@@ -1,0 +1,14 @@
+node_modules
+dist
+.env
+*.db
+*.tsbuildinfo
+server/uploads/originals/*
+server/uploads/thumbnails/*
+!server/uploads/originals/.gitkeep
+!server/uploads/thumbnails/.gitkeep
+.DS_Store
+.git
+.gitignore
+*.md
+LICENSE
