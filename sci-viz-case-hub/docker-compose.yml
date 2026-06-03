@@ -1,0 +1,22 @@
+version: "3.9"
+services:
+  sci-viz-hub:
+    build: .
+    container_name: sci-viz-hub
+    ports:
+      - "3001:3001"
+    volumes:
+      - sci-viz-db:/app/sci-viz-case-hub/server/prisma
+      - sci-viz-uploads:/app/sci-viz-case-hub/server/uploads
+      - sci-viz-journal-covers:/app/journal_covers
+    environment:
+      PORT: "3001"
+      DATABASE_URL: "file:./prisma/dev.db"
+      JWT_SECRET: "${JWT_SECRET:-change-me-in-production}"
+      CORS_ORIGINS: "http://localhost:3001,http://localhost:5173"
+    restart: unless-stopped
+
+volumes:
+  sci-viz-db:
+  sci-viz-uploads:
+  sci-viz-journal-covers:
