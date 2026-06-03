@@ -1,0 +1,11 @@
+{
+  "name": "sci-viz-case-hub-extension",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo 'Extension is ready to load as unpacked in Chrome'"
+  },
+  "devDependencies": {
+    "acorn": "^8.16.0"
+  }
+}

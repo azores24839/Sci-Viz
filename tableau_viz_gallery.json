@@ -1,0 +1,150 @@
+{
+  "title": "Discover | Tableau Public",
+  "url": "https://public.tableau.com/app/discover",
+  "cards": [
+    {
+      "image_url": "https://public.tableau.com/static/images/Pl/PlayingwithTableausNewSpatialParameter/Map/4_3.png",
+      "title": "Mapping Ottawa with Spatial Parameters",
+      "author": "dennis.kao",
+      "link": "https://public.tableau.com/app/profile/dennis.kao/viz/PlayingwithTableausNewSpatialParameter/Map"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/Co/CountrieswiththeMostHolidaysin2024makeovermonday/Dashboard12/4_3.png",
+      "title": "Countries with the Most Holidays in 2024",
+      "author": "mateusz.karmalski",
+      "link": "https://public.tableau.com/app/profile/mateusz.karmalski/viz/CountrieswiththeMostHolidaysin2024makeovermonday/Dashboard12"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/Ja/JapansMostBeautifulPrefectures_17204472802890/Japan/4_3.png",
+      "title": "Most Beautiful Prefectures in Japan",
+      "author": "agata1619",
+      "link": "https://public.tableau.com/app/profile/agata1619/viz/JapansMostBeautifulPrefectures_17204472802890/Japan"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/So/SouthKorea-Demographics/SouthKoreaPopulationDensityandDemographics/4_3.png",
+      "title": "South Korea Demographics",
+      "author": "marc.reid",
+      "link": "https://public.tableau.com/app/profile/marc.reid/viz/SouthKorea-Demographics/SouthKoreaPopulationDensityandDemographics"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/F1/F1Circuits2024/Dashboard13/4_3.png",
+      "title": "Circuit Maps",
+      "author": "vizgrowth",
+      "link": "https://public.tableau.com/app/profile/vizgrowth/viz/F1Circuits2024/Dashboard13"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/Pa/Parksforkids/kanseiban/4_3.png",
+      "title": "Parks for Kids",
+      "author": "yusukenakanishi",
+      "link": "https://public.tableau.com/app/profile/yusukenakanishi/viz/Parksforkids/kanseiban"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/24/24healthstatsfeb25/Dashboard1/4_3.png",
+      "title": "My Health Stats",
+      "author": "arjen.groeneveld",
+      "link": "https://public.tableau.com/app/profile/arjen.groeneveld/viz/24healthstatsfeb25/Dashboard1"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/PC/PCOSDashboard_17297311153800/pcosdashboard/4_3.png",
+      "title": "PCOS Dashboard",
+      "author": "jennifer.eneh",
+      "link": "https://public.tableau.com/app/profile/jennifer.eneh/viz/PCOSDashboard_17297311153800/pcosdashboard"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/He/HealthTracker_17222296039800/HealthTrackerMetrics/4_3.png",
+      "title": "Health Tracker",
+      "author": "tobiloba.babajide",
+      "link": "https://public.tableau.com/app/profile/tobiloba.babajide/viz/HealthTracker_17222296039800/HealthTrackerMetrics"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/Dy/Dyslexiaabattlewithwordsandself-worth/DyslexiaWordsandSelfWorth/4_3.png",
+      "title": "Dyslexia: A Battle with Words and Self-Worth",
+      "author": "jennifer.cook",
+      "link": "https://public.tableau.com/app/profile/jennifer.cook/viz/Dyslexiaabattlewithwordsandself-worth/DyslexiaWordsandSelfWorth"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/Ch/ChiariMalformation/ChiariMalformation/4_3.png",
+      "title": "Chiari Malformation",
+      "author": "jade.corley",
+      "link": "https://public.tableau.com/app/profile/jade.corley/viz/ChiariMalformation/ChiariMalformation"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/Pr/ProjectHealthVizHCDataBreaches/HCdatabreach/4_3.png",
+      "title": "ProjectHealthViz: HC Data Breaches",
+      "author": "sankalp.jain2108",
+      "link": "https://public.tableau.com/app/profile/sankalp.jain2108/viz/ProjectHealthVizHCDataBreaches/HCdatabreach"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/B2/B2VB2026W10/B2VB2026W10/4_3.png",
+      "title": "#B2VB2026 W10 | Mapping Sea Turtle Sightings Across Newfoundland and Labrador",
+      "author": "akane.okamoto",
+      "link": "https://public.tableau.com/app/profile/akane.okamoto/viz/B2VB2026W10/B2VB2026W10"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/No/NordicDigitalDevelopmentSustainableProsperity/DigitalDashboard/4_3.png",
+      "title": "Nordic Digital Development & Sustainable Prosperity",
+      "author": "elena.cherednikova",
+      "link": "https://public.tableau.com/app/profile/elena.cherednikova/viz/NordicDigitalDevelopmentSustainableProsperity/DigitalDashboard"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/Pa/PaniniDashboardGruppe3/AlterTeams_1/4_3.png",
+      "title": "Panini Dashboard Gruppe 3",
+      "author": "marcel.weis",
+      "link": "https://public.tableau.com/app/profile/marcel.weis/viz/PaniniDashboardGruppe3/AlterTeams_1"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/Sa/Sales_Dashboard_17803678521220/SalesDashboard/4_3.png",
+      "title": "Sales_Dashboard",
+      "author": "ahmed.sobhy2146",
+      "link": "https://public.tableau.com/app/profile/ahmed.sobhy2146/viz/Sales_Dashboard_17803678521220/SalesDashboard"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/B2/B2VBWEEK10SeaTurtleSightingsinNewfoundlandandLabradorCanada/1/4_3.png",
+      "title": "#B2VB WEEK10 | Sea Turtle Sightings in Newfoundland and Labrador, Canada",
+      "author": "ikeda.tsutomu",
+      "link": "https://public.tableau.com/app/profile/ikeda.tsutomu/viz/B2VBWEEK10SeaTurtleSightingsinNewfoundlandandLabradorCanada/1"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/HR/HRANALYTICSDASHBOARD_17803873592330/HRANALYTICSDASHBOARD/4_3.png",
+      "title": "HR ANALYTICS DASHBOARD",
+      "author": "calessia.ann.vincent",
+      "link": "https://public.tableau.com/app/profile/calessia.ann.vincent/viz/HRANALYTICSDASHBOARD_17803873592330/HRANALYTICSDASHBOARD"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/OK/OKRIKA/RETAILSTORE/4_3.png",
+      "title": "RETAIL STORE",
+      "author": "bigxpt",
+      "link": "https://public.tableau.com/app/profile/bigxpt/viz/OKRIKA/RETAILSTORE"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/ne/newportfolio_17803867135180/Data-to-ValueOptimizingSupplyChainCustomerLoyaltyProfitMargins/4_3.png",
+      "title": "newportfolio",
+      "author": "hafiz.nuruyev2532",
+      "link": "https://public.tableau.com/app/profile/hafiz.nuruyev2532/viz/newportfolio_17803867135180/Data-to-ValueOptimizingSupplyChainCustomerLoyaltyProfitMargins"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/Ge/GenreMash-UpMadness-IronViz26/Opener/4_3.png",
+      "title": "Genre Mash-Up Madness - Iron Viz Winner '26",
+      "author": "ann.pregler",
+      "link": "https://public.tableau.com/app/profile/ann.pregler/viz/GenreMash-UpMadness-IronViz26/Opener"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/sp/spotifytrabajofinal/Historia1/4_3.png",
+      "title": "spotify trabajo final",
+      "author": "jazmin.siddharta.p.rez.montero",
+      "link": "https://public.tableau.com/app/profile/jazmin.siddharta.p.rez.montero/viz/spotifytrabajofinal/Historia1"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/Mo/MoM2026W21GPUComputationalPerformanceperDollar/MoM2026W21/4_3.png",
+      "title": "MoM2026 W21 GPU Computational Performance per Dollar",
+      "author": "nobu.kimura",
+      "link": "https://public.tableau.com/app/profile/nobu.kimura/viz/MoM2026W21GPUComputationalPerformanceperDollar/MoM2026W21"
+    },
+    {
+      "image_url": "https://public.tableau.com/static/images/Da/Dashboard_17801959807080/Tngquan/4_3.png",
+      "title": "Dashboard",
+      "author": "quyen.ngo3949",
+      "link": "https://public.tableau.com/app/profile/quyen.ngo3949/viz/Dashboard_17801959807080/Tngquan"
+    }
+  ]
+}

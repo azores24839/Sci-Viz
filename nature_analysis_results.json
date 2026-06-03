@@ -1,0 +1,508 @@
+[
+  {
+    "filename": "Nature_Vol0650_Iss8100_5_February_2026.jpg",
+    "original_title": "Nature 封面 - 5 February 2026",
+    "volume": 650,
+    "issue": 8100,
+    "date": "5 February 2026",
+    "description": "Clear waters The cover shows members of a local community in the Western Province of the Solomon Islands taking part in a traditional fish drive, in which multiple members of a community work together to make the catch. The world’s oceans and their resources are crucial to humanity, but there is increasing inequity when it comes to accessing these resources. The benefits tend to be accrued by the powerful, whereas the burdens — from pollution to biodiversity loss — are more often shouldered by t",
+    "analysis": {
+      "media_type": "摄影",
+      "content_type": "团队场景",
+      "discipline": "环境科学",
+      "visual_style": "顶刊封面",
+      "composition": "中心式",
+      "color_tone": "冷调",
+      "use_case": [
+        "期刊封面",
+        "科普传播",
+        "教学材料"
+      ],
+      "ai_summary": "俯拍视角下，一群西所罗门群岛居民在碧绿海面上协同捕鱼，呼应封面主题“清澈的水域”与海洋资源分配不公的议题。",
+      "case_title": "社区捕鱼与海洋公平",
+      "borrowable_points": [
+        "俯拍视角强化了中心主体的视觉冲击力，同时暗示宏观视角下的社会议题",
+        "用自然海色与白色浪花形成冷调对比，突出主题的严肃性与生态感",
+        "将复杂社会议题（海洋资源分配）通过具象的集体劳动场景直观呈现"
+      ],
+      "risk_notes": [],
+      "confidence": 0.98
+    }
+  },
+  {
+    "filename": "Nature_Vol0650_Iss8101_12_February_2026.jpg",
+    "original_title": "Nature 封面 - 12 February 2026",
+    "volume": 650,
+    "issue": 8101,
+    "date": "12 February 2026",
+    "description": "Down to earth The use of synthetic pesticides is widespread, and their potentially harmful effects on wildlife — from bees to fish— and human health are well documented. Somewhat less clear are their effects on soil biodiversity. In this week’s issue, Marcel van der Heijden and colleagues address this issue with a report on how pesticide residues affect soils across Europe. The researchers assessed 63 pesticides across 373 sites in 26 European countries. Pesticide residues were present at 70% of",
+    "analysis": {
+      "media_type": "摄影",
+      "content_type": "微观样本",
+      "discipline": "生命科学",
+      "visual_style": "科技",
+      "composition": "中心式",
+      "color_tone": "冷调",
+      "use_case": [
+        "期刊封面",
+        "论文配图",
+        "科普传播"
+      ],
+      "ai_summary": "Nature期刊封面，以特写土壤和幼苗视觉隐喻农药对土壤生物多样性的影响。",
+      "case_title": "农药重塑土壤生态",
+      "borrowable_points": [
+        "用特写土壤纹理和幼苗营造强烈的环境主题视觉焦点",
+        "主标题与副标题层级清晰，白色字体在深色背景上形成高对比度",
+        "通过自然元素（土壤、幼苗）直观传达科学议题，增强传播力"
+      ],
+      "risk_notes": [],
+      "confidence": 0.98
+    }
+  },
+  {
+    "filename": "Nature_Vol0650_Iss8102_19_February_2026.jpg",
+    "original_title": "Nature 封面 - 19 February 2026",
+    "volume": 650,
+    "issue": 8102,
+    "date": "19 February 2026",
+    "description": "Old Masters The cover shows examples of early rock art found in limestone caves on the Indonesian island of Sulawesi. As Adhi Agus Oktaviana and colleagues report in this week’s issue, a hand stencil dated to at least 67,800 years ago at Liang Metanduno could be the oldest rock art yet discovered. Indonesia is already well known for its ancient cave art, but Sulawesi’s southeast region had remained largely unexplored. To rectify this, the researchers surveyed caves across the area and recorded 4",
+    "analysis": {
+      "media_type": "摄影",
+      "content_type": "微观样本",
+      "discipline": "生命科学",
+      "visual_style": "科技",
+      "composition": "中心式",
+      "color_tone": "暖调",
+      "use_case": [
+        "期刊封面",
+        "论文配图",
+        "科普传播"
+      ],
+      "ai_summary": "Nature期刊封面展示印尼苏拉威西岛洞穴中发现的最古老岩画，包括67800年前的手印。",
+      "case_title": "最古老岩画发现",
+      "borrowable_points": [
+        "将原始岩画作为封面主体，直接传达核心科学发现",
+        "使用高对比度白色字体突出标题，增强视觉冲击力",
+        "保留岩画原始纹理与色彩，营造历史厚重感"
+      ],
+      "risk_notes": [],
+      "confidence": 0.98
+    }
+  },
+  {
+    "filename": "Nature_Vol0650_Iss8103_26_February_2026.jpg",
+    "original_title": "Nature 封面 - 26 February 2026",
+    "volume": 650,
+    "issue": 8103,
+    "date": "26 February 2026",
+    "description": "A manner of squeaking From sticky hinges to bicycle brakes, squeaks are part of everyday life. Although the way sound is generated when two rigid bodies slide over each other is relatively clear, what happens when a soft material slides on a rigid body is much less well understood. In this week’s issue, Katia Bertoldi and colleagues reveal what generates the squeak in such a situation. Using high-speed imaging and acoustic analysis, the researchers examined basket-ball shoes sliding on a smooth ",
+    "analysis": {
+      "media_type": "3D渲染",
+      "content_type": "机制模型",
+      "discipline": "综合交叉",
+      "visual_style": "顶刊封面",
+      "composition": "中心式",
+      "color_tone": "冷调",
+      "use_case": [
+        "期刊封面",
+        "论文配图",
+        "科普传播"
+      ],
+      "ai_summary": "Nature期刊封面，用3D渲染的篮球鞋剖面图，展示软材料在硬表面滑动产生噪音的科学机制。",
+      "case_title": "软材滑噪机制",
+      "borrowable_points": [
+        "使用3D渲染的剖面模型直观展示复杂科学机制",
+        "深色背景突出主体，增强视觉冲击力",
+        "标题文字与图像形成视觉层级，引导阅读焦点"
+      ],
+      "risk_notes": [],
+      "confidence": 0.98
+    }
+  },
+  {
+    "filename": "Nature_Vol0651_Iss8104_5_March_2026.jpg",
+    "original_title": "Nature 封面 - 5 March 2026",
+    "volume": 651,
+    "issue": 8104,
+    "date": "5 March 2026",
+    "description": "Caught in time Bony fish account for some 98% of all vertebrate species, but the early stages of their evolution are not well understood. The core issue is the fragmented fossil record for specimens that date back earlier than the start of the Devonian Period some 419 million years ago. Across two papers in this week’s issue, Min Zhu and colleagues help to plug that gap. In the first paper, the researchers reveal the near-complete skeleton of a small bony fish dating to the early Silurian (aroun",
+    "analysis": {
+      "media_type": "3D渲染",
+      "content_type": "机制模型",
+      "discipline": "生命科学",
+      "visual_style": "科技",
+      "composition": "中心式",
+      "color_tone": "冷调",
+      "use_case": [
+        "期刊封面",
+        "论文配图",
+        "科普传播"
+      ],
+      "ai_summary": "3D渲染的史前骨鱼捕食场景，揭示早期硬骨鱼演化关键证据。",
+      "case_title": "骨鱼演化关键发现",
+      "borrowable_points": [
+        "用3D渲染技术精准还原古生物形态与动态，增强视觉冲击力",
+        "主视觉采用中心式构图，突出核心科学发现",
+        "冷色调水下背景强化科学严谨感与时间感"
+      ],
+      "risk_notes": [],
+      "confidence": 0.98
+    }
+  },
+  {
+    "filename": "Nature_Vol0651_Iss8105_12_March_2026.jpg",
+    "original_title": "Nature 封面 - 12 March 2026",
+    "volume": 651,
+    "issue": 8105,
+    "date": "12 March 2026",
+    "description": "Power sourced Superluminous supernovae are at least ten times brighter than their regular counterparts, but astronomers have remained in the dark about what exactly powers these phenomena. In this week’s issue, Joseph Farah and colleagues confirm that magnetars — highly magnetized neutron stars formed by a supernova — are a driving force of these explosions. The researchers analysed light emitted by a superluminous supernova more than a billion light years from Earth. Using a new model of the su",
+    "analysis": {
+      "media_type": "3D渲染",
+      "content_type": "机制模型",
+      "discipline": "物理",
+      "visual_style": "科技",
+      "composition": "中心式",
+      "color_tone": "冷调",
+      "use_case": [
+        "期刊封面",
+        "论文配图",
+        "科普传播"
+      ],
+      "ai_summary": "描绘磁星驱动超亮超新星爆发的极端物理机制的3D艺术渲染图。",
+      "case_title": "磁星驱动超新星",
+      "borrowable_points": [
+        "中心发光体与螺旋结构形成强烈视觉焦点，突出核心科学概念。",
+        "冷色调与高对比度营造宇宙深邃感和科学严谨感。",
+        "文字排版与图像视觉动线一致，引导读者聚焦核心发现。"
+      ],
+      "risk_notes": [],
+      "confidence": 0.98
+    }
+  },
+  {
+    "filename": "Nature_Vol0651_Iss8106_19_March_2026.jpg",
+    "original_title": "Nature 封面 - 19 March 2026",
+    "volume": 651,
+    "issue": 8106,
+    "date": "19 March 2026",
+    "description": "Heat sensitive The cover shows the moth Idalus iragorri , one of many insect species found at low to medium elevations in the eastern Andes. More than 70% of all insect species are found in the tropics, but the potential effects of global warming on these key components of the ecosystem are not well understood. In this week’s issue, Kim Holzmann and colleagues aim to resolve this with an analysis of around 2,300 insect species from Africa and South America. They found that insects at high elevat",
+    "analysis": {
+      "media_type": "摄影",
+      "content_type": "微观样本",
+      "discipline": "生命科学",
+      "visual_style": "科技",
+      "composition": "中心式",
+      "color_tone": "冷调",
+      "use_case": [
+        "期刊封面",
+        "论文配图",
+        "科普传播"
+      ],
+      "ai_summary": "Nature期刊封面展示了一只栖息在苔藓上的色彩鲜艳的蛾子，主题为热带昆虫对全球变暖的敏感性。",
+      "case_title": "热敏昆虫封面",
+      "borrowable_points": [
+        "主体昆虫特写占据视觉中心，强化科学主题",
+        "高饱和度色彩与冷调背景形成对比，突出研究对象",
+        "大号无衬线字体标题与自然摄影结合，科技感强"
+      ],
+      "risk_notes": [],
+      "confidence": 0.98
+    }
+  },
+  {
+    "filename": "Nature_Vol0651_Iss8107_26_March_2026.jpg",
+    "original_title": "Nature 封面 - 26 March 2026",
+    "volume": 651,
+    "issue": 8107,
+    "date": "26 March 2026",
+    "description": "Old friends The cover shows an artist’s impression of a human and their canine companion near a settlement in Ice Age Switzerland. Dogs have been companions for humans for millennia. They were the first animal to be domesticated, and remains with possible dog morphology have been dated to at least 14,000 years ago. But the exact origins and nature of early dogs remain a mystery. Two papers in this week’s issue go some way to resolving this problem. In one, Anders Bergström, Pontus Skoglund and c",
+    "analysis": {
+      "media_type": "手绘图",
+      "content_type": "机制模型",
+      "discipline": "生命科学",
+      "visual_style": "顶刊封面",
+      "composition": "中心式",
+      "color_tone": "冷调",
+      "use_case": [
+        "期刊封面",
+        "论文配图",
+        "科普传播"
+      ],
+      "ai_summary": "描绘冰河时代人类与狗相伴的场景，象征早期人类与狗的共生关系。",
+      "case_title": "冰河时代人犬共赏极光",
+      "borrowable_points": [
+        "利用极光背景营造神秘科学氛围",
+        "人物与动物背对观众形成叙事引导",
+        "冷色调强化史前环境的真实感"
+      ],
+      "risk_notes": [],
+      "confidence": 0.95
+    }
+  },
+  {
+    "filename": "Nature_Vol0652_Iss8108_2_April_2026.jpg",
+    "original_title": "Nature 封面 - 2 April 2026",
+    "volume": 652,
+    "issue": 8108,
+    "date": "2 April 2026",
+    "description": "Repeat performance Three key factors help to show whether a study’s results can be trusted: reproducibility (the same conclusion can be derived using the study’s methods and data), replication (the study’s conclusions can be achieved using independent data) and analytical robustness (reanalysis of the data by multiple teams can generate the same conclusions). In this week’s special issue, four papers present multi-team collaborations testing these criteria in the social and behavioural sciences.",
+    "analysis": {
+      "media_type": "信息图",
+      "content_type": "机制模型",
+      "discipline": "综合交叉",
+      "visual_style": "顶刊封面",
+      "composition": "中心式",
+      "color_tone": "高饱和",
+      "use_case": [
+        "期刊封面",
+        "官网宣传",
+        "科普传播"
+      ],
+      "ai_summary": "Nature期刊封面以抽象几何网格和行走人形隐喻科学研究的可重复性与验证过程。",
+      "case_title": "可重复性验证",
+      "borrowable_points": [
+        "用几何网格分割画面，象征科学验证的多维度框架",
+        "中心人形作为视觉焦点，引导观众理解核心主题",
+        "高饱和色彩营造视觉冲击力，强化科学前沿感"
+      ],
+      "risk_notes": [],
+      "confidence": 0.95
+    }
+  },
+  {
+    "filename": "Nature_Vol0652_Iss8109_9_April_2026.jpg",
+    "original_title": "Nature 封面 - 9 April 2026",
+    "volume": 652,
+    "issue": 8109,
+    "date": "9 April 2026",
+    "description": "Light show The cover image offers a night-time view of Earth, capturing human activity across the eastern hemisphere of the planet through the emissions of artificial light. Derived from satellite images taken daily over the past decade, the image maps the dynamics of the human night-time activities, with golden areas experiencing brightening, purple areas featuring dimming, and white areas experiencing both. This changing footprint is explored in this week’s issue by Tian Li, Zhe Zhu and collea",
+    "analysis": {
+      "media_type": "3D渲染",
+      "content_type": "微观样本",
+      "discipline": "环境科学",
+      "visual_style": "科技",
+      "composition": "中心式",
+      "color_tone": "冷调",
+      "use_case": [
+        "期刊封面",
+        "科普传播",
+        "教学材料"
+      ],
+      "ai_summary": "Nature期刊封面以3D地球模型呈现全球夜间人工光源分布，用金色、紫色和白色区分不同区域的人类活动变化趋势。",
+      "case_title": "夜光地球动态图",
+      "borrowable_points": [
+        "用地球模型作为视觉主体，直观传达全球性科学主题",
+        "通过色彩编码（金/紫/白）清晰区分数据变化趋势",
+        "标题字体与主视觉形成强烈对比，突出核心信息"
+      ],
+      "risk_notes": [],
+      "confidence": 0.98
+    }
+  },
+  {
+    "filename": "Nature_Vol0652_Iss8110_16_April_2026.jpg",
+    "original_title": "Nature 封面 - 16 April 2026",
+    "volume": 652,
+    "issue": 8110,
+    "date": "16 April 2026",
+    "description": "Cellular learning Cancer cells have an unfortunate ability to evade therapies by adapting to hostile environments that threaten their survival. In this week’s issue, Gustavo França and Itai Yanai examine the molecular mechanisms these cells use to cope with stressful environments. The researchers propose that individual cells adopt a process similar to an evolutionary algorithm: exploring different gene-regulatory combinations and using feedback responses to stabilize those combinations that red",
+    "analysis": {
+      "media_type": "信息图",
+      "content_type": "机制模型",
+      "discipline": "生命科学",
+      "visual_style": "科技",
+      "composition": "中心式",
+      "color_tone": "中性",
+      "use_case": [
+        "期刊封面",
+        "论文配图",
+        "科普传播"
+      ],
+      "ai_summary": "Nature期刊封面用抽象几何图形表现癌细胞通过基因调控适应环境的“细胞学习”机制。",
+      "case_title": "细胞学习机制可视化",
+      "borrowable_points": [
+        "用重叠的彩色圆环象征基因调控网络的动态交互与反馈",
+        "将复杂科学概念转化为具象化的几何抽象图形",
+        "主标题与副标题层级清晰，信息密度高但易读"
+      ],
+      "risk_notes": [],
+      "confidence": 0.95
+    }
+  },
+  {
+    "filename": "Nature_Vol0652_Iss8111_23_April_2026.jpg",
+    "original_title": "Nature 封面 - 23 April 2026",
+    "volume": 652,
+    "issue": 8111,
+    "date": "23 April 2026",
+    "description": "Match point Table tennis is a highly dextrous sport that requires rapid reflexes and an ability to respond to unpredictable gameplay, all of which presents a significant challenge for robots. Some robotic systems have taken up a bat, but have only been able to operate under simplified rules or against amateur players. In this week’s issue, Peter Dürr and colleagues present Ace, an autonomous robot that can outplay elite table tennis players under official competition rules. Ace consists of a net",
+    "analysis": {
+      "media_type": "期刊封面",
+      "content_type": "机制模型",
+      "discipline": "工程",
+      "visual_style": "顶刊封面",
+      "composition": "中心式",
+      "color_tone": "冷调",
+      "use_case": [
+        "期刊封面",
+        "论文配图",
+        "科普传播"
+      ],
+      "ai_summary": "AI控制的机器人在乒乓球比赛中击败精英选手，封面以动态视觉呈现人机对决。",
+      "case_title": "AI乒乓球机器人对决",
+      "borrowable_points": [
+        "用模糊的人影与清晰的机械臂形成对比，突出科技感",
+        "用紫色光效表现机器人动作的高速与力量感",
+        "将标题“MATCH POINT”置于视觉中心，强化主题冲击力"
+      ],
+      "risk_notes": [],
+      "confidence": 1
+    }
+  },
+  {
+    "filename": "Nature_Vol0652_Iss8112_30_April_2026.jpg",
+    "original_title": "Nature 封面 - 30 April 2026",
+    "volume": 652,
+    "issue": 8112,
+    "date": "30 April 2026",
+    "description": "The way back With around 60% of tropical forests already lost or severely degraded, restoring this type of habitat has become a key strategy for conservation efforts. Although tree recovery has been studied, a comprehensive view of biodiversity recovery in restored tropical forests has been lacking. In this week’s issue, Timo Metz, Nico Blüthgen and colleagues aim to bridge that gap with an analysis of recovery across a range of species covering 16 taxonomic groups. Working at Jocotoco’s Río Can",
+    "analysis": {
+      "media_type": "摄影",
+      "content_type": "微观样本",
+      "discipline": "生命科学",
+      "visual_style": "科技",
+      "composition": "中心式",
+      "color_tone": "冷调",
+      "use_case": [
+        "期刊封面",
+        "论文配图",
+        "科普传播"
+      ],
+      "ai_summary": "一只黄褐色斑点树蛙攀附在树枝上，作为《自然》期刊封面，主题为热带雨林恢复与生物多样性重建。",
+      "case_title": "树蛙封面：自然恢复",
+      "borrowable_points": [
+        "主体生物特写突出，增强视觉冲击力",
+        "深色背景强化主体，提升专业感",
+        "标题与图像形成叙事关联，强化主题传达"
+      ],
+      "risk_notes": [],
+      "confidence": 0.98
+    }
+  },
+  {
+    "filename": "Nature_Vol0653_Iss8113_7_May_2026.jpg",
+    "original_title": "Nature 封面 - 7 May 2026",
+    "volume": 653,
+    "issue": 8113,
+    "date": "7 May 2026",
+    "description": "Heading south The last continent in the world to be settled by humans was the Americas. Beringia, a land bridge that replaced the Bering Strait during the last ice age, allowed the ancestors of Indigenous Americans to travel from northeast Asia into North America. Once there, they dispersed south, settling in and adapting to dramatically different environments as they did so. But many questions remain about this dispersal, largely because there is a lack of genomic data from Indigenous American ",
+    "analysis": {
+      "media_type": "摄影",
+      "content_type": "微观样本",
+      "discipline": "生命科学",
+      "visual_style": "科技",
+      "composition": "中心式",
+      "color_tone": "中性",
+      "use_case": [
+        "期刊封面",
+        "论文配图",
+        "科普传播"
+      ],
+      "ai_summary": "Nature期刊封面，以彩色羽毛头饰为视觉主体，展示关于美洲原住民基因组研究的封面故事。",
+      "case_title": "羽毛基因图谱",
+      "borrowable_points": [],
+      "risk_notes": [],
+      "confidence": 0
+    }
+  },
+  {
+    "filename": "Nature_Vol0653_Iss8114_14_May_2026.jpg",
+    "original_title": "Nature 封面 - 14 May 2026",
+    "volume": 653,
+    "issue": 8114,
+    "date": "14 May 2026",
+    "description": "Good neighbours? The cover captures a tropical forest in Danum Valley, Malaysia, veiled in mist. Species diversity declines as you move from the equator towards the poles. This decline is particularly marked in trees, although the exact mechanism behind it is the source of some debate. At the heart of the discussion is the fact that neighbouring trees of the same species compete with each other more strongly than do trees of different species. But the question remains of whether this effect is l",
+    "analysis": {
+      "media_type": "摄影",
+      "content_type": "空间环境",
+      "discipline": "生命科学",
+      "visual_style": "顶刊封面",
+      "composition": "中心式",
+      "color_tone": "冷调",
+      "use_case": [
+        "期刊封面",
+        "论文配图",
+        "科普传播"
+      ],
+      "ai_summary": "Nature期刊封面，展示马来西亚丹浓谷热带雨林的雾气笼罩景象，探讨树木种间竞争如何影响森林多样性。",
+      "case_title": "雨林中的邻居之谜",
+      "borrowable_points": [
+        "利用自然风光作为科学主题的视觉载体，增强传播力",
+        "主标题与副标题层级清晰，引导读者理解核心科学问题",
+        "前景树与背景森林形成视觉纵深，强化主题的生态空间感"
+      ],
+      "risk_notes": [],
+      "confidence": 0.98
+    }
+  },
+  {
+    "filename": "Nature_Vol0653_Iss8115_21_May_2026.jpg",
+    "original_title": "Nature 封面 - 21 May 2026",
+    "volume": 653,
+    "issue": 8115,
+    "date": "21 May 2026",
+    "description": "Diversity dividend Is there any relationship between salaries attained by graduates and the racial diversity of their classmates? This question has generated significant debate but there is a paucity of empirical evidence to help resolve it. In this week’s issue, Debanjan Mitra, Peter Golder and Mariya Topchy add to that evidence by showing that students who study within racially diverse graduating classes tend to receive higher salaries upon graduation. The researchers used datasets covering tw",
+    "analysis": {
+      "media_type": "信息图",
+      "content_type": "机制模型",
+      "discipline": "综合交叉",
+      "visual_style": "科技",
+      "composition": "中心式",
+      "color_tone": "中性",
+      "use_case": [
+        "期刊封面",
+        "论文配图",
+        "科普传播"
+      ],
+      "ai_summary": "Nature期刊封面用拼贴艺术表现“多样性红利”研究，将美元钞票与不同肤色人像叠加在本杰明·富兰克林肖像上，视觉化呈现种族多样性与薪资关联的学术发现。",
+      "case_title": "多样性红利封面设计",
+      "borrowable_points": [
+        "用真实货币元素（美元）与人像拼贴，直观关联经济收益与社会多样性主题",
+        "将经典人物肖像（富兰克林）作为视觉基底，赋予封面历史厚重感与权威性",
+        "色彩块（红、绿、黄）分割人像，象征不同种族群体，强化视觉对比与主题表达"
+      ],
+      "risk_notes": [],
+      "confidence": 0.98
+    }
+  },
+  {
+    "filename": "Nature_Vol0653_Iss8116_28_May_2026.jpg",
+    "original_title": "Nature 封面 - 28 May 2026",
+    "volume": 653,
+    "issue": 8116,
+    "date": "28 May 2026",
+    "description": "Storm warning Understanding how hailstorm damage is evolving with climate change is increasingly important: the past two years, for example, have seen multiple hailstorms sufficiently severe to cause billions of dollars’ worth of damage. In this week’s issue, Qinghong Zhang and colleagues probe this phenomenon on a global scale. Using simulations cross-validated through multimodel comparisons, the researchers were able to build a picture of how human-induced climate change is likely to affect ha",
+    "analysis": {
+      "media_type": "摄影",
+      "content_type": "微观样本",
+      "discipline": "生命科学",
+      "visual_style": "科技",
+      "composition": "中心式",
+      "color_tone": "冷调",
+      "use_case": [
+        "期刊封面",
+        "论文配图",
+        "科普传播"
+      ],
+      "ai_summary": "Nature期刊封面，展示草地上的冰雹，标题为“风暴警告”，探讨气候变化如何加剧冰雹灾害。",
+      "case_title": "冰雹风暴预警",
+      "borrowable_points": [
+        "使用特写镜头聚焦核心视觉元素（冰雹）以强化主题",
+        "大号无衬线字体与自然背景形成高对比度，突出标题",
+        "冷色调与高饱和度结合，营造科学严肃感同时增强视觉冲击力"
+      ],
+      "risk_notes": [],
+      "confidence": 0.98
+    }
+  }
+]

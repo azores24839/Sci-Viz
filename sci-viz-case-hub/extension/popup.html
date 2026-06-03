@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 320px;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+      margin: 0;
+    }
+    h2 { font-size: 15px; margin: 0 0 12px; }
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 8px 12px;
+      margin-bottom: 8px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 13px;
+      text-align: left;
+    }
+    .btn:hover { background: #f0f0f0; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #666;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #eee;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .dot.ok { background: #0a0; }
+    .dot.err { background: #c00; }
+    .dot.unknown { background: #ccc; }
+    .input-group { margin-bottom: 8px; }
+    .input-group label { display: block; font-size: 11px; color: #888; margin-bottom: 2px; }
+    .input-group input {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 12px;
+      box-sizing: border-box;
+    }
+  </style>
+</head>
+<body>
+  <h2>科研视觉案例采集</h2>
+
+  <button id="btnScreenshot" class="btn">📷 保存当前页面截图</button>
+  <button id="btnImages" class="btn">🖼️ 保存当前页面主要图片</button>
+
+  <div class="input-group">
+    <label for="apiUrl">后端 API 地址</label>
+    <input type="text" id="apiUrl" placeholder="http://127.0.0.1:3001" />
+  </div>
+
+  <div class="status">
+    <span class="dot unknown" id="statusDot"></span>
+    <span id="statusText">检查后端连接状态...</span>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

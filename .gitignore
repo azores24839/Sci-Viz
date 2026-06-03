@@ -1,0 +1,6 @@
+journal_covers/
+*.db-shm
+*.db-wal
+**/.playwright-cli/*.log
+**/.playwright-cli/*.yml
+.DS_Store

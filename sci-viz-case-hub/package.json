@@ -1,0 +1,21 @@
+{
+  "name": "sci-viz-case-hub",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install:all": "cd server && npm install && cd ../web && npm install",
+    "dev": "concurrently -k -n server,web \"cd server && npm run dev\" \"bash scripts/wait-for-server.sh http://localhost:3001/api/health && cd web && npm run dev\"",
+    "dev:server": "cd server && npm run dev",
+    "dev:web": "cd web && npm run dev",
+    "build": "cd server && npm run build && cd ../web && npm run build",
+    "db:setup": "cd server && npm run db:setup",
+    "db:seed": "cd server && npm run db:seed",
+    "db:seed:enterprise-sources": "cd server && npm run db:seed:enterprise-sources",
+    "enterprise:dry-run": "cd server && npm run enterprise:dry-run --",
+    "enterprise:active-batch": "cd server && npm run enterprise:active-batch --",
+    "enterprise:browser-batch": "cd server && npm run enterprise:browser-batch --"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

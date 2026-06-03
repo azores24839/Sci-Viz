@@ -1,0 +1,109 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model VisualCase {
+  id        String   @id @default(uuid())
+  title     String   @default("")
+
+  sourceUrl      String @default("")
+  sourceDomain   String @default("")
+  pageTitle      String @default("")
+  caseTitle      String @default("")
+
+  imageUrl      String @default("")
+  imagePath     String @default("")
+  thumbnailPath String @default("")
+  imageHash     String @default("")
+
+  contextText String @default("")
+  ocrText     String @default("")
+  captureType String @default("image")
+  userHint    String @default("")
+  collectionScore Int @default(0)
+  collectionReasons String @default("")
+
+  mediaType    String @default("")
+  contentType  String @default("")
+  discipline   String @default("")
+  visualStyle  String @default("")
+  composition  String @default("")
+  colorTone    String @default("")
+  useCase      String @default("")
+  functionalPurpose  String @default("")   // 功能用途：记录|解释|数据|展示|传播|交互
+  distributionMedium String @default("")   // 传播媒介：静图|动图|视频|图组|交互|实体
+  mediaSubType       String @default("")   // 技术手段子分类
+  contentSubType     String @default("")   // 内容对象子分类
+  aiSummary    String @default("")
+  borrowablePoints String @default("")
+  riskNotes    String @default("")
+  confidence   Float  @default(0.0)
+
+  reviewStatus String @default("pending_ai_analysis")
+  rating       Int    @default(0)
+  manualNotes  String @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([imageHash])
+}
+
+model CrawlSource {
+  id           Int      @id @default(autoincrement())
+  name         String   @default("")
+  url          String   @default("")
+  category     String   @default("")
+  sourceType   String   @default("")
+  adapterType  String   @default("static_html")
+  crawlStatus  String   @default("active_static")
+  crawlTier    String   @default("B")
+  lastDiagnosis String  @default("")
+  visualValue  String   @default("")
+  strategyHint String   @default("")
+  enabled      Boolean  @default(true)
+  notes        String   @default("")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  jobs CrawlJob[]
+}
+
+model CrawlJob {
+  id             Int      @id @default(autoincrement())
+  sourceId       Int
+  status         String   @default("pending")
+  discoveredUrls String   @default("[]")
+  crawledUrls    String   @default("[]")
+  totalCount     Int      @default(0)
+  crawledCount   Int      @default(0)
+  newCases       Int      @default(0)
+  error          String   @default("")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  source CrawlSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([sourceId])
+}
+
+model CollectionKpi {
+  id          Int      @id @default(autoincrement())
+  dimension   String
+  category    String
+  targetCount Int
+  priority    Int      @default(50)
+  enabled     Boolean  @default(true)
+  notes       String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([dimension, category])
+  @@index([dimension])
+  @@index([enabled])
+}
