@@ -7,7 +7,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/sci-viz-case-hub
+  IMAGE_NAME: ${{ github.repository_owner }}/sci-viz-hub
 
 jobs:
   build-and-push:

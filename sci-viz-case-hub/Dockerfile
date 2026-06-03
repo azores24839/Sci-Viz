@@ -1,4 +1,5 @@
-FROM docker.registry.leeteng.com/library/node:24-slim AS build
+FROM node:24-slim AS build
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app/sci-viz-case-hub
 
 COPY package.json package-lock.json ./
@@ -18,7 +19,8 @@ COPY web/src web/src/
 COPY web/public web/public/
 RUN cd web && npx vite build
 
-FROM docker.registry.leeteng.com/library/node:24-slim
+FROM node:24-slim
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app/sci-viz-case-hub
 
 COPY --from=build /app/sci-viz-case-hub/server/dist ./server/dist
@@ -27,8 +29,7 @@ COPY --from=build /app/sci-viz-case-hub/server/prisma ./server/prisma
 COPY --from=build /app/sci-viz-case-hub/server/package.json ./server/
 COPY --from=build /app/sci-viz-case-hub/web/dist ./web/dist
 
-COPY docker-entrypoint.sh /
-RUN chmod +x /docker-entrypoint.sh
+RUN mkdir -p /app/prisma-template && cp /app/sci-viz-case-hub/server/prisma/schema.prisma /app/prisma-template/
 
 ENV PORT=3001
 ENV DATABASE_URL="file:./prisma/dev.db"
@@ -36,5 +37,4 @@ ENV JWT_SECRET="change-me-in-production"
 ENV CORS_ORIGINS="http://localhost:3001,http://localhost:5173"
 
 EXPOSE 3001
-ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["node", "server/dist/index.js"]
+CMD ["sh", "-c", "cd /app/sci-viz-case-hub/server && [ -f prisma/schema.prisma ] || cp /app/prisma-template/schema.prisma prisma/schema.prisma && [ -f prisma/dev.db ] || (npx prisma db push --skip-generate && node dist/seed.js) && exec node dist/index.js"]
