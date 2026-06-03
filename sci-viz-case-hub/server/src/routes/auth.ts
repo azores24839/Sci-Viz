@@ -13,7 +13,7 @@ function signToken(user: AuthUser): string {
 
 export const authRouter = Router();
 
-authRouter.get('/auth/check', (req: Request, res: Response) => {
+authRouter.get('/check', (req: Request, res: Response) => {
   const token = req.cookies?.token;
   if (!token) {
     return res.json({ success: false, error: '未登录' });
@@ -26,7 +26,7 @@ authRouter.get('/auth/check', (req: Request, res: Response) => {
   }
 });
 
-authRouter.post('/auth/login', async (req: Request, res: Response) => {
+authRouter.post('/login', async (req: Request, res: Response) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ success: false, error: '请输入用户名和密码' });
@@ -51,12 +51,12 @@ authRouter.post('/auth/login', async (req: Request, res: Response) => {
   return res.json({ success: true, data: { id: user.id, username: user.username } });
 });
 
-authRouter.post('/auth/logout', (_req: Request, res: Response) => {
+authRouter.post('/logout', (_req: Request, res: Response) => {
   res.clearCookie('token');
   return res.json({ success: true });
 });
 
-authRouter.post('/auth/register', async (req: Request, res: Response) => {
+authRouter.post('/register', async (req: Request, res: Response) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ success: false, error: '请输入用户名和密码' });
