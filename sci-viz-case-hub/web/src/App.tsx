@@ -1,3 +1,4 @@
+import { useState, useEffect, useCallback } from 'react';
 import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
 import CaseList from './pages/CaseList';
 import CaseDetail from './pages/CaseDetail';
@@ -6,6 +7,8 @@ import PoolPage from './pages/PoolPage';
 import InsightsPage from './pages/InsightsPage';
 import ComparisonPage from './pages/ComparisonPage';
 import AnalysisReportPage from './pages/AnalysisReportPage';
+import LoginPage from './pages/LoginPage';
+import { api, setOnUnauthorized } from './api';
 import { theme } from './theme';
 
 const navItems = [
@@ -19,6 +22,45 @@ const navItems = [
 
 function App() {
   const location = useLocation();
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [username, setUsername] = useState('');
+
+  const checkAuth = useCallback(async () => {
+    const res = await api.checkAuth();
+    if (res.success && res.data) {
+      setAuthenticated(true);
+      setUsername(res.data.username);
+    } else {
+      setAuthenticated(false);
+    }
+    setAuthChecked(true);
+  }, []);
+
+  useEffect(() => {
+    checkAuth();
+    setOnUnauthorized(() => {
+      setAuthenticated(false);
+      setAuthChecked(true);
+    });
+  }, [checkAuth]);
+
+  async function handleLogout() {
+    await api.logout();
+    setAuthenticated(false);
+  }
+
+  if (!authChecked) {
+    return (
+      <div style={{ minHeight: '100vh', background: theme.colors.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ color: theme.colors.text.secondary, fontSize: 14 }}>加载中...</span>
+      </div>
+    );
+  }
+
+  if (!authenticated) {
+    return <LoginPage onLogin={checkAuth} />;
+  }
 
   return (
     <div style={{ minHeight: '100vh', background: theme.colors.bg }}>
@@ -47,7 +89,7 @@ function App() {
           }}>
             Sci-Viz Case Hub
           </span>
-          <nav style={{ display: 'flex', gap: 4, height: '100%', alignItems: 'stretch' }}>
+          <nav style={{ display: 'flex', gap: 4, height: '100%', alignItems: 'stretch', flex: 1 }}>
             {navItems.map(item => {
               const isActive = item.path === '/'
                 ? location.pathname === '/'
@@ -73,6 +115,25 @@ function App() {
               );
             })}
           </nav>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 13, color: theme.colors.text.secondary }}>
+              {username}
+            </span>
+            <button
+              onClick={handleLogout}
+              style={{
+                fontSize: 12,
+                color: theme.colors.text.secondary,
+                background: 'none',
+                border: `1px solid ${theme.colors.border}`,
+                borderRadius: 4,
+                padding: '3px 10px',
+                cursor: 'pointer',
+              }}
+            >
+              登出
+            </button>
+          </div>
         </div>
       </header>
       <main style={{ maxWidth: 1680, width: 'calc(100% - 80px)', margin: '0 auto', padding: '8px 40px 0' }}>

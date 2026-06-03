@@ -838,10 +838,10 @@ export const STATIC_SOURCE_ADAPTERS: StaticSourceAdapter[] = [
     excludeSelectors: ENTERPRISE_EXCLUDE_SELECTORS,
   },
   {
-    name: 'Autodesk Construction Blog',
+    name: 'Autodesk Customer Stories',
     hostPatterns: [/^www\.autodesk\.com$/i, /^autodesk\.com$/i],
-    articleLinkSelectors: ['article a[href]', '.card a[href]', '.post-card a[href]', 'h2 a[href], h3 a[href]', 'a[href*="/customer-stories/"]', 'a[href*="/blogs/construction/"]'],
-    articlePathPatterns: [/\/customer-stories\//i, /\/blogs\/construction\//i, /\/construction-cloud\/blog\//i],
+    articleLinkSelectors: ['article a[href]', '.card a[href]', '.post-card a[href]', 'h2 a[href], h3 a[href]', 'a[href*="/customer-stories/"]'],
+    articlePathPatterns: [/\/customer-stories\//i],
     excludeUrlPatterns: [/\/tag\//i, /\/category\//i, /\/author\//i, /\.pdf$/i],
     contentSelectors: ['article', 'main', '.entry-content', '.post-content', '.content'],
     titleSelectors: ['h1', '.entry-title', '.post-title', 'title'],

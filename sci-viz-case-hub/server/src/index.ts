@@ -1,9 +1,12 @@
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { ensureUploadDirs } from './services/image.js';
 import { startAnalysisRecovery } from './services/analysisRecovery.js';
+import { authRouter } from './routes/auth.js';
+import { authMiddleware } from './middleware/auth.js';
 import { capturesRouter } from './routes/captures.js';
 import { casesRouter } from './routes/cases.js';
 import { analysisRouter } from './routes/analysis.js';
@@ -33,10 +36,13 @@ app.use(cors({
   },
 }));
 app.use(express.json({ limit: '1mb' }));
+app.use(cookieParser());
 
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 app.use('/journal_covers', express.static(path.join(__dirname, '..', '..', '..', 'journal_covers')));
 
+app.use('/api/auth', authRouter);
+app.use('/api', authMiddleware);
 app.use('/api', capturesRouter);
 app.use('/api', casesRouter);
 app.use('/api', analysisRouter);

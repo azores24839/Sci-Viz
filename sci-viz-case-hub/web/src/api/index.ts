@@ -2,11 +2,19 @@ import type { ApiResponse, VisualCase, CrawlResponse, NetworkTestResponse, Crawl
 
 const BASE = '/api';
 
+let onUnauthorized: (() => void) | null = null;
+export function setOnUnauthorized(fn: () => void) {
+  onUnauthorized = fn;
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<ApiResponse<T>> {
   const res = await fetch(`${BASE}${url}`, {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   });
+  if (res.status === 401 && onUnauthorized) {
+    onUnauthorized();
+  }
   const data = await res.json().catch(() => ({
     success: false,
     error: `HTTP ${res.status}`,
@@ -174,5 +182,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ statuses: statuses || ['needs_review', 'low_confidence_review'] }),
     });
+  },
+
+  checkAuth() {
+    return request<{ id: string; username: string }>('/auth/check');
+  },
+
+  login(username: string, password: string) {
+    return request<{ id: string; username: string }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    });
+  },
+
+  logout() {
+    return request<void>('/auth/logout', { method: 'POST' });
   },
 };
