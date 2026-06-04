@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import type { Prisma, VisualCase } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { toTrimmedString } from '../utils/httpSafety.js';
+import { remapImagePath } from '../services/oss.js';
 
 export const insightsRouter = Router();
 
@@ -876,7 +877,7 @@ insightsRouter.get('/insights/comparison', async (req: Request, res: Response) =
       const samples = sampled.map((c: any) => ({
         id: c.id,
         title: c.caseTitle || c.mediaType,
-        thumbnail: c.thumbnailPath || c.imagePath || c.imageUrl || '',
+        thumbnail: remapImagePath(c.thumbnailPath) || remapImagePath(c.imagePath) || c.imageUrl || '',
         sourceUrl: c.sourceUrl,
         sourceDomain: c.sourceDomain,
         mediaType: c.mediaType,

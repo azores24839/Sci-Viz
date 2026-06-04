@@ -5,6 +5,7 @@ import { deleteSavedImage, saveImage, saveImageFromUrl, type SavedImage } from '
 import { runAnalysis } from '../services/analysisRunner.js';
 import { findDuplicateCase } from '../services/dedupe.js';
 import { normalizeHttpUrl, toTrimmedString } from '../utils/httpSafety.js';
+import { remapImagePath } from '../services/oss.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 export const capturesRouter = Router();
@@ -45,7 +46,11 @@ capturesRouter.post('/captures', upload.single('image_file'), async (req: Reques
           duplicate: true,
           matchType: duplicate.matchType,
           distance: duplicate.distance,
-          data: duplicate.caseEntry,
+          data: {
+            ...duplicate.caseEntry,
+            imagePath: remapImagePath(duplicate.caseEntry.imagePath),
+            thumbnailPath: remapImagePath(duplicate.caseEntry.thumbnailPath),
+          },
         });
         return;
       }
@@ -66,7 +71,14 @@ capturesRouter.post('/captures', upload.single('image_file'), async (req: Reques
       },
     });
 
-    res.json({ success: true, data: caseEntry });
+    res.json({
+      success: true,
+      data: {
+        ...caseEntry,
+        imagePath: remapImagePath(caseEntry.imagePath),
+        thumbnailPath: remapImagePath(caseEntry.thumbnailPath),
+      },
+    });
 
     // Fire-and-forget: OCR + Vision analysis runs in background
     if (imageResult?.imagePath) {

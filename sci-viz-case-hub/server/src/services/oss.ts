@@ -78,6 +78,14 @@ export function makeOssKey(dir: string, filename: string): string {
   return path.posix.join(dir, filename).replace(/^\/+/, '');
 }
 
+export function remapImagePath(localPath: string): string {
+  if (!localPath || !localPath.startsWith('/uploads/')) return localPath;
+  const config = getOssConfig();
+  if (!config) return localPath;
+  const relative = localPath.replace(/^\/uploads\//, '');
+  return getOssPublicUrl(relative);
+}
+
 export async function ossFileExists(ossKey: string): Promise<boolean> {
   const client = getOssClient();
   if (!client) return false;

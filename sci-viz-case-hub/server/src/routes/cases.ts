@@ -2,6 +2,13 @@ import { Router, Request, Response } from 'express';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { clampInt, toTrimmedString } from '../utils/httpSafety.js';
+import { remapImagePath } from '../services/oss.js';
+
+function remapCase(c: Record<string, any>) {
+  c.imagePath = remapImagePath(c.imagePath);
+  c.thumbnailPath = remapImagePath(c.thumbnailPath);
+  return c;
+}
 
 export const casesRouter = Router();
 
@@ -114,7 +121,7 @@ casesRouter.get('/cases', async (req: Request, res: Response) => {
 
     res.json({
       success: true,
-      data: cases,
+      data: cases.map(remapCase),
       pagination: {
         total,
         page: currentPage,
@@ -215,7 +222,7 @@ casesRouter.get('/cases/:id', async (req: Request, res: Response) => {
       res.status(404).json({ success: false, error: 'Case not found' });
       return;
     }
-    res.json({ success: true, data: caseEntry });
+    res.json({ success: true, data: remapCase(caseEntry) });
   } catch (error) {
     res.status(500).json({ success: false, error: (error as Error).message });
   }

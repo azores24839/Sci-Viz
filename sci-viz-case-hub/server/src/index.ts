@@ -25,10 +25,11 @@ const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173,http:
   .split(',')
   .map(origin => origin.trim())
   .filter(Boolean);
+const localDevOriginPattern = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/;
 
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin) || origin.startsWith('chrome-extension://')) {
+    if (!origin || allowedOrigins.includes(origin) || localDevOriginPattern.test(origin) || origin.startsWith('chrome-extension://')) {
       callback(null, true);
       return;
     }
