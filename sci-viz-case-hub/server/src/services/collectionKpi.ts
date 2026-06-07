@@ -47,7 +47,7 @@ export async function getCollectionKpiProgress(): Promise<KpiProgressItem[]> {
         mediaType: true,
         contentType: true,
         discipline: true,
-        visualStyle: true,
+        technicalMethod: true,
         functionalPurpose: true,
         distributionMedium: true,
         reviewStatus: true,
@@ -58,7 +58,7 @@ export async function getCollectionKpiProgress(): Promise<KpiProgressItem[]> {
 
   const counts = new Map<string, { current: number; approved: number; highValue: number }>();
   for (const caseEntry of cases) {
-    for (const dimension of ['mediaType', 'contentType', 'discipline', 'visualStyle', 'functionalPurpose', 'distributionMedium'] as KpiDimension[]) {
+    for (const dimension of ['mediaType', 'contentType', 'discipline', 'technicalMethod', 'functionalPurpose', 'distributionMedium'] as KpiDimension[]) {
       const category = normalizeTaxonomyValue(dimension, caseEntry[dimension] || '');
       const key = `${dimension}:${category}`;
       const current = counts.get(key) || { current: 0, approved: 0, highValue: 0 };

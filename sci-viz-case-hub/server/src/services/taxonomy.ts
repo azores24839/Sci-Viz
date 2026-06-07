@@ -2,7 +2,7 @@ export const TAXONOMY = {
   mediaType: ['摄影', '手绘图', '3D渲染', '信息图', '显微图', '数据可视化', '混合媒介', '不确定'],
   contentType: ['单人肖像', '群体肖像', '绘画肖像', '实验设备', '实验过程', '微观样本', '机制模型', '数据结果', '空间环境', '团队场景', '科普传播', '不确定'],
   discipline: ['生命科学', '材料', '医学', '工程', '物理', '化学', '信息科学', '环境科学', '综合交叉', '不确定'],
-  visualStyle: ['纪实', '科技', '极简', '人文', '艺术化', '教学解释', '商业宣传', '顶刊封面', '不确定'],
+  technicalMethod: ['拍摄', '成像', '绘设', '数据', '渲染', '生成'],
   functionalPurpose: ['记录', '解释', '数据', '展示', '传播', '交互'],
   distributionMedium: ['静图', '动图', '视频', '图组', '交互', '实体'],
 } as const;
@@ -17,7 +17,6 @@ export const SUB_TAXONOMY = {
     '信息图': ['科学插画', '图标设计', '版面设计/信息图'],
     '显微图': ['光学显微', '电子显微', '医学影像', '遥感成像', '热成像'],
     '数据可视化': ['统计图表', '地图', '网络图', '科学数据可视化'],
-    '视频': ['短视频', '动画视频', '纪录片', '讲解视频'],
     '混合媒介': [],
     '不确定': [],
   },
@@ -69,15 +68,13 @@ const ALIASES: Record<KpiDimension, Array<[RegExp, string]>> = {
     [/环境|地球|气候|遥感/, '环境科学'],
     [/综合|交叉|历史|社会|人文/, '综合交叉'],
   ],
-  visualStyle: [
-    [/纪实|照片|档案|历史|黑白/, '纪实'],
-    [/科技|未来|空间|设备|渲染/, '科技'],
-    [/极简/, '极简'],
-    [/人文|人物|团队/, '人文'],
-    [/艺术|封面|插画/, '艺术化'],
-    [/教学|解释|图解|机制/, '教学解释'],
-    [/商业|宣传/, '商业宣传'],
-    [/顶刊|封面/, '顶刊封面'],
+  technicalMethod: [
+    [/拍摄|摄影|摄像|航拍|采集/, '拍摄'],
+    [/成像|显微|医学|遥感|热成像|CT|MRI|X光|超声/, '成像'],
+    [/绘设|插画|图标|设计|排版|手绘|版面/, '绘设'],
+    [/数据|图表|可视化|统计|地图|网络/, '数据'],
+    [/渲染|3D|建模|仿真|工程|CAD|模型/, '渲染'],
+    [/生成|AI|算法|风格迁移|GAN|扩散/, '生成'],
   ],
   functionalPurpose: [
     [/记录|纪实|存档|现场|记录仪/, '记录'],
@@ -144,11 +141,11 @@ export function getDefaultKpis(): Array<{
       targetCount: category === '不确定' ? 20 : 80,
       priority: category === '不确定' ? 10 : 60,
     })),
-    ...TAXONOMY.visualStyle.map(category => ({
-      dimension: 'visualStyle' as const,
+    ...TAXONOMY.technicalMethod.map(category => ({
+      dimension: 'technicalMethod' as const,
       category,
-      targetCount: category === '不确定' ? 20 : 80,
-      priority: category === '不确定' ? 10 : 50,
+      targetCount: 80,
+      priority: 50,
     })),
     ...TAXONOMY.functionalPurpose.map(category => ({
       dimension: 'functionalPurpose' as const,

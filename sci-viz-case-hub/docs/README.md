@@ -12,9 +12,18 @@
 
 ## 方法论与分类体系
 
+- `../../docs/superpowers/specs/2026-06-05-三轴分类编码本-v1.md`：当前三轴分类标准口径，定义功能、媒介、技术三套互相独立的分类方式。
 - `superpowers/specs/2026-06-02-project-phases-and-3-axis-design.md`：项目阶段规划与三轴分类体系设计。
-- `superpowers/specs/2026-06-02-3axis-classification-dictionary.md`：三轴分类体系完整字典。
+- `superpowers/specs/2026-06-02-3axis-classification-dictionary.md`：早期三轴分类体系完整字典，作为历史设计参考；如与 2026-06-05 编码本冲突，以后者为准。
 - `../../视觉调研流程_人机分工.md`：科研影像视觉调研流程与人机分工方案。
+
+## 数据统计口径
+
+- 长期文档不写死案例总数、approved 数量或各来源数量；这些数值以数据库和统计脚本实时输出为准。
+- 正式三轴统计只使用 `functionalPurpose`、`distributionMedium`、`technicalMethod`。
+- `mediaType`、`contentType`、`discipline` 分别作为旧呈现方式、内容对象、学科分层维度使用，不与三轴混作同一套 tag。
+- `captureType`、补采方式、浏览器截图方式等属于采集元数据，不进入技术维度。
+- 历史批处理报告保留当时快照数字，阅读时按报告日期理解，不视为当前状态。
 
 ## 来源池与专题资料
 

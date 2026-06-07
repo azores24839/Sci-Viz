@@ -26,7 +26,7 @@ interface AnalysisResult {
     media_type: string;
     content_type: string;
     discipline: string;
-    visual_style: string;
+    technical_method: string;
     composition: string;
     color_tone: string;
     use_case: string[];
@@ -111,7 +111,7 @@ async function importNatureCovers() {
           mediaType: a.media_type || '不确定',
           contentType: a.content_type || '不确定',
           discipline: a.discipline || '不确定',
-          visualStyle: a.visual_style || '不确定',
+          technicalMethod: a.technical_method || '不确定',
           composition: a.composition || '不确定',
           colorTone: a.color_tone || '不确定',
           useCase: JSON.stringify(a.use_case || []),

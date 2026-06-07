@@ -7,9 +7,24 @@
 ## 技术栈
 - Web应用：Node.js (sci-viz-case-hub/)
 - 数据采集：Python (scrape_all_journals.py, scrape_nature_covers.py)
-- 数据库：SQLite (已入库2837条案例)
+- 数据库：SQLite（案例数量以实时数据库统计为准，不在长期文档中写死）
 - 图像处理：感知哈希去重、视觉分析
 - 测试：Playwright (sci-viz-case-hub/.playwright-cli/)
+
+## 三轴分类标准口径
+长期分析以三轴为主，不把旧字段、采集方式或自由 tag 混入三轴结论。
+
+| 维度 | 字段 | 核心问题 | 类别 |
+| --- | --- | --- | --- |
+| 功能维度 | `functionalPurpose` | 影像为什么存在 / 用来做什么 | 记录、解释、数据、展示、传播、交互 |
+| 媒介维度 | `distributionMedium` | 影像以什么形式呈现 | 静图、动图、视频、图组、交互、实体 |
+| 技术维度 | `technicalMethod` | 影像通过什么方式生产 | 拍摄、成像、绘设、数据、渲染、生成 |
+
+辅助字段边界：
+- `mediaType` 是旧的呈现方式字段，混合了技术、风格和媒介线索，只作辅助筛选或迁移参考。
+- `contentType` 是内容对象/题材线索，不属于三轴。
+- `discipline` 是学科分层维度，不属于三轴。
+- `captureType`、`检索补采`、`浏览器截图` 等属于采集方式或处理方式，不能写入技术维度结论。
 
 ## 任务路由规则（主agent自动判断）
 遇到以下任务时，优先派出subagent：

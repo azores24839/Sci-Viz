@@ -108,6 +108,23 @@ function isPlaceholder(src: string): boolean {
   return PLACEHOLDER_PATTERNS.some(p => lower.includes(p));
 }
 
+function imageUrlFromResponsiveJson(rawSrc: string): string {
+  const trimmed = rawSrc.trim();
+  if (!trimmed.startsWith('{')) return rawSrc;
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, string>;
+    return parsed.max
+      || parsed.xxlarge
+      || parsed.xlarge
+      || parsed.large
+      || parsed.medium
+      || parsed.small
+      || rawSrc;
+  } catch {
+    return rawSrc;
+  }
+}
+
 export async function extractImagesFromPage(url: string, html: string): Promise<ExtractedPage> {
   const $ = cheerio.load(html);
   const adapter = getStaticSourceAdapter(url);
@@ -134,7 +151,7 @@ export async function extractImagesFromPage(url: string, html: string): Promise<
 
   function addCandidate(rawSrc: string, alt: string, width: number | null, height: number | null, contextText: string) {
     if (!rawSrc) return;
-    let src = rawSrc;
+    let src = imageUrlFromResponsiveJson(rawSrc);
     try {
       src = new URL(src, baseUrl).href;
     } catch {

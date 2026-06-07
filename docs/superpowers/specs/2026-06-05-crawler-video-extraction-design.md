@@ -173,11 +173,11 @@ function detectVideoPlatform(url: string): { platform: string; videoId: string }
 
 文件: `web/src/pages/CaseList.tsx`
 
-在快速筛选行新增"视频"按钮：
+在快速筛选行新增"视频"按钮，按研究分类筛选传播媒介：
 ```tsx
 // 现有: Nature covers, 3D建模, 机制图, 显微图, 数据可视化
 // 新增: 视频
-{ label: '视频', filter: { captureType: 'video' } }
+{ label: '视频', filter: { distribution_medium: '视频' } }
 ```
 
 #### 6.2 无需改动的组件

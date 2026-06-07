@@ -121,6 +121,22 @@ export async function processSingleUrl(
   let createdCaseCount = 0;
 
   try {
+    const urlCheck = await prisma.visualCase.findFirst({
+      where: { sourceUrl: url },
+      select: { id: true },
+    });
+    if (urlCheck) {
+      return {
+        url,
+        status: 'success',
+        pageTitle: 'Skipped: URL already exists',
+        candidateImageCount: 0,
+        filteredImageCount: 0,
+        createdCaseCount: 0,
+        errors: [`Skipped: sourceUrl already exists (id=${urlCheck.id})`],
+      };
+    }
+
     let parsedUrl = await assertPublicHttpUrl(url);
 
     const fetchHeaders: Record<string, string> = {

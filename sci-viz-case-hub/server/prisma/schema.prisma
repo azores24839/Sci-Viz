@@ -21,6 +21,10 @@ model VisualCase {
   thumbnailPath String @default("")
   imageHash     String @default("")
 
+  videoUrl       String @default("")
+  videoPlatform  String @default("")
+  videoDuration  Int    @default(0)
+
   contextText String @default("")
   ocrText     String @default("")
   captureType String @default("image")
@@ -31,7 +35,7 @@ model VisualCase {
   mediaType    String @default("")
   contentType  String @default("")
   discipline   String @default("")
-  visualStyle  String @default("")
+  technicalMethod  String @default("")
   composition  String @default("")
   colorTone    String @default("")
   useCase      String @default("")
@@ -52,6 +56,8 @@ model VisualCase {
   updatedAt DateTime @updatedAt
 
   @@index([imageHash])
+  @@index([sourceUrl])
+  @@index([sourceDomain])
 }
 
 model CrawlSource {

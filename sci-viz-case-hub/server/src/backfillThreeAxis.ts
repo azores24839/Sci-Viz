@@ -12,7 +12,7 @@ async function main() {
       id: true,
       mediaType: true,
       contentType: true,
-      visualStyle: true,
+      technicalMethod: true,
       captureType: true,
     },
   });
@@ -29,10 +29,10 @@ async function main() {
   for (const entry of allCases) {
     const mediaType = entry.mediaType || '';
     const contentType = entry.contentType || '';
-    const visualStyle = entry.visualStyle || '';
+    const technicalMethod = entry.technicalMethod || '';
     const captureType = entry.captureType || '';
 
-    const fp = inferFunctionalPurpose(mediaType, contentType, visualStyle);
+    const fp = inferFunctionalPurpose(mediaType, contentType, technicalMethod);
     const dm = inferDistributionMedium(mediaType, captureType);
     const tm = inferTechnicalMethod(mediaType);
 
@@ -66,33 +66,27 @@ async function main() {
   printStats('technicalMethod (for reference, not written to DB)', stats.technicalMethod);
 }
 
-function inferFunctionalPurpose(mediaType: string, contentType: string, visualStyle: string): string {
+function inferFunctionalPurpose(mediaType: string, contentType: string, technicalMethod: string): string {
   const mt = mediaType.trim();
   const ct = contentType.trim();
-  const vs = visualStyle.trim();
+  const tm = technicalMethod.trim();
 
-  if (vs === '顶刊封面') return '传播';
-  if (vs === '商业宣传') return '传播';
-  if (vs === '教学解释') return '解释';
+  if (tm === '绘设') return '传播';
+  if (tm === '拍摄') return '记录';
+  if (tm === '渲染') return '展示';
   if (ct === '科普传播') return '传播';
   if (ct === '微观样本') return '数据';
   if (ct === '数据结果') return '数据';
   if (ct === '机制模型') return '解释';
   if (ct === '实验设备' || ct === '实验过程' || ct === '空间环境') return '记录';
   if (ct === '单人肖像' || ct === '群体肖像' || ct === '团队场景') return '记录';
-  if (vs === '纪实') return '记录';
-  if (vs === '科技') return '展示';
-  if (vs === '极简') return '展示';
-  if (vs === '艺术化') return '传播';
 
   return '';
 }
 
 function inferDistributionMedium(mediaType: string, captureType: string): string {
-  const mt = mediaType.trim();
   const cap = captureType.trim();
 
-  if (mt === '视频') return '视频';
   if (cap === 'video') return '视频';
 
   return '静图';
@@ -108,7 +102,6 @@ function inferTechnicalMethod(mediaType: string): string {
     '信息图': '绘设',
     '显微图': '成像',
     '数据可视化': '数据',
-    '视频': '拍摄',
     '不确定': '不确定',
   };
 

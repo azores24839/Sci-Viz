@@ -1,0 +1,26 @@
+<svg id="图层_1" data-name="图层 1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+    viewBox="0 0 615.48 425.39" width="17" height="12" fill="#333333">
+    <defs>
+        <style>
+            .cls-1 {
+                fill: none;
+            }
+
+            .cls-2 {
+                clip-path: url(#clip-path);
+            }
+        </style>
+        <clipPath id="clip-path" transform="translate(-651.88 -327.37)">
+            <rect class="cls-1" x="652" y="327" width="615.84" height="426.72" />
+        </clipPath>
+    </defs>
+    <g class="cls-2">
+        <path d="M1232.53,572.15H675.88a24,24,0,0,1,0-48h556.65a24,24,0,0,1,0,48Zm0,0"
+            transform="translate(-651.88 -327.37)" />
+        <path
+            d="M1228.54,557.28l-.16-.15L1039.76,368.51l-.2-.21a24,24,0,1,1,33.94-33.93h0l.35.36a1.21,1.21,0,0,1,.16.16l188.47,188.47Zm0,0"
+            transform="translate(-651.88 -327.37)" />
+    </g>
+    <path d="M1054.36,752.76a24,24,0,0,1-17-41l189-189a24,24,0,1,1,33.95,33.94l-189,189a23.88,23.88,0,0,1-17,7Zm0,0"
+        transform="translate(-651.88 -327.37)" />
+</svg>

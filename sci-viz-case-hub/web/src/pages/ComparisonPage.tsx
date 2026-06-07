@@ -11,6 +11,7 @@ const PURPLE = '#7c5ccf';
 const ORANGE = '#f28c28';
 
 const GROUP_COLORS: Record<string, string> = {
+  ime: '#0891b2',
   sjtu: BLUE,
   domestic: GREEN,
   international: PURPLE,
@@ -18,6 +19,7 @@ const GROUP_COLORS: Record<string, string> = {
 };
 
 const GROUP_TINTS: Record<string, { bg: string; border: string; text: string }> = {
+  ime: { bg: '#ecfeff', border: '#a5f3fc', text: '#0e7490' },
   sjtu: { bg: '#eff6ff', border: '#bfdbfe', text: '#1d4ed8' },
   domestic: { bg: '#edf7ef', border: '#cbe7d1', text: '#247042' },
   international: { bg: '#f4f0ff', border: '#ded2ff', text: '#6d45c4' },
@@ -25,6 +27,7 @@ const GROUP_TINTS: Record<string, { bg: string; border: string; text: string }> 
 };
 
 const GROUP_LABELS: Record<string, string> = {
+  ime: '长兴海洋实验室',
   sjtu: '交大现状',
   domestic: '国内顶尖高校',
   international: '国际研究',
@@ -32,11 +35,9 @@ const GROUP_LABELS: Record<string, string> = {
 };
 
 const COMPARISON_DIMENSIONS: { key: string; label: string }[] = [
-  { key: 'functionalPurpose', label: '表达功能' },
-  { key: 'mediaType', label: '呈现方式' },
-  { key: 'contentType', label: '内容类型' },
-  { key: 'visualStyle', label: '视觉风格' },
+  { key: 'functionalPurpose', label: '功能用途' },
   { key: 'distributionMedium', label: '传播媒介' },
+  { key: 'technicalMethod', label: '技术手段' },
 ];
 
 const SJTU_SCHOOLS = [
@@ -107,7 +108,7 @@ function mediaTypeToExpression(mediaType: string): ExpressionKey | null {
 }
 
 function sampleText(sample: ComparisonSample) {
-  return [sample.title, sample.mediaType, sample.contentType, sample.visualStyle].filter(Boolean).join(' ');
+  return [sample.title, sample.mediaType, sample.contentType, sample.technicalMethod].filter(Boolean).join(' ');
 }
 
 function findSampleForExpression(samples: ComparisonSample[], expression: ExpressionKey): ComparisonSample | null {

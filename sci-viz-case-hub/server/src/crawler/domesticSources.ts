@@ -16,7 +16,7 @@ export interface DomesticSourceConfig {
 export const DOMESTIC_SOURCES: DomesticSourceConfig[] = [
   {
     name: '浙江大学-求是新闻网',
-    url: 'https://www.news.zju.edu.cn',
+    url: 'http://www.news.zju.edu.cn',
     sourceType: 'university_news',
     category: 'H',
     crawlTier: 'A',

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import type { VisualCase, Pagination, CrawlSource } from '../types';
-import { REVIEW_STATUS_LABELS, MEDIA_TYPES, CONTENT_TYPES, DISCIPLINES, VISUAL_STYLES, CAPTURE_TYPE_LABELS, CATEGORY_LABELS } from '../types';
+import { REVIEW_STATUS_LABELS, MEDIA_TYPES, CONTENT_TYPES, DISCIPLINES, TECHNICAL_METHODS, DISTRIBUTION_MEDIUMS, CAPTURE_TYPE_LABELS, CATEGORY_LABELS } from '../types';
 import { theme } from '../theme';
 
 const STATUS_FILTERS: Array<{ key: string; label: string }> = [
@@ -25,7 +25,8 @@ const FILTER_PARAM_KEYS = [
   'media_type',
   'content_type',
   'discipline',
-  'visual_style',
+  'technical_method',
+  'distribution_medium',
   'capture_type',
   'ocr_status',
   'ai_status',
@@ -141,11 +142,13 @@ function makeConceptTag(title: string): string {
 function makeCardTags(c: VisualCase): string[] {
   const title = makeCaseTitle(c);
   const ordered = [
-    normalizePrimaryTag(c.mediaType),
-    c.visualStyle === '顶刊封面' ? '期刊封面' : '',
+    c.functionalPurpose,
+    c.distributionMedium,
+    c.technicalMethod,
     c.contentType && c.contentType !== '科普传播' ? normalizeContentTypeLabel(c.contentType) : '',
     makeSourceLine(c),
     c.discipline,
+    normalizePrimaryTag(c.mediaType),
     makeConceptTag(title),
   ].filter(v => v && v !== '不确定');
 
@@ -200,6 +203,9 @@ export default function CaseList() {
   const [poolSources, setPoolSources] = useState<CrawlSource[]>([]);
   const [sourceDropdownOpen, setSourceDropdownOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [managementMode, setManagementMode] = useState(false);
+  const [selectedCaseIds, setSelectedCaseIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const sourceDropdownRef = useRef<HTMLDivElement>(null);
 
   const sourceNameSelected = new Set(
@@ -349,6 +355,10 @@ export default function CaseList() {
     }).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    setSelectedCaseIds(new Set());
+  }, [filters]);
+
   const setFilter = (key: string, value: string) => {
     setPage(1);
     setFilters(f => {
@@ -362,6 +372,59 @@ export default function CaseList() {
   const resetFilters = () => {
     setFilters(DEFAULT_FILTERS);
     setPage(1);
+  };
+
+  const toggleManagementMode = () => {
+    setManagementMode(active => {
+      if (active) setSelectedCaseIds(new Set());
+      return !active;
+    });
+  };
+
+  const toggleCaseSelection = (id: string) => {
+    setSelectedCaseIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllLoaded = () => {
+    setSelectedCaseIds(new Set(cases.map(item => item.id)));
+  };
+
+  const clearSelection = () => {
+    setSelectedCaseIds(new Set());
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedCaseIds);
+    if (ids.length === 0 || bulkDeleting) return;
+    const ok = window.confirm(`确定删除已选的 ${ids.length} 个案例吗？此操作会同时移除本地图片文件，无法在界面中撤销。`);
+    if (!ok) return;
+
+    setBulkDeleting(true);
+    try {
+      const res = await api.batchDeleteCases(ids);
+      if (!res.success) {
+        window.alert(res.error || '批量删除失败');
+        return;
+      }
+      const deleted = res.data?.deleted ?? ids.length;
+      const deletedIds = new Set(ids);
+      setCases(prev => prev.filter(item => !deletedIds.has(item.id)));
+      setSelectedCaseIds(new Set());
+      setPagination(prev => {
+        if (!prev) return prev;
+        const total = Math.max(0, prev.total - deleted);
+        return { ...prev, total, totalPages: Math.ceil(total / prev.limit) };
+      });
+      fetchCounts();
+      fetchFacetCounts();
+    } finally {
+      setBulkDeleting(false);
+    }
   };
 
   const activeFilterCount = Object.entries(filters)
@@ -383,8 +446,9 @@ export default function CaseList() {
   };
 
   const quickFilters: Array<{ label: string; filters: Record<string, string> }> = [
-    { label: 'Nature 封面', filters: { search: 'Nature', visual_style: '顶刊封面' } },
+    { label: 'Nature 封面', filters: { search: 'Nature', technical_method: '渲染' } },
     { label: 'Nature Photonics', filters: { search: 'Nature Photonics' } },
+    { label: '视频案例', filters: { distribution_medium: '视频' } },
     { label: '3D建模', filters: { media_type: '3D渲染' } },
     { label: '机制图', filters: { content_type: '机制模型' } },
     { label: '显微图', filters: { media_type: '显微图' } },
@@ -404,6 +468,8 @@ export default function CaseList() {
   const displayedCount = cases.length;
   const totalCount = pagination?.total ?? 0;
   const canLoadMore = !!pagination && page < pagination.totalPages;
+  const selectedCount = selectedCaseIds.size;
+  const allLoadedSelected = cases.length > 0 && cases.every(item => selectedCaseIds.has(item.id));
 
   return (
     <div>
@@ -429,6 +495,37 @@ export default function CaseList() {
           box-shadow: ${theme.shadow.elevated};
           border-color: ${theme.colors.borderFocus};
           transform: translateY(-1px);
+        }
+        .case-card.is-selected {
+          border-color: ${theme.colors.text.primary} !important;
+          box-shadow: 0 0 0 2px rgba(30, 30, 35, 0.14), ${theme.shadow.card};
+        }
+        .case-card.is-managing {
+          cursor: pointer;
+        }
+        .case-select-control {
+          position: absolute;
+          top: 8px;
+          left: 8px;
+          z-index: 3;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          min-height: 30px;
+          padding: 5px 8px 5px 6px;
+          border-radius: 9999px;
+          border: 1px solid rgba(255, 255, 255, 0.72);
+          background: rgba(255, 255, 255, 0.94);
+          box-shadow: ${theme.shadow.popover};
+          color: ${theme.colors.text.primary};
+          font-size: 11px;
+          font-weight: 700;
+        }
+        .case-select-control input {
+          width: 16px;
+          height: 16px;
+          margin: 0;
+          accent-color: ${theme.colors.text.primary};
         }
         .case-card:hover .case-hover-meta {
           opacity: 1;
@@ -463,8 +560,26 @@ export default function CaseList() {
             浏览已经整理好的科研视觉案例，按主题、学科和视觉形式快速找到可复用灵感。
           </div>
         </div>
-        <div style={{ fontSize: 13, color: theme.colors.text.tertiary }}>
-          已显示 {displayedCount || '-'} / {pagination?.total ?? '-'} 条 · 已入库 {statusCounts.approved ?? '-'} 条
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <div style={{ fontSize: 13, color: theme.colors.text.tertiary }}>
+            已显示 {displayedCount || '-'} / {pagination?.total ?? '-'} 条 · 已入库 {statusCounts.approved ?? '-'} 条
+          </div>
+          <button
+            onClick={toggleManagementMode}
+            style={{
+              height: 34,
+              padding: '0 14px',
+              borderRadius: 8,
+              border: `1px solid ${managementMode ? theme.colors.text.primary : theme.colors.border}`,
+              background: managementMode ? theme.colors.text.primary : theme.colors.bgCard,
+              color: managementMode ? theme.colors.bgCard : theme.colors.text.secondary,
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: 700,
+            }}
+          >
+            {managementMode ? '退出管理' : '管理'}
+          </button>
         </div>
       </div>
 
@@ -605,10 +720,17 @@ export default function CaseList() {
             return <option key={t} value={t}>{t}{count !== undefined ? ` (${count})` : ''}</option>;
           })}
         </select>
-        <select value={filters.visual_style || ''} onChange={(e) => setFilter('visual_style', e.target.value)} style={{ ...selectStyle, height: 38, maxWidth: 'none' }}>
-          <option value="">全部视觉风格</option>
-          {VISUAL_STYLES.map(t => {
-            const count = facetCounts.visualStyle?.[t];
+        <select value={filters.technical_method || ''} onChange={(e) => setFilter('technical_method', e.target.value)} style={{ ...selectStyle, height: 38, maxWidth: 'none' }}>
+          <option value="">全部技术手段</option>
+          {TECHNICAL_METHODS.map(t => {
+            const count = facetCounts.technicalMethod?.[t];
+            return <option key={t} value={t}>{t}{count !== undefined ? ` (${count})` : ''}</option>;
+          })}
+        </select>
+        <select value={filters.distribution_medium || ''} onChange={(e) => setFilter('distribution_medium', e.target.value)} style={{ ...selectStyle, height: 38, maxWidth: 'none' }}>
+          <option value="">全部传播媒介</option>
+          {DISTRIBUTION_MEDIUMS.map(t => {
+            const count = facetCounts.distributionMedium?.[t];
             return <option key={t} value={t}>{t}{count !== undefined ? ` (${count})` : ''}</option>;
           })}
         </select>
@@ -722,6 +844,89 @@ export default function CaseList() {
         </div>
       )}
 
+      {managementMode && (
+        <div style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 20,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexWrap: 'wrap',
+          marginBottom: 16,
+          padding: '10px 12px',
+          borderRadius: 8,
+          border: `1px solid ${theme.colors.border}`,
+          background: 'rgba(255, 255, 255, 0.96)',
+          boxShadow: theme.shadow.card,
+          backdropFilter: 'blur(10px)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <strong style={{ fontSize: 13, color: theme.colors.text.primary }}>
+              已选 {selectedCount} 项
+            </strong>
+            <span style={{ fontSize: 12, color: theme.colors.text.tertiary }}>
+              当前已加载 {displayedCount} 条
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              onClick={allLoadedSelected ? clearSelection : selectAllLoaded}
+              disabled={cases.length === 0}
+              style={{
+                height: 32,
+                padding: '0 12px',
+                borderRadius: 8,
+                border: `1px solid ${theme.colors.border}`,
+                background: theme.colors.bgCard,
+                color: cases.length === 0 ? theme.colors.text.tertiary : theme.colors.text.secondary,
+                cursor: cases.length === 0 ? 'not-allowed' : 'pointer',
+                fontSize: 12,
+                fontWeight: 700,
+              }}
+            >
+              {allLoadedSelected ? '取消全选' : '全选当前页'}
+            </button>
+            {selectedCount > 0 && (
+              <button
+                onClick={clearSelection}
+                style={{
+                  height: 32,
+                  padding: '0 12px',
+                  borderRadius: 8,
+                  border: `1px solid ${theme.colors.border}`,
+                  background: 'transparent',
+                  color: theme.colors.text.tertiary,
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}
+              >
+                清空选择
+              </button>
+            )}
+            <button
+              onClick={handleBulkDelete}
+              disabled={selectedCount === 0 || bulkDeleting}
+              style={{
+                height: 32,
+                padding: '0 14px',
+                borderRadius: 8,
+                border: '1px solid #d14a3a',
+                background: selectedCount === 0 || bulkDeleting ? '#f8e5e1' : '#c7372f',
+                color: selectedCount === 0 || bulkDeleting ? '#a8756c' : '#fff',
+                cursor: selectedCount === 0 || bulkDeleting ? 'not-allowed' : 'pointer',
+                fontSize: 12,
+                fontWeight: 800,
+              }}
+            >
+              {bulkDeleting ? '删除中...' : '删除所选'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {loading && cases.length === 0 && (
         <div style={{
           display: 'flex',
@@ -750,13 +955,22 @@ export default function CaseList() {
         {cases.map((c) => {
           const title = makeCaseTitle(c);
           const tags = makeCardTags(c);
+          const selected = selectedCaseIds.has(c.id);
           return (
           <Link
-            to={`/cases/${c.id}`}
+            to={managementMode ? '#' : `/cases/${c.id}`}
             state={{ from: `${location.pathname}${location.search}` }}
-            onClick={rememberListPosition}
+            onClick={(e) => {
+              if (managementMode) {
+                e.preventDefault();
+                toggleCaseSelection(c.id);
+                return;
+              }
+              rememberListPosition();
+            }}
             key={c.id}
-            className="case-card"
+            className={`case-card${managementMode ? ' is-managing' : ''}${selected ? ' is-selected' : ''}`}
+            aria-selected={managementMode ? selected : undefined}
             style={{
               textDecoration: 'none',
               color: 'inherit',
@@ -793,6 +1007,39 @@ export default function CaseList() {
                   无图片
                 </div>
               )}
+              {managementMode && (
+                <label
+                  className="case-select-control"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={() => toggleCaseSelection(c.id)}
+                    aria-label={`选择案例：${title}`}
+                  />
+                  <span>{selected ? '已选' : '选择'}</span>
+                </label>
+              )}
+              {c.captureType === 'video' && !imgErrors.has(c.id) && (
+                <div style={{
+                  position: 'absolute',
+                  top: 8,
+                  right: 8,
+                  width: 28,
+                  height: 28,
+                  borderRadius: '50%',
+                  background: 'rgba(0,0,0,0.6)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 2,
+                }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="white">
+                    <polygon points="6,3 20,12 6,21" />
+                  </svg>
+                </div>
+              )}
               <div
                 className="case-hover-meta"
                 style={{
@@ -821,7 +1068,7 @@ export default function CaseList() {
                 }}>
                   {REVIEW_STATUS_LABELS[c.reviewStatus] || c.reviewStatus || '未标记'}
                   {c.rating ? ` · ${c.rating}分` : ''}
-                  {c.visualStyle && c.visualStyle !== '不确定' ? ` · ${c.visualStyle}` : ''}
+                  {c.technicalMethod && c.technicalMethod !== '不确定' ? ` · ${c.technicalMethod}` : ''}
                 </div>
                 <div style={{
                   display: 'flex',

@@ -9,6 +9,7 @@ import { prisma } from '../prisma.js';
 import { backupDatabase } from '../utils/backup.js';
 import { analyzeImage, classifyMediaType } from '../services/vision.js';
 import { normalizeTaxonomyValue } from '../services/taxonomy.js';
+import { getVisionConfig, getVisionHeaders } from '../services/visionConfig.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -77,11 +78,10 @@ async function ocrRemoteImage(imageUrl: string, context: string): Promise<string
   const response = await fetch(config.url, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.key}`,
+      ...getVisionHeaders(config.key),
     },
     body: JSON.stringify({
-      model: process.env.OCR_VISION_MODEL || 'qwen/qwen3-vl-8b-instruct',
+      model: config.ocrModel,
       messages: [
         {
           role: 'system',
@@ -105,13 +105,6 @@ async function ocrRemoteImage(imageUrl: string, context: string): Promise<string
     choices?: Array<{ message?: { content?: string | null; reasoning?: string | null } }>;
   };
   return cleanOcrText(data.choices?.[0]?.message?.content || '');
-}
-
-function getVisionConfig() {
-  return {
-    url: process.env.VISION_API_URL || '',
-    key: process.env.VISION_API_KEY || '',
-  };
 }
 
 async function findLocalImage(c: { imagePath: string; thumbnailPath: string }): Promise<string> {
@@ -358,9 +351,12 @@ processingRouter.post('/processing/classify', async (req, res) => {
           contextText: c.contextText || '',
         });
 
-        const reviewStatus = result.confidence >= 0.8
-          ? 'needs_review'
-          : 'low_confidence_review';
+        const isAnalysisFailure = result.confidence <= 0 && /失败|无法读取|等待AI分析/.test(result.ai_summary || '');
+        const reviewStatus = isAnalysisFailure
+          ? 'analysis_failed'
+          : result.confidence >= 0.8
+            ? 'needs_review'
+            : 'low_confidence_review';
 
         await prisma.visualCase.update({
           where: { id: c.id },
@@ -368,10 +364,12 @@ processingRouter.post('/processing/classify', async (req, res) => {
             mediaType: result.media_type,
             contentType: result.content_type,
             discipline: result.discipline,
-            visualStyle: result.visual_style,
+            technicalMethod: result.technical_method,
             composition: result.composition,
             colorTone: result.color_tone,
             useCase: JSON.stringify(result.use_case),
+            functionalPurpose: result.functional_purpose || undefined,
+            distributionMedium: result.distribution_medium || undefined,
             aiSummary: result.ai_summary,
             caseTitle: result.case_title,
             borrowablePoints: JSON.stringify(result.borrowable_points),
@@ -422,7 +420,7 @@ processingRouter.post('/processing/reclassify-media-type', async (req, res) => {
       });
     } else {
       cases = await prisma.visualCase.findMany({
-        where: { mediaType: '不确定', sourceDomain: 'www.nature.com', visualStyle: '顶刊封面', imageUrl: { not: '' } },
+        where: { mediaType: '不确定', sourceDomain: 'www.nature.com', technicalMethod: '绘设', imageUrl: { not: '' } },
         select: {
           id: true, imagePath: true, thumbnailPath: true, imageUrl: true,
           ocrText: true, pageTitle: true, contextText: true,

@@ -25,6 +25,14 @@ const HIGH_VALUE_HOSTS = [
   'images-assets.nasa.gov',
   'images.nasa.gov',
   'cds.cern.ch',
+  'www.asml.com',
+  'www.zeiss.com',
+  'www.nrel.gov',
+  'www.mpie.de',
+  'thermocalc.com',
+  'www.asminternational.org',
+  'www.basf.com',
+  'battery-materials.basf.com',
   'www.cas.cn',
   'news.sciencenet.cn',
   'www.tsinghua.edu.cn',
@@ -79,7 +87,7 @@ function containsAny(text: string, patterns: string[]): boolean {
 export function scoreImageCandidate(input: CollectionScoreInput): CollectionScoreResult {
   const { image } = input;
   const state = { score: 40, reasons: ['+40 base candidate'] };
-  const isEnterpriseSource = input.sourceType === 'enterprise';
+  const isEnterpriseSource = Boolean(input.sourceType?.includes('enterprise'));
   const joinedText = [
     image.src,
     image.alt,

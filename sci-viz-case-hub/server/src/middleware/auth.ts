@@ -16,7 +16,7 @@ declare global {
   }
 }
 
-const PUBLIC_PATHS = ['/api/auth/login', '/api/auth/check', '/api/health'];
+const PUBLIC_PATHS = ['/health', '/api/health'];
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction) {
   if (PUBLIC_PATHS.includes(req.path)) {

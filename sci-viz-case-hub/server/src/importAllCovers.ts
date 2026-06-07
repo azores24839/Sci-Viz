@@ -106,7 +106,7 @@ async function importJournal(key: string, cfg: JournalConfig) {
           mediaType: '不确定',
           contentType: '科普传播',
           discipline: cfg.discipline,
-          visualStyle: '顶刊封面',
+          technicalMethod: '绘设',
           aiSummary: (iss.description || '').slice(0, 500),
           reviewStatus: 'approved',
           rating: 5,

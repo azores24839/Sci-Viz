@@ -17,6 +17,9 @@ capturesRouter.post('/captures', upload.single('image_file'), async (req: Reques
     const pageTitle = toTrimmedString(req.body.page_title, 500);
     const contextText = toTrimmedString(req.body.context_text, 5000);
     const captureType = toTrimmedString(req.body.capture_type, 50) || 'image';
+    const videoUrl = toTrimmedString(req.body.video_url, 500) || '';
+    const videoPlatform = toTrimmedString(req.body.video_platform, 50) || '';
+    const videoDuration = parseInt(req.body.video_duration) || 0;
 
     let imageResult: SavedImage | null = null;
 
@@ -67,6 +70,9 @@ capturesRouter.post('/captures', upload.single('image_file'), async (req: Reques
         imageHash: imageResult?.imageHash || '',
         contextText,
         captureType,
+        videoUrl,
+        videoPlatform,
+        videoDuration,
         reviewStatus: 'pending_ai_analysis',
       },
     });

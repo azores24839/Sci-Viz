@@ -12,6 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SERVER_ROOT = path.resolve(__dirname, '..');
 const UPLOADS_ROOT = path.join(SERVER_ROOT, 'uploads');
+const OCR_BINARY = path.join(SERVER_ROOT, '.tmp', 'ocr_image');
 const OCR_SWIFT_SCRIPT = path.join(SERVER_ROOT, 'scripts', 'ocr_image.swift');
 
 function uploadPathToFilePath(webPath: string): string {
@@ -32,6 +33,14 @@ function cleanOcrText(text: string): string {
 }
 
 async function runLocalOcr(filePath: string) {
+  const binaryExists = await fs.access(OCR_BINARY).then(() => true).catch(() => false);
+  if (binaryExists) {
+    const { stdout } = await execFileAsync(OCR_BINARY, [filePath], {
+      maxBuffer: 1024 * 1024 * 4,
+      timeout: 30000,
+    });
+    return cleanOcrText(stdout);
+  }
   const { stdout } = await execFileAsync('swift', [OCR_SWIFT_SCRIPT, filePath], {
     maxBuffer: 1024 * 1024 * 4,
     timeout: 30000,
@@ -113,7 +122,7 @@ async function main() {
     '说明：本轮只调用本机 Apple Vision OCR，不调用云 OCR 或外部视觉 API。',
   ];
 
-  const reportPath = path.resolve(process.cwd(), '..', 'docs', 'local-ocr-missing-report-2026-05-31.md');
+  const reportPath = path.resolve(process.cwd(), '..', 'docs', `local-ocr-missing-report-${startedAt.toISOString().slice(0,10)}.md`);
   await fs.writeFile(reportPath, `${lines.join('\n')}\n`);
   console.log(`Local OCR report written to ${reportPath}`);
 }

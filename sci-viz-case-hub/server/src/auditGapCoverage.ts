@@ -41,7 +41,7 @@ const directionWhere: Record<string, Prisma.VisualCaseWhereInput> = {
   },
 };
 
-async function groupByField(field: 'discipline' | 'contentType' | 'mediaType' | 'visualStyle' | 'sourceDomain') {
+async function groupByField(field: 'discipline' | 'contentType' | 'mediaType' | 'technicalMethod' | 'sourceDomain') {
   return prisma.visualCase.groupBy({
     by: [field],
     where: gapWhere,
@@ -50,10 +50,9 @@ async function groupByField(field: 'discipline' | 'contentType' | 'mediaType' | 
   });
 }
 
-function tableForGroup(field: string, rows: Array<Record<string, unknown> & { _count: { id: number } }>) {
+function tableForGroup(field: string, rows: Array<Record<string, unknown> & { _count: { id: number } }>, label?: string) {
   return [
-    `### ${field}`,
-    '',
+    `### ${label || field}`,
     '| 值 | 数量 |',
     '|---|---:|',
     ...rows.map(row => `|${String(row[field] || '(空)').replace(/\|/g, '/')}|${row._count.id}|`),
@@ -73,7 +72,7 @@ async function candidateRows(direction: string) {
       discipline: true,
       mediaType: true,
       contentType: true,
-      visualStyle: true,
+      technicalMethod: true,
       collectionScore: true,
       reviewStatus: true,
     },
@@ -88,7 +87,7 @@ async function candidateRows(direction: string) {
     '|---|---|---|---|---|---|---:|---|',
     ...rows.map(row => {
       const title = (row.caseTitle || row.pageTitle || row.id).replace(/\|/g, '/').slice(0, 80);
-      return `|${title}|${row.discipline || ''}|${row.mediaType || ''}|${row.contentType || ''}|${row.visualStyle || ''}|${row.sourceDomain}|${row.collectionScore}|${row.reviewStatus}|`;
+      return `|${title}|${row.discipline || ''}|${row.mediaType || ''}|${row.contentType || ''}|${row.technicalMethod || ''}|${row.sourceDomain}|${row.collectionScore}|${row.reviewStatus}|`;
     }),
     '',
   ];
@@ -101,7 +100,7 @@ async function main() {
   const disciplineGroups = await groupByField('discipline');
   const contentGroups = await groupByField('contentType');
   const mediaGroups = await groupByField('mediaType');
-  const styleGroups = await groupByField('visualStyle');
+  const styleGroups = await groupByField('technicalMethod');
 
   const lines = [
     '# 国际非 Nature 补缺覆盖审计',
@@ -116,7 +115,7 @@ async function main() {
     ...tableForGroup('discipline', disciplineGroups),
     ...tableForGroup('contentType', contentGroups),
     ...tableForGroup('mediaType', mediaGroups),
-    ...tableForGroup('visualStyle', styleGroups),
+    ...tableForGroup('technicalMethod', styleGroups, '技术手段'),
     '## 高价值候选案例',
     '',
     ...await candidateRows('医学'),

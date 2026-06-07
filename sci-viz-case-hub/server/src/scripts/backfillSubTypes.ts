@@ -10,37 +10,47 @@ interface BackfillStats {
 function inferFunctionalPurpose(
   mediaType: string,
   contentType: string,
-  visualStyle: string
+  technicalMethod: string,
+  sourceDomain: string
 ): string {
   const ct = contentType.trim();
-  const vs = visualStyle.trim();
+  const tm = technicalMethod.trim();
+  const mt = mediaType.trim();
+  const sd = sourceDomain.trim().toLowerCase();
 
-  // Priority 1: visualStyle
-  if (vs === '顶刊封面') return '传播';
-  if (vs === '商业宣传') return '传播';
-  if (vs === '教学解释') return '解释';
-
-  // Priority 2: contentType (signal-heavy)
+  // Priority 1: contentType (strongest signal for function)
   if (ct === '科普传播') return '传播';
-  if (ct === '微观样本') return '数据';
-  if (ct === '数据结果') return '数据';
   if (ct === '机制模型') return '解释';
-
-  // Priority 3: contentType (observational)
-  if (ct === '单人肖像') return '记录';
-  if (ct === '群体肖像') return '记录';
-  if (ct === '绘画肖像') return '记录';
+  if (ct === '数据结果') return '数据';
+  if (ct === '微观样本') return '数据';
+  if (ct === '单人肖像' || ct === '群体肖像' || ct === '绘画肖像') return '记录';
   if (ct === '团队场景') return '记录';
   if (ct === '实验过程') return '记录';
   if (ct === '实验设备') return '记录';
   if (ct === '空间环境') return '记录';
 
-  // Priority 4: visualStyle
-  if (vs === '纪实') return '记录';
-  if (vs === '艺术化') return '传播';
-  if (vs === '科技') return '展示';
-  if (vs === '极简') return '展示';
-  if (vs === '人文') return '记录';
+  // Priority 2: mediaType + sourceDomain (Nature covers → 传播/展示)
+  if (sd.includes('nature.com')) {
+    if (mt === '3D渲染') return '展示';
+    if (mt === '数据可视化') return '数据';
+    if (mt === '信息图') return '解释';
+    return '传播';
+  }
+
+  // Priority 3: technicalMethod with nuance (NOT blanket mapping)
+  if (tm === '数据') return '数据';
+  if (tm === '成像') return '数据';
+  if (tm === '生成') return '展示';
+
+  // Priority 4: mediaType fallback
+  if (mt === '数据可视化') return '数据';
+  if (mt === '3D渲染') return '展示';
+  if (mt === '信息图') return '解释';
+  if (mt === '显微图') return '数据';
+  if (mt === '手绘图') return '解释';
+
+  // Photography: depends on context
+  if (tm === '拍摄' || mt === '摄影') return '记录';
 
   return '不确定';
 }
@@ -48,16 +58,24 @@ function inferFunctionalPurpose(
 function inferDistributionMedium(
   mediaType: string,
   sourceDomain: string,
-  visualStyle: string
+  technicalMethod: string,
+  captureType: string,
+  videoUrl: string
 ): string {
   const mt = mediaType.trim();
   const sd = sourceDomain.trim().toLowerCase();
-  const vs = visualStyle.trim();
+  const cap = captureType.trim();
+  const vu = videoUrl.trim();
 
-  if (mt === '视频') return '视频';
-  if (mt === '信息图' && sd.includes('nature.com')) return '图组';
-  if (mt === '数据可视化' && sd.includes('nature.com')) return '图组';
-  if (mt === '3D渲染' && vs === '顶刊封面') return '静图';
+  if (cap === 'video' || vu) return '视频';
+
+  // Information graphics and data visualization from Nature are typically multi-panel figures
+  if (sd.includes('nature.com')) {
+    if (mt === '信息图' || mt === '数据可视化') return '图组';
+  }
+
+  // Information graphics are typically image sets
+  if (mt === '信息图') return '图组';
 
   return '静图';
 }
@@ -65,15 +83,15 @@ function inferDistributionMedium(
 function inferMediaSubType(
   mediaType: string,
   discipline: string,
-  visualStyle: string
+  technicalMethod: string
 ): string {
   const mt = mediaType.trim();
-  const vs = visualStyle.trim();
+  const tm = technicalMethod.trim();
   const d = discipline.trim();
 
   switch (mt) {
     case '3D渲染':
-      if (vs === '顶刊封面') return '3D机制图';
+      if (tm === '绘设') return '3D机制图';
       if (['材料', '工程', '物理'].includes(d)) return '3D机制图';
       return '3D产品渲染';
     case '摄影':
@@ -88,8 +106,6 @@ function inferMediaSubType(
       return '科学插画';
     case '混合媒介':
       return '';
-    case '视频':
-      return '纪实摄影';
     case 'PDF/文档':
       return '';
     case '不确定':
@@ -126,9 +142,11 @@ async function main() {
       id: true,
       mediaType: true,
       contentType: true,
-      visualStyle: true,
+      technicalMethod: true,
       discipline: true,
       sourceDomain: true,
+      captureType: true,
+      videoUrl: true,
       functionalPurpose: true,
       distributionMedium: true,
       mediaSubType: true,
@@ -175,7 +193,8 @@ async function main() {
       const fp = inferFunctionalPurpose(
         entry.mediaType,
         entry.contentType,
-        entry.visualStyle
+        entry.technicalMethod,
+        entry.sourceDomain || ''
       );
       data.functionalPurpose = fp;
       stats.functionalPurpose.updated++;
@@ -191,7 +210,9 @@ async function main() {
       const dm = inferDistributionMedium(
         entry.mediaType,
         entry.sourceDomain || '',
-        entry.visualStyle
+        entry.technicalMethod,
+        entry.captureType || '',
+        entry.videoUrl || ''
       );
       data.distributionMedium = dm;
       stats.distributionMedium.updated++;
@@ -207,7 +228,7 @@ async function main() {
       const mst = inferMediaSubType(
         entry.mediaType,
         entry.discipline || '',
-        entry.visualStyle
+        entry.technicalMethod
       );
       if (mst) {
         data.mediaSubType = mst;

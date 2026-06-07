@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { prisma } from './prisma.js';
+import { getVisionConfig, getVisionHeaders } from './services/visionConfig.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,17 +12,9 @@ const SERVER_ROOT = path.join(__dirname, '..');
 const REPO_ROOT = path.join(__dirname, '..', '..', '..');
 const OCR_BINARY = path.join(SERVER_ROOT, '.tmp', 'ocr_image');
 const OCR_SWIFT_SCRIPT = path.join(SERVER_ROOT, 'scripts', 'ocr_image.swift');
-const MODEL = process.env.OCR_VISION_MODEL || 'qwen/qwen3-vl-8b-instruct';
 const LIMIT = Number.parseInt(process.env.LIMIT || '0', 10);
 const DEBUG = process.env.DEBUG_OCR === '1';
 const execFileAsync = promisify(execFile);
-
-function getVisionConfig() {
-  return {
-    url: process.env.VISION_API_URL || '',
-    key: process.env.VISION_API_KEY || '',
-  };
-}
 
 function mimeType(filePath: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase() || '';
@@ -98,12 +91,9 @@ async function ocrImage(imageInput: string, context: string): Promise<string> {
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${key}`,
-    },
+    headers: getVisionHeaders(key),
     body: JSON.stringify({
-      model: MODEL,
+      model: getVisionConfig().ocrModel,
       messages: [
         {
           role: 'system',

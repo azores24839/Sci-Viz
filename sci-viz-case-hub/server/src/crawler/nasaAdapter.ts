@@ -4,7 +4,7 @@ import { findDuplicateCase } from '../services/dedupe.js';
 import { runAnalysis } from '../services/analysisRunner.js';
 
 const NASA_SEARCH_URL = 'https://images-api.nasa.gov/search';
-const NASA_KEYWORDS = ['space', 'telescope', 'galaxy', 'experiment', 'laboratory'];
+const NASA_KEYWORDS = ['space', 'telescope', 'galaxy', 'experiment', 'laboratory', 'earth science', 'microscopy', 'satellite', 'climate', 'physics'];
 
 interface NasaItem {
   data: Array<{

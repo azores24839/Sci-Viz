@@ -711,7 +711,7 @@ export default function ReviewPage() {
                             ['呈现方式', c.mediaType],
                             ['内容类型', normalizeContentTypeLabel(c.contentType)],
                             ['学科', c.discipline],
-                            ['视觉风格', c.visualStyle],
+                            ['技术手段', c.technicalMethod],
                             ['构图', c.composition],
                             ['色调', c.colorTone],
                           ].map(([label, value]) => (

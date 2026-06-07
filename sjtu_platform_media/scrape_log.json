@@ -1,0 +1,98 @@
+{
+  "transmed": {
+    "name": "转化医学国家重大科技基础设施",
+    "url": "https://transmed.sjtu.edu.cn/#/",
+    "images": 0,
+    "videos": 0,
+    "pages": 2,
+    "errors": []
+  },
+  "oe": {
+    "name": "海洋工程国家重点实验室",
+    "url": "http://oe.sjtu.edu.cn/",
+    "images": 101,
+    "videos": 0,
+    "pages": 5,
+    "errors": []
+  },
+  "msv": {
+    "name": "机械系统与振动国家重点实验室",
+    "url": "http://msv.sjtu.edu.cn/",
+    "images": 122,
+    "videos": 1,
+    "pages": 32,
+    "errors": []
+  },
+  "sklcm": {
+    "name": "金属基复合材料国家重点实验室",
+    "url": "http://sklcm.sjtu.edu.cn/",
+    "images": 140,
+    "videos": 0,
+    "pages": 11,
+    "errors": []
+  },
+  "loct": {
+    "name": "区域光纤通信网与新型光通信系统国家重点实验室",
+    "url": "http://loct.sjtu.edu.cn/",
+    "images": 80,
+    "videos": 3,
+    "pages": 32,
+    "errors": []
+  },
+  "rjh_genome": {
+    "name": "医学基因组学国家重点实验室",
+    "url": "http://www.rjh.com.cn/pages/Yixuejiyin/index.shtml",
+    "images": 0,
+    "videos": 0,
+    "pages": 0,
+    "errors": [
+      "首页失败: 404 Client Error: Not Found for url: https://www.rjh.com.cn:443/pages/Yixuejiyin/index.shtml"
+    ]
+  },
+  "skmml": {
+    "name": "微生物代谢国家重点实验室",
+    "url": "http://skmml.sjtu.edu.cn/",
+    "images": 457,
+    "videos": 0,
+    "pages": 30,
+    "errors": [
+      "子页面失败 http://skmml.sjtu.edu.cn/training/excellent.html.html: 404 Client Error: Not Found for url: https://skmml.sjtu.edu.cn/training/excellent.html.html"
+    ]
+  },
+  "cmic": {
+    "name": "未来媒体网络协同创新中心",
+    "url": "http://cmic.sjtu.edu.cn",
+    "images": 0,
+    "videos": 0,
+    "pages": 2,
+    "errors": []
+  },
+  "cisse": {
+    "name": "高新船舶与深海开发装备协同创新中心",
+    "url": "http://cisse.sjtu.edu.cn/",
+    "images": 0,
+    "videos": 0,
+    "pages": 0,
+    "errors": [
+      "首页失败: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))"
+    ]
+  },
+  "inen": {
+    "name": "国家双创示范基地（双创推进办公室）",
+    "url": "http://inen.sjtu.edu.cn/",
+    "images": 0,
+    "videos": 0,
+    "pages": 0,
+    "errors": [
+      "首页失败: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))"
+    ]
+  },
+  "design": {
+    "name": "创新设计中心",
+    "url": "https://design.sjtu.edu.cn/",
+    "images": 533,
+    "videos": 0,
+    "pages": 32,
+    "errors": []
+  }
+}

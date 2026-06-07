@@ -127,7 +127,7 @@ async function approveCompleteCases() {
       discipline: { notIn: ['', '不确定'] },
       mediaType: { notIn: ['', '不确定'] },
       contentType: { notIn: ['', '不确定'] },
-      visualStyle: { notIn: ['', '不确定'] },
+      technicalMethod: { notIn: ['', '不确定'] },
     },
     data: { reviewStatus: 'approved' },
   });
@@ -152,7 +152,7 @@ async function finalCounts() {
           { discipline: { in: ['', '不确定'] } },
           { mediaType: { in: ['', '不确定'] } },
           { contentType: { in: ['', '不确定'] } },
-          { visualStyle: { in: ['', '不确定'] } },
+          { technicalMethod: { in: ['', '不确定'] } },
         ],
       },
     }),

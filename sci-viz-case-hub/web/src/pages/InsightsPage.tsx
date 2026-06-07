@@ -12,7 +12,7 @@ const DEFAULT_FILTERS: InsightFilters = {
   mediaType: '',
   contentType: '',
   discipline: '',
-  visualStyle: '',
+  technicalMethod: '',
   composition: '',
   colorTone: '',
   functionalPurpose: '',
@@ -456,7 +456,7 @@ const DIMENSION_FILTER_MAP: Record<string, keyof InsightFilters> = {
   mediaType: 'mediaType',
   contentType: 'contentType',
   discipline: 'discipline',
-  visualStyle: 'visualStyle',
+  technicalMethod: 'technicalMethod',
   composition: 'composition',
   colorTone: 'colorTone',
   functionalPurpose: 'functionalPurpose',
@@ -688,15 +688,15 @@ export default function InsightsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
-  const [rowDim, setRowDim] = useState('discipline');
-  const [colDim, setColDim] = useState('mediaType');
+  const [rowDim, setRowDim] = useState('functionalPurpose');
+  const [colDim, setColDim] = useState('technicalMethod');
   const [exported, setExported] = useState(false);
   const [viewMode, setViewMode] = useState<'overview' | 'spectrum'>('overview');
   const [spectrum, setSpectrum] = useState<ThreeAxisSpectrum | null>(null);
   const [spectrumLoading, setSpectrumLoading] = useState(false);
   const [specX, setSpecX] = useState('functionalPurpose');
-  const [specY, setSpecY] = useState('mediaType');
-  const [specZ, setSpecZ] = useState('discipline');
+  const [specY, setSpecY] = useState('technicalMethod');
+  const [specZ, setSpecZ] = useState('distributionMedium');
   const [specSliceZ, setSpecSliceZ] = useState('');
   const sourceDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -849,11 +849,11 @@ export default function InsightsPage() {
 
   const DIM_CHOICES = [
     { key: 'functionalPurpose', label: '功能用途' },
-    { key: 'mediaType', label: '呈现方式' },
-    { key: 'discipline', label: '学科' },
-    { key: 'visualStyle', label: '视觉风格' },
-    { key: 'contentType', label: '内容类型' },
     { key: 'distributionMedium', label: '传播媒介' },
+    { key: 'technicalMethod', label: '技术手段' },
+    { key: 'discipline', label: '学科' },
+    { key: 'mediaType', label: '呈现方式' },
+    { key: 'contentType', label: '内容类型' },
   ];
 
   const tabStyle = (active: boolean): CSSProperties => ({
@@ -935,12 +935,16 @@ export default function InsightsPage() {
         }}>
           <FieldSelect label="学科" value={filters.discipline} emptyLabel="全部学科" filterKey="discipline"
             options={filterOptions?.discipline || []} onChange={(value) => setFilter('discipline', value)} />
-          <FieldSelect label="呈现方式" value={filters.mediaType} emptyLabel="全部呈现方式" filterKey="mediaType"
-            options={filterOptions?.mediaType || []} onChange={(value) => setFilter('mediaType', value)} />
-          <FieldSelect label="视觉风格" value={filters.visualStyle} emptyLabel="全部视觉风格" filterKey="visualStyle"
-            options={filterOptions?.visualStyle || []} onChange={(value) => setFilter('visualStyle', value)} />
+          <FieldSelect label="功能用途" value={filters.functionalPurpose} emptyLabel="全部功能用途" filterKey="functionalPurpose"
+            options={filterOptions?.functionalPurpose || []} onChange={(value) => setFilter('functionalPurpose', value)} />
+          <FieldSelect label="传播媒介" value={filters.distributionMedium} emptyLabel="全部传播媒介" filterKey="distributionMedium"
+            options={filterOptions?.distributionMedium || []} onChange={(value) => setFilter('distributionMedium', value)} />
+          <FieldSelect label="技术手段" value={filters.technicalMethod} emptyLabel="全部技术手段" filterKey="technicalMethod"
+            options={filterOptions?.technicalMethod || []} onChange={(value) => setFilter('technicalMethod', value)} />
           <FieldSelect label="内容类型" value={filters.contentType} emptyLabel="全部内容类型" filterKey="contentType"
             options={filterOptions?.contentType || []} onChange={(value) => setFilter('contentType', value)} />
+          <FieldSelect label="呈现方式" value={filters.mediaType} emptyLabel="全部呈现方式" filterKey="mediaType"
+            options={filterOptions?.mediaType || []} onChange={(value) => setFilter('mediaType', value)} />
           <FieldSelect label="构图" value={filters.composition} emptyLabel="全部构图" filterKey="composition"
             options={filterOptions?.composition || []} onChange={(value) => setFilter('composition', value)} />
           <FieldSelect label="色调" value={filters.colorTone} emptyLabel="全部色调" filterKey="colorTone"
@@ -974,7 +978,7 @@ export default function InsightsPage() {
         <MetricCard label="来源数量" value={compactNumber(summary?.sourceCount || 0)} hint="当前样本覆盖来源" />
         <MetricCard label="主要呈现方式" value={summary?.leadingMediaType || '-'} />
         <MetricCard label="主要学科" value={summary?.leadingDiscipline || '-'} />
-        <MetricCard label="主要视觉风格" value={summary?.leadingVisualStyle || '-'} />
+        <MetricCard label="主要技术手段" value={summary?.leadingTechnicalMethod || '-'} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 18, marginBottom: 18 }}>

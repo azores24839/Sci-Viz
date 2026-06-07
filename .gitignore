@@ -4,3 +4,8 @@ journal_covers/
 **/.playwright-cli/*.log
 **/.playwright-cli/*.yml
 .DS_Store
+# 密钥和敏感配置
+.env
+.env.*
+*.swp
+*.save

@@ -68,11 +68,15 @@ function inferMediaType(c: VisualCase, text: string, contentType: string) {
   return '摄影';
 }
 
-function inferVisualStyle(c: VisualCase, text: string) {
-  if (c.sourceDomain.includes('nature.com')) return '顶刊封面';
-  if (/示意|教学|diagram|schematic|explainer/i.test(text)) return '教学解释';
-  if (/研究人员|团队|现场|ship|field|researcher|team/i.test(text)) return '纪实';
-  return '科技';
+function inferTechnicalMethod(c: VisualCase, text: string) {
+  if (c.sourceDomain.includes('nature.com')) return '绘设';
+  if (/示意|教学|diagram|schematic|explainer/i.test(text)) return '绘设';
+  if (/显微|micro|microscopy|cell|protein|crystal/i.test(text)) return '成像';
+  if (/研究人员|团队|现场|ship|field|researcher|team|photo|photography/i.test(text)) return '拍摄';
+  if (/3D|渲染|render|modeling|simulation/i.test(text)) return '渲染';
+  if (/数据|图表|chart|graph|data|stats/i.test(text)) return '数据';
+  if (/生成|AI|machine learning|neural/i.test(text)) return '生成';
+  return '绘设';
 }
 
 function fallbackTitle(c: VisualCase) {
@@ -89,7 +93,7 @@ async function main() {
         { discipline: { in: ['', '不确定'] } },
         { mediaType: { in: ['', '不确定'] } },
         { contentType: { in: ['', '不确定'] } },
-        { visualStyle: { in: ['', '不确定'] } },
+        { technicalMethod: { in: ['', '不确定'] } },
       ],
     },
   });
@@ -105,7 +109,7 @@ async function main() {
       discipline: needsValue(c.discipline) ? inferDiscipline(c, text) : c.discipline,
       mediaType: needsValue(c.mediaType) ? inferMediaType(c, text, contentType) : c.mediaType,
       contentType,
-      visualStyle: needsValue(c.visualStyle) ? inferVisualStyle(c, text) : c.visualStyle,
+      technicalMethod: needsValue(c.technicalMethod) ? inferTechnicalMethod(c, text) : c.technicalMethod,
       reviewStatus: 'approved',
       manualNotes: [
         c.manualNotes,
@@ -125,7 +129,7 @@ async function main() {
         { discipline: { in: ['', '不确定'] } },
         { mediaType: { in: ['', '不确定'] } },
         { contentType: { in: ['', '不确定'] } },
-        { visualStyle: { in: ['', '不确定'] } },
+        { technicalMethod: { in: ['', '不确定'] } },
       ],
     },
   });

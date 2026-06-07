@@ -9,6 +9,9 @@ export interface VisualCase {
   imagePath: string;
   thumbnailPath: string;
   imageHash: string;
+  videoUrl: string;
+  videoPlatform: string;
+  videoDuration: number;
   contextText: string;
   ocrText: string;
   captureType: string;
@@ -18,7 +21,7 @@ export interface VisualCase {
   mediaType: string;
   contentType: string;
   discipline: string;
-  visualStyle: string;
+  technicalMethod: string;
   composition: string;
   colorTone: string;
   useCase: string;
@@ -95,10 +98,11 @@ export interface DimensionOption {
 export interface InsightFilters {
   sourceDomain: string;
   sourceName: string;
+  enterpriseCompany?: string;
   mediaType: string;
   contentType: string;
   discipline: string;
-  visualStyle: string;
+  technicalMethod: string;
   composition: string;
   colorTone: string;
   functionalPurpose: string;
@@ -114,6 +118,7 @@ export interface InsightSummary {
   leadingMediaType: string;
   leadingDiscipline: string;
   leadingVisualStyle: string;
+  leadingTechnicalMethod: string;
   distributions: Record<string, InsightDistributionItem[]>;
   crossMatrix: CrossMatrix;
   ratingDistribution: InsightDistributionItem[];
@@ -155,7 +160,7 @@ export interface NetworkTestResponse {
 
 export interface CollectionKpiProgress {
   id: number;
-  dimension: 'mediaType' | 'contentType' | 'discipline' | 'visualStyle' | 'functionalPurpose' | 'distributionMedium';
+  dimension: 'mediaType' | 'contentType' | 'discipline' | 'technicalMethod' | 'functionalPurpose' | 'distributionMedium';
   category: string;
   targetCount: number;
   currentCount: number;
@@ -195,9 +200,8 @@ export const DISCIPLINES = [
   '化学', '信息科学', '环境科学', '综合交叉', '不确定',
 ] as const;
 
-export const VISUAL_STYLES = [
-  '纪实', '科技', '极简', '人文', '艺术化',
-  '教学解释', '商业宣传', '顶刊封面', '不确定',
+export const TECHNICAL_METHODS = [
+  '拍摄', '成像', '绘设', '数据', '渲染', '生成',
 ] as const;
 
 export const FUNCTIONAL_PURPOSES = [
@@ -221,6 +225,7 @@ export const CAPTURE_TYPE_LABELS: Record<string, string> = {
   screenshot: '截图',
   page_selection: '选中文字',
   crawler: '自动采集',
+  video: '视频',
 };
 
 export const SOURCE_TYPE_OPTIONS = [
@@ -238,6 +243,9 @@ export interface CrawlSource {
   name: string;
   url: string;
   sourceDomain?: string;
+  enterpriseCompany?: string;
+  enterpriseCompanyKey?: string;
+  sourcePageType?: string;
   category: string;
   sourceType: string;
   adapterType: string;
@@ -270,6 +278,7 @@ export interface CrawlJob {
 }
 
 export const CATEGORY_LABELS: Record<string, string> = {
+  '00-CHANGXING': '长兴海洋实验室',
   'A': '高校科研新闻',
   'B': '国家实验室/机构',
   'C': '官方图库/API',
@@ -283,6 +292,9 @@ export const CATEGORY_LABELS: Record<string, string> = {
   'K': '国家重点机构',
   'L': '国际补缺来源',
   'ENT': '头部企业',
+  'SJTU': '交大院系来源',
+  'SJTU-VIS': '交大工科对标来源',
+  'SJTU-NATLAB': '国家级科研平台',
 };
 
 export type ComparisonGroupId = 'sjtu' | 'domestic' | 'international' | 'enterprise';
@@ -301,7 +313,11 @@ export interface ComparisonSample {
   sourceDomain: string;
   mediaType: string;
   contentType: string;
-  visualStyle: string;
+  discipline?: string;
+  technicalMethod: string;
+  functionalPurpose?: string;
+  distributionMedium?: string;
+  rating?: number;
 }
 
 export interface ComparisonGroup {
@@ -432,4 +448,14 @@ export const SOURCE_TYPE_LABELS: Record<string, string> = {
   'curated_open_media_gallery': '精选媒体',
   'science_news_aggregator': '新闻聚合',
   'science_magazine': '科学杂志',
+  'national_lab': '国家实验室',
+  'major_infrastructure': '重大基础设施',
+  'engineering_center': '工程研究中心',
+  'engineering_lab': '工程实验室',
+  'rd_center': '研发中心',
+  'collaborative_innovation': '协同创新中心',
+  'entrepreneurship_base': '双创基地',
+  'international_cooperation': '国际合作基地',
+  'who_center': 'WHO合作中心',
+  'no_independent_site': '无独立网站',
 };

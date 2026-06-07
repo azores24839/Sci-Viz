@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../prisma.js';
 import { discoverSourceArticles, EASY_STATIC_SOURCE_NAMES, enqueueSourceCrawlJob } from '../crawler/sourceJobRunner.js';
 import { clampInt, normalizeHttpUrl, toTrimmedString } from '../utils/httpSafety.js';
+import { classifyEnterpriseSource } from '../services/enterpriseTaxonomy.js';
 
 export const poolRouter = Router();
 
@@ -53,9 +54,13 @@ async function countCasesForSource(source: { name: string; url: string }) {
 
 poolRouter.get('/pool/sources', async (req: Request, res: Response) => {
   try {
-    const { category } = req.query;
+    const { category, includeDisabled } = req.query;
+    const where: Record<string, unknown> = {};
+    if (category && typeof category === 'string') where.category = category;
+    if (includeDisabled !== 'true') where.enabled = true;
+
     const sources = await prisma.crawlSource.findMany({
-      where: category && typeof category === 'string' ? { category } : undefined,
+      where,
       orderBy: { category: 'asc' },
       include: {
         jobs: {
@@ -69,9 +74,13 @@ poolRouter.get('/pool/sources', async (req: Request, res: Response) => {
       let hostname = '';
       try { hostname = new URL(source.url).hostname; } catch { /* */ }
       const existingCases = await countCasesForSource(source);
+      const enterpriseTaxonomy = classifyEnterpriseSource(source);
       return {
         ...source,
         sourceDomain: hostname,
+        enterpriseCompany: enterpriseTaxonomy?.companyName || '',
+        enterpriseCompanyKey: enterpriseTaxonomy?.companyKey || '',
+        sourcePageType: enterpriseTaxonomy?.sourcePageType || '',
         lastJob: source.jobs[0] || null,
         existingCases,
         crawlAvailability: classifyAvailability(source, existingCases),

@@ -2,13 +2,19 @@ import { Router, Request, Response } from 'express';
 import type { Prisma, VisualCase } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { toTrimmedString } from '../utils/httpSafety.js';
-import { remapImagePath } from '../services/oss.js';
+import {
+  getDisciplineConfig,
+  getAllDisciplineConfigs,
+  DISCIPLINES,
+} from '../services/disciplineConfig.js';
+import type { DisciplineConfig } from '../services/disciplineConfig.js';
+import { classifyEnterpriseCase, makeEnterpriseCompanyWhere } from '../services/enterpriseTaxonomy.js';
 
 export const insightsRouter = Router();
 
 type CaseInsightFields = Pick<
   VisualCase,
-  'sourceDomain' | 'mediaType' | 'contentType' | 'discipline' | 'visualStyle' | 'composition' | 'colorTone' | 'functionalPurpose' | 'distributionMedium' | 'rating' | 'reviewStatus'
+  'sourceDomain' | 'mediaType' | 'contentType' | 'discipline' | 'technicalMethod' | 'composition' | 'colorTone' | 'functionalPurpose' | 'distributionMedium' | 'rating' | 'reviewStatus'
 >;
 
 type DistributionItem = {
@@ -38,29 +44,36 @@ type CrossMatrix = {
   rows: CrossMatrixRow[];
 };
 
-type FilterKey = 'sourceDomain' | 'sourceName' | 'mediaType' | 'contentType' | 'discipline' | 'visualStyle' | 'composition' | 'colorTone' | 'functionalPurpose' | 'distributionMedium' | 'reviewStatus';
+type FilterKey = 'sourceDomain' | 'sourceName' | 'enterpriseCompany' | 'mediaType' | 'contentType' | 'discipline' | 'technicalMethod' | 'composition' | 'colorTone' | 'functionalPurpose' | 'distributionMedium' | 'reviewStatus';
 
-type DimensionKey = 'mediaType' | 'contentType' | 'discipline' | 'visualStyle' | 'composition' | 'colorTone' | 'functionalPurpose' | 'distributionMedium';
+type DimensionKey = 'mediaType' | 'contentType' | 'discipline' | 'technicalMethod' | 'composition' | 'colorTone' | 'functionalPurpose' | 'distributionMedium';
+type ComparisonDimensionKey = 'functionalPurpose' | 'distributionMedium' | 'technicalMethod';
 
 const DIMENSION_LABELS: Record<DimensionKey, string> = {
   mediaType: '呈现方式',
   contentType: '内容类型',
   discipline: '学科',
-  visualStyle: '视觉风格',
+  technicalMethod: '技术手段',
   composition: '构图',
   colorTone: '色调',
   functionalPurpose: '功能用途',
   distributionMedium: '传播媒介',
 };
 
-const DIMENSION_KEYS: DimensionKey[] = ['mediaType', 'contentType', 'discipline', 'visualStyle', 'composition', 'colorTone', 'functionalPurpose', 'distributionMedium'];
+const COMPARISON_DIMENSION_LABELS: Record<ComparisonDimensionKey, string> = {
+  functionalPurpose: '功能维度',
+  distributionMedium: '媒介维度',
+  technicalMethod: '技术维度',
+};
 
-const FIELD_QUERY_ALIASES: Record<Exclude<FilterKey, 'sourceName'>, string[]> = {
+const DIMENSION_KEYS: DimensionKey[] = ['mediaType', 'contentType', 'discipline', 'technicalMethod', 'composition', 'colorTone', 'functionalPurpose', 'distributionMedium'];
+
+const FIELD_QUERY_ALIASES: Record<Exclude<FilterKey, 'sourceName' | 'enterpriseCompany'>, string[]> = {
   sourceDomain: ['sourceDomain', 'source_domain'],
   mediaType: ['mediaType', 'media_type'],
   contentType: ['contentType', 'content_type'],
   discipline: ['discipline'],
-  visualStyle: ['visualStyle', 'visual_style'],
+  technicalMethod: ['technicalMethod', 'technical_method'],
   composition: ['composition'],
   colorTone: ['colorTone', 'color_tone'],
   functionalPurpose: ['functionalPurpose', 'functional_purpose'],
@@ -69,10 +82,11 @@ const FIELD_QUERY_ALIASES: Record<Exclude<FilterKey, 'sourceName'>, string[]> = 
 };
 
 const SOURCE_NAME_ALIASES = ['sourceName', 'source_name'];
+const ENTERPRISE_COMPANY_ALIASES = ['enterpriseCompany', 'enterprise_company'];
 const UNKNOWN_LABEL = '未标注';
 const LOW_SAMPLE_THRESHOLD = 20;
 
-const VALID_CROSS_DIMENSIONS: DimensionKey[] = ['mediaType', 'contentType', 'discipline', 'visualStyle', 'composition', 'colorTone', 'functionalPurpose', 'distributionMedium'];
+const VALID_CROSS_DIMENSIONS: DimensionKey[] = ['mediaType', 'contentType', 'discipline', 'technicalMethod', 'composition', 'colorTone', 'functionalPurpose', 'distributionMedium'];
 
 function splitValues(value: string): string[] {
   return value
@@ -113,7 +127,7 @@ function roundPercent(count: number, total: number): number {
 
 function addExactFilter(
   where: Prisma.VisualCaseWhereInput,
-  field: Exclude<FilterKey, 'sourceName'>,
+  field: Exclude<FilterKey, 'sourceName' | 'enterpriseCompany'>,
   rawValue: string,
 ) {
   const values = splitValues(rawValue);
@@ -166,7 +180,7 @@ async function buildWhere(query: Record<string, unknown>): Promise<Prisma.Visual
   const where: Prisma.VisualCaseWhereInput = {};
   const andClauses: Prisma.VisualCaseWhereInput[] = [];
 
-  for (const [field, aliases] of Object.entries(FIELD_QUERY_ALIASES) as Array<[Exclude<FilterKey, 'sourceName'>, string[]]>) {
+  for (const [field, aliases] of Object.entries(FIELD_QUERY_ALIASES) as Array<[Exclude<FilterKey, 'sourceName' | 'enterpriseCompany'>, string[]]>) {
     addExactFilter(where, field, readQueryValue(query, aliases));
   }
 
@@ -174,6 +188,11 @@ async function buildWhere(query: Record<string, unknown>): Promise<Prisma.Visual
   const sourceNames = splitValues(sourceNameValue);
   const sourceNameWhere = await makeSourceNameWhere(sourceNames);
   if (sourceNameWhere) andClauses.push(sourceNameWhere);
+
+  const enterpriseCompanyValue = readQueryValue(query, ENTERPRISE_COMPANY_ALIASES);
+  const enterpriseCompanies = splitValues(enterpriseCompanyValue);
+  const enterpriseCompanyWhere = makeEnterpriseCompanyWhere(enterpriseCompanies);
+  if (enterpriseCompanyWhere) andClauses.push(enterpriseCompanyWhere);
 
   if (andClauses.length > 0) {
     where.AND = andClauses;
@@ -234,6 +253,32 @@ async function makeSourceNameOptions(sources: Array<{ name: string; url: string 
   const total = filtered.reduce((sum, item) => sum + item.count, 0);
   return filtered
     .map(item => ({ ...item, percentage: roundPercent(item.count, total) }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'zh-CN'));
+}
+
+function makeEnterpriseCompanyOptions(cases: Array<Pick<VisualCase, 'sourceDomain' | 'sourceUrl' | 'userHint' | 'pageTitle' | 'caseTitle' | 'contextText'>>): DistributionItem[] {
+  const counts = new Map<string, number>();
+  for (const c of cases) {
+    const taxonomy = classifyEnterpriseCase(c);
+    if (!taxonomy) continue;
+    counts.set(taxonomy.companyName, (counts.get(taxonomy.companyName) || 0) + 1);
+  }
+  const total = [...counts.values()].reduce((sum, count) => sum + count, 0);
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count, percentage: roundPercent(count, total) }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'zh-CN'));
+}
+
+function makeEnterprisePageTypeOptions(cases: Array<Pick<VisualCase, 'sourceDomain' | 'sourceUrl' | 'userHint' | 'pageTitle' | 'caseTitle' | 'contextText'>>): DistributionItem[] {
+  const counts = new Map<string, number>();
+  for (const c of cases) {
+    const taxonomy = classifyEnterpriseCase(c);
+    if (!taxonomy) continue;
+    counts.set(taxonomy.sourcePageType, (counts.get(taxonomy.sourcePageType) || 0) + 1);
+  }
+  const total = [...counts.values()].reduce((sum, count) => sum + count, 0);
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count, percentage: roundPercent(count, total) }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'zh-CN'));
 }
 
@@ -317,10 +362,11 @@ function makeRatingDistribution(cases: CaseInsightFields[]): DistributionItem[] 
 function makeScopeLabel(filters: Record<FilterKey, string>): string {
   const parts: string[] = [];
   if (filters.sourceName) parts.push(`${splitValues(filters.sourceName).join('、')} 来源`);
+  else if (filters.enterpriseCompany) parts.push(`${splitValues(filters.enterpriseCompany).join('、')} 企业`);
   else if (filters.sourceDomain) parts.push(`${splitValues(filters.sourceDomain).join('、')} 来源`);
   if (filters.discipline) parts.push(`${splitValues(filters.discipline).join('、')} 学科`);
   if (filters.mediaType) parts.push(`${splitValues(filters.mediaType).join('、')} 呈现方式`);
-  if (filters.visualStyle) parts.push(`${splitValues(filters.visualStyle).join('、')} 风格`);
+  if (filters.technicalMethod) parts.push(`${splitValues(filters.technicalMethod).join('、')} 技术手段`);
   if (filters.contentType) parts.push(`${splitValues(filters.contentType).join('、')} 内容类型`);
   if (filters.composition) parts.push(`${splitValues(filters.composition).join('、')} 构图`);
   if (filters.colorTone) parts.push(`${splitValues(filters.colorTone).join('、')} 色调`);
@@ -335,7 +381,7 @@ function makeGeneratedInsights(args: {
   filters: Record<FilterKey, string>;
   media: DistributionItem[];
   discipline: DistributionItem[];
-  visualStyle: DistributionItem[];
+  technicalMethod: DistributionItem[];
   contentType: DistributionItem[];
   composition: DistributionItem[];
   colorTone: DistributionItem[];
@@ -343,7 +389,7 @@ function makeGeneratedInsights(args: {
   distributionMedium: DistributionItem[];
   rating: DistributionItem[];
 }): string[] {
-  const { totalCases, sourceCount, filters, media, discipline, visualStyle, contentType, composition, colorTone, functionalPurpose, distributionMedium, rating } = args;
+  const { totalCases, sourceCount, filters, media, discipline, technicalMethod, contentType, composition, colorTone, functionalPurpose, distributionMedium, rating } = args;
   const scope = makeScopeLabel(filters);
   const insights: string[] = [];
 
@@ -370,9 +416,9 @@ function makeGeneratedInsights(args: {
     insights.push(`基于当前样本库，${scope}中"${topDiscipline.label}"案例最多，占比 ${topDiscipline.percentage.toFixed(1)}%，后续可优先拆解该学科的视觉策略。`);
   }
 
-  const topStyle = topUseful(visualStyle);
+  const topStyle = topUseful(technicalMethod);
   if (topStyle) {
-    insights.push(`基于当前样本库，${scope}的视觉风格以"${topStyle.label}"为主，占比 ${topStyle.percentage.toFixed(1)}%。`);
+    insights.push(`基于当前样本库，${scope}的技术手段以"${topStyle.label}"为主，占比 ${topStyle.percentage.toFixed(1)}%。`);
   }
 
   const topContent = topUseful(contentType);
@@ -423,24 +469,31 @@ async function makeFilterOptions() {
         mediaType: true,
         contentType: true,
         discipline: true,
-        visualStyle: true,
+        technicalMethod: true,
         composition: true,
         colorTone: true,
         functionalPurpose: true,
         distributionMedium: true,
         reviewStatus: true,
+        sourceUrl: true,
+        userHint: true,
+        pageTitle: true,
+        caseTitle: true,
+        contextText: true,
       },
     }),
-    prisma.crawlSource.findMany({ select: { name: true, url: true } }),
+    prisma.crawlSource.findMany({ where: { enabled: true }, select: { name: true, url: true } }),
   ]);
 
   return {
     sourceDomain: makeFilterOption(cases.map(item => item.sourceDomain)),
     sourceName: await makeSourceNameOptions(crawlSources),
+    enterpriseCompany: makeEnterpriseCompanyOptions(cases),
+    enterprisePageType: makeEnterprisePageTypeOptions(cases),
     mediaType: makeFilterOption(cases.map(item => item.mediaType)),
     contentType: makeFilterOption(cases.map(item => item.contentType)),
     discipline: makeFilterOption(cases.map(item => item.discipline)),
-    visualStyle: makeFilterOption(cases.map(item => item.visualStyle)),
+    technicalMethod: makeFilterOption(cases.map(item => item.technicalMethod)),
     composition: makeFilterOption(cases.map(item => item.composition)),
     colorTone: makeFilterOption(cases.map(item => item.colorTone)),
     functionalPurpose: makeFilterOption(cases.map(item => item.functionalPurpose)),
@@ -464,10 +517,11 @@ insightsRouter.get('/insights/summary', async (req: Request, res: Response) => {
     const filters: Record<FilterKey, string> = {
       sourceDomain: readQueryValue(query, FIELD_QUERY_ALIASES.sourceDomain),
       sourceName: readQueryValue(query, SOURCE_NAME_ALIASES),
+      enterpriseCompany: readQueryValue(query, ENTERPRISE_COMPANY_ALIASES),
       mediaType: readQueryValue(query, FIELD_QUERY_ALIASES.mediaType),
       contentType: readQueryValue(query, FIELD_QUERY_ALIASES.contentType),
       discipline: readQueryValue(query, FIELD_QUERY_ALIASES.discipline),
-      visualStyle: readQueryValue(query, FIELD_QUERY_ALIASES.visualStyle),
+      technicalMethod: readQueryValue(query, FIELD_QUERY_ALIASES.technicalMethod),
       composition: readQueryValue(query, FIELD_QUERY_ALIASES.composition),
       colorTone: readQueryValue(query, FIELD_QUERY_ALIASES.colorTone),
       functionalPurpose: readQueryValue(query, FIELD_QUERY_ALIASES.functionalPurpose),
@@ -495,7 +549,7 @@ insightsRouter.get('/insights/summary', async (req: Request, res: Response) => {
           mediaType: true,
           contentType: true,
           discipline: true,
-          visualStyle: true,
+          technicalMethod: true,
           composition: true,
           colorTone: true,
           functionalPurpose: true,
@@ -507,15 +561,18 @@ insightsRouter.get('/insights/summary', async (req: Request, res: Response) => {
       makeFilterOptions(),
     ]);
 
+    const selectedCompanyCount = splitValues(filters.enterpriseCompany).length;
     const selectedSourceCount = splitValues(filters.sourceName).length;
     const sourceCount = selectedSourceCount > 0
       ? selectedSourceCount
+      : selectedCompanyCount > 0
+      ? selectedCompanyCount
       : new Set(cases.map(item => item.sourceDomain).filter(Boolean)).size;
 
     const distributions = {
       mediaType: makeDistribution(cases, 'mediaType'),
       discipline: makeDistribution(cases, 'discipline'),
-      visualStyle: makeDistribution(cases, 'visualStyle'),
+      technicalMethod: makeDistribution(cases, 'technicalMethod'),
       contentType: makeDistribution(cases, 'contentType'),
       composition: makeDistribution(cases, 'composition'),
       colorTone: makeDistribution(cases, 'colorTone'),
@@ -528,7 +585,7 @@ insightsRouter.get('/insights/summary', async (req: Request, res: Response) => {
 
     const leadingMediaType = topUseful(distributions.mediaType)?.label || '';
     const leadingDiscipline = topUseful(distributions.discipline)?.label || '';
-    const leadingVisualStyle = topUseful(distributions.visualStyle)?.label || '';
+    const leadingTechnicalMethod = topUseful(distributions.technicalMethod)?.label || '';
 
     res.json({
       success: true,
@@ -539,7 +596,7 @@ insightsRouter.get('/insights/summary', async (req: Request, res: Response) => {
         sourceCount,
         leadingMediaType,
         leadingDiscipline,
-        leadingVisualStyle,
+        leadingTechnicalMethod,
         distributions,
         crossMatrix,
         ratingDistribution,
@@ -550,7 +607,7 @@ insightsRouter.get('/insights/summary', async (req: Request, res: Response) => {
           filters,
           media: distributions.mediaType,
           discipline: distributions.discipline,
-          visualStyle: distributions.visualStyle,
+          technicalMethod: distributions.technicalMethod,
           contentType: distributions.contentType,
           composition: distributions.composition,
           colorTone: distributions.colorTone,
@@ -568,6 +625,11 @@ insightsRouter.get('/insights/summary', async (req: Request, res: Response) => {
 // ── Three-column comparison endpoint ──────────────────────────────────
 
 const COMPARISON_GROUPS: Record<string, { id: string; label: string; domains: string[] }> = {
+  ime: {
+    id: 'ime',
+    label: '长兴海洋实验室',
+    domains: ['ime.sjtu.edu.cn'],
+  },
   sjtu: {
     id: 'sjtu',
     label: '交大现状',
@@ -590,8 +652,11 @@ const COMPARISON_GROUPS: Record<string, { id: string; label: string; domains: st
     id: 'international',
     label: '国际研究',
     domains: [
-      'www.nature.com', 'news.mit.edu', 'news.harvard.edu', 'newscenter.lbl.gov',
-      'www.mpg.de', 'images.nasa.gov', 'nature.com',
+      'www.nature.com', 'nature.com',
+      'news.mit.edu', 'news.harvard.edu',
+      'news.stanford.edu', 'engineering.stanford.edu',
+      'newscenter.lbl.gov', 'www.mpg.de', 'images.nasa.gov',
+      'public.tableau.com',
     ],
   },
   enterprise: {
@@ -604,11 +669,17 @@ const COMPARISON_GROUPS: Record<string, { id: string; label: string; domains: st
       'new.abb.com', 'www.se.com', 'www.eaton.com',
       'bostondynamics.com', 'www.fanucamerica.com',
       'research.google', 'www.microsoft.com', 'aiotlabs.microsoft.com',
+      'azure.microsoft.com', 'news.xbox.com',
       'www.asml.com', 'pr.tsmc.com', 'newsroom.arm.com', 'www.arm.com',
       'www.basf.com', 'www.corning.com', 'corporate.dow.com',
       'www.xylem.com', 'www.veolia.com', 'orsted.com',
       'www.siemens-healthineers.com', 'www.gehealthcare.com', 'news.bostonscientific.com',
+      'www.bostonscientific.com',
       'www.airbus.com', 'boeing.mediaroom.com',
+      'www.zeiss.com',
+      'physicsworld.com', 'optics.org', 'semiengineering.com',
+      'www.medicaldesignandoutsourcing.com',
+      'www.waterworld.com', 'www.watertechonline.com',
     ],
   },
 };
@@ -628,16 +699,85 @@ const SJTU_SCHOOLS = [
   { id: 'aero', label: '航空航天学院', discipline: '工程', domains: ['www.aero.sjtu.edu.cn', 'news.sjtu.edu.cn'] },
 ];
 
-type ComparisonGroupId = 'sjtu' | 'domestic' | 'international' | 'enterprise';
+type ComparisonGroupId = 'ime' | 'sjtu' | 'domestic' | 'international' | 'enterprise';
 
 function includesAny(text: string, patterns: RegExp[]): boolean {
   return patterns.some(pattern => pattern.test(text));
 }
 
-function enterpriseNameFromHint(userHint: string): string {
-  return userHint
-    .replace(/\s*\/\s*enterprise\s*$/i, '')
-    .trim() || '未标注企业';
+function usefulComparisonValue(value: string): string {
+  const v = normalizeLabel(value);
+  return isUsefulLabel(v) ? v : '';
+}
+
+function comparisonText(c: Pick<VisualCase, 'sourceUrl' | 'pageTitle' | 'caseTitle' | 'contextText' | 'mediaType' | 'contentType' | 'technicalMethod' | 'functionalPurpose' | 'distributionMedium'>): string {
+  return [
+    c.sourceUrl,
+    c.pageTitle,
+    c.caseTitle,
+    c.contextText,
+    c.mediaType,
+    c.contentType,
+    c.technicalMethod,
+    c.functionalPurpose,
+    c.distributionMedium,
+  ].filter(Boolean).join(' ');
+}
+
+function normalizeFunctionalDimension(c: Pick<VisualCase, 'mediaType' | 'contentType' | 'technicalMethod' | 'functionalPurpose' | 'contextText' | 'caseTitle' | 'pageTitle' | 'sourceUrl' | 'distributionMedium'>): string {
+  const current = usefulComparisonValue(c.functionalPurpose || '');
+  if (['记录', '解释', '数据', '展示', '传播', '交互'].includes(current)) return current;
+  if (/证明|验证|结果|统计|图表|趋势|分布/.test(current)) return '数据';
+  if (/转译|产品|方案|应用|成果|空间|项目/.test(current)) return '展示';
+
+  const text = comparisonText(c);
+  if (/交互|互动|仪表盘|dashboard|筛选|浏览|缩放|explore/i.test(text)) return '交互';
+  if (/数据|图表|曲线|趋势|统计|模型|结果|地图|网络|可视化/i.test(text)) return '数据';
+  if (/解释|机制|结构|流程|原理|说明|图解|示意/i.test(text)) return '解释';
+  if (/品牌|科普|公众|宣传|传播|新闻|封面|展览/i.test(text)) return '传播';
+  if (/成果|产品|空间|项目|方案|应用|展示|样机|平台/i.test(text)) return '展示';
+  if (/记录|现场|人物|团队|实验|设备|样本|观测|采集|摄影|照片/i.test(text)) return '记录';
+  return '未标注';
+}
+
+function normalizeMediumDimension(c: Pick<VisualCase, 'mediaType' | 'distributionMedium' | 'captureType' | 'contextText' | 'caseTitle' | 'pageTitle' | 'sourceUrl' | 'contentType' | 'technicalMethod' | 'functionalPurpose'>): string {
+  const current = usefulComparisonValue(c.distributionMedium || '');
+  if (['静图', '动图', '视频', '图组', '交互', '实体'].includes(current)) return current;
+
+  const text = comparisonText(c);
+  if (/交互|互动|dashboard|仪表盘|地图|缩放|筛选|explore/i.test(text)) return '交互';
+  if (/gif|动图|循环|动效/i.test(text)) return '动图';
+  if (/video|视频|animation|动画|影片|纪录|讲解/i.test(text) || c.captureType === 'video') return '视频';
+  if (/图组|组图|长图|步骤|多图|gallery|slideshow/i.test(text)) return '图组';
+  if (/印刷|海报|展板|包装|实体|展陈|poster|print/i.test(text)) return '实体';
+  return '静图';
+}
+
+function inferTechnicalMethod(c: Pick<VisualCase, 'mediaType' | 'contentType' | 'technicalMethod' | 'contextText' | 'caseTitle' | 'pageTitle' | 'sourceUrl' | 'functionalPurpose' | 'distributionMedium'>): string {
+  const current = usefulComparisonValue(c.technicalMethod || '');
+  if (['拍摄', '成像', '绘设', '数据', '渲染', '生成'].includes(current)) return current;
+
+  const mediaType = normalizeLabel(c.mediaType || '');
+  if (/摄影|照片/.test(mediaType)) return '拍摄';
+  if (/显微|电镜|医学影像|遥感|热成像|成像/.test(mediaType)) return '成像';
+  if (/3D|三维|渲染|仿真|建模/.test(mediaType)) return '渲染';
+  if (/数据可视化|数据图表|图表/.test(mediaType)) return '数据';
+  if (/手绘|信息图|插画|图解|示意/.test(mediaType)) return '绘设';
+
+  const text = comparisonText(c);
+  if (/\bAI\b|人工智能|AIGC|算法生成|模型生成|图像生成|风格迁移|diffusion|generative/i.test(text)) return '生成';
+  if (/3D|三维|渲染|建模|仿真|simulation|render|CAD|工程软件/i.test(text)) return '渲染';
+  if (/显微|电镜|SEM|TEM|医学影像|MRI|CT|遥感|热成像|传感|成像|microscopy|microscope|imaging/i.test(text)) return '成像';
+  if (/数据|图表|地图|网络|可视化|统计|曲线|模型|dashboard|visualization/i.test(text)) return '数据';
+  if (/插画|手绘|绘制|图标|信息图|设计|排版|示意|diagram|illustration|infographic/i.test(text)) return '绘设';
+  if (/摄影|摄像|航拍|无人机|照片|现场|设备|人物|团队|实验过程|拍摄|photo|camera|drone/i.test(text)) return '拍摄';
+  return '未标注';
+}
+
+function comparisonDimensionValue(c: VisualCase, dimension: ComparisonDimensionKey): string {
+  if (dimension === 'functionalPurpose') return normalizeFunctionalDimension(c);
+  if (dimension === 'distributionMedium') return normalizeMediumDimension(c);
+  return inferTechnicalMethod(c);
 }
 
 function makeEnterpriseCommercialSignals(cases: any[]) {
@@ -680,7 +820,7 @@ function makeEnterpriseCommercialSignals(cases: any[]) {
   for (const c of cases) {
     const text = [
       c.sourceUrl, c.pageTitle, c.caseTitle, c.contextText, c.mediaType, c.contentType,
-      c.visualStyle, c.functionalPurpose, c.distributionMedium, c.mediaSubType, c.contentSubType,
+      c.technicalMethod, c.functionalPurpose, c.distributionMedium, c.mediaSubType, c.contentSubType,
     ].filter(Boolean).join(' ');
 
     counts.forEach((signal, index) => {
@@ -707,22 +847,15 @@ function makeEnterpriseCommercialSignals(cases: any[]) {
     percentage: total > 0 ? Math.round((dynamicOrRendered / total) * 1000) / 10 : 0,
   });
 
+  const companyBreakdown = makeEnterpriseCompanyOptions(cases).slice(0, 16);
+  const pageTypeBreakdown = makeEnterprisePageTypeOptions(cases);
+
   return {
     total,
     signals: enriched,
-    sourceBreakdown: makeDistribution(cases.map(c => ({
-      sourceDomain: '',
-      mediaType: enterpriseNameFromHint(c.userHint || ''),
-      contentType: '',
-      discipline: '',
-      visualStyle: '',
-      composition: '',
-      colorTone: '',
-      functionalPurpose: '',
-      distributionMedium: '',
-      rating: 0,
-      reviewStatus: '',
-    })), 'mediaType').slice(0, 16),
+    companyBreakdown,
+    pageTypeBreakdown,
+    sourceBreakdown: companyBreakdown,
     summary: total === 0
       ? '企业商业化样本仍待采集。'
       : `企业组当前有 ${total} 条 approved 样本，商业化信号最高的是「${enriched[0]?.label || '待判断'}」，适合作为科研成果转译成行业场景、产品方案和客户价值表达的参照。`,
@@ -732,7 +865,7 @@ function makeEnterpriseCommercialSignals(cases: any[]) {
 function scoreEnterpriseSample(c: any): number {
   const text = [
     c.sourceUrl, c.pageTitle, c.caseTitle, c.contextText, c.mediaType, c.contentType,
-    c.visualStyle, c.functionalPurpose, c.distributionMedium,
+    c.technicalMethod, c.functionalPurpose, c.distributionMedium,
   ].filter(Boolean).join(' ');
   let score = 0;
   if (/case-stud(y|ies)|customer-stor(y|ies)|success-stor(y|ies)/i.test(text)) score += 80;
@@ -784,7 +917,7 @@ insightsRouter.get('/insights/comparison', async (req: Request, res: Response) =
   try {
     const school = toTrimmedString(req.query.school as string, 100) || '';
     const discipline = toTrimmedString(req.query.discipline as string, 200) || '';
-    const dimension = toTrimmedString(req.query.dimension as string, 200) || 'mediaType';
+    const dimension = toTrimmedString(req.query.dimension as string, 200) || 'functionalPurpose';
 
     let effectiveDiscipline = discipline;
     let schoolLabel = '';
@@ -803,9 +936,9 @@ insightsRouter.get('/insights/comparison', async (req: Request, res: Response) =
       }
     }
 
-    const validDimensions: DimensionKey[] = ['mediaType', 'contentType', 'visualStyle', 'functionalPurpose', 'distributionMedium'];
-    const dimKey: DimensionKey = validDimensions.includes(dimension as DimensionKey) ? (dimension as DimensionKey) : 'mediaType';
-    const dimLabel = DIMENSION_LABELS[dimKey] || dimension;
+    const validDimensions: ComparisonDimensionKey[] = ['functionalPurpose', 'distributionMedium', 'technicalMethod'];
+    const dimKey: ComparisonDimensionKey = validDimensions.includes(dimension as ComparisonDimensionKey) ? (dimension as ComparisonDimensionKey) : 'functionalPurpose';
+    const dimLabel = COMPARISON_DIMENSION_LABELS[dimKey] || dimension;
 
     const where: Prisma.VisualCaseWhereInput = effectiveDiscipline
       ? { discipline: effectiveDiscipline, reviewStatus: 'approved' }
@@ -813,7 +946,7 @@ insightsRouter.get('/insights/comparison', async (req: Request, res: Response) =
 
     const cases = await prisma.visualCase.findMany({
       where,
-      select: { id: true, sourceDomain: true, sourceUrl: true, pageTitle: true, caseTitle: true, contextText: true, userHint: true, mediaType: true, contentType: true, visualStyle: true, discipline: true, functionalPurpose: true, distributionMedium: true, mediaSubType: true, contentSubType: true, thumbnailPath: true, imagePath: true, imageUrl: true, [dimKey]: true },
+      select: { id: true, sourceDomain: true, sourceUrl: true, pageTitle: true, caseTitle: true, contextText: true, captureType: true, userHint: true, mediaType: true, contentType: true, technicalMethod: true, discipline: true, functionalPurpose: true, distributionMedium: true, mediaSubType: true, contentSubType: true, thumbnailPath: true, imagePath: true, imageUrl: true, rating: true },
     });
 
     const SJTU_DOMAINS = new Set(sjtuDomains);
@@ -828,7 +961,7 @@ insightsRouter.get('/insights/comparison', async (req: Request, res: Response) =
     }
     COMPARISON_GROUPS.domestic.domains = [...domesticBaseDomains];
 
-    const SAMPLES_PER_GROUP = 8;
+    const SAMPLES_PER_GROUP = 18;
 
     const groups = Object.values(COMPARISON_GROUPS).map((group) => {
       const domainSet = group.id === 'sjtu' ? SJTU_DOMAINS : new Set(group.domains);
@@ -836,12 +969,12 @@ insightsRouter.get('/insights/comparison', async (req: Request, res: Response) =
         .filter((c: any) => group.id === 'enterprise'
           ? String(c.userHint || '').includes('/ enterprise') || domainSet.has(c.sourceDomain)
           : domainSet.has(c.sourceDomain))
-        .sort((a: any, b: any) => group.id === 'enterprise' ? scoreEnterpriseSample(b) - scoreEnterpriseSample(a) : 0);
+        .sort((a: any, b: any) => group.id === 'enterprise' ? scoreEnterpriseSample(b) - scoreEnterpriseSample(a) : (b.rating || 0) - (a.rating || 0));
       const total = groupCases.length;
 
       const countMap = new Map<string, number>();
       for (const c of groupCases) {
-        const val = (c as any)[dimKey] || '不确定';
+        const val = comparisonDimensionValue(c as VisualCase, dimKey);
         countMap.set(val, (countMap.get(val) || 0) + 1);
       }
 
@@ -860,29 +993,41 @@ insightsRouter.get('/insights/comparison', async (req: Request, res: Response) =
         : (() => {
             const buckets = new Map<string, any[]>();
             for (const c of groupCases) {
-              const val = (c as any)[dimKey] || '不确定';
+              const val = comparisonDimensionValue(c as VisualCase, dimKey);
               if (!buckets.has(val)) buckets.set(val, []);
               buckets.get(val)!.push(c);
             }
+            const bucketOrder = [...buckets.entries()]
+              .sort((a, b) => b[1].length - a[1].length)
+              .map(([key]) => key);
             const result: any[] = [];
-            const sorted = [...buckets.entries()].sort((a, b) => b[1].length - a[1].length);
-            for (const [, bucket] of sorted) {
-              for (const c of bucket) {
-                if (result.length < SAMPLES_PER_GROUP) result.push(c);
+            while (result.length < SAMPLES_PER_GROUP) {
+              let added = false;
+              for (const key of bucketOrder) {
+                const bucket = buckets.get(key);
+                if (!bucket || bucket.length === 0) continue;
+                result.push(bucket.shift()!);
+                added = true;
+                if (result.length >= SAMPLES_PER_GROUP) break;
               }
+              if (!added) break;
             }
-            return result.slice(0, SAMPLES_PER_GROUP);
+            return result;
           })();
 
       const samples = sampled.map((c: any) => ({
         id: c.id,
         title: c.caseTitle || c.mediaType,
-        thumbnail: remapImagePath(c.thumbnailPath) || remapImagePath(c.imagePath) || c.imageUrl || '',
+        thumbnail: c.thumbnailPath || c.imagePath || c.imageUrl || '',
         sourceUrl: c.sourceUrl,
         sourceDomain: c.sourceDomain,
         mediaType: c.mediaType,
         contentType: c.contentType,
-        visualStyle: c.visualStyle,
+        discipline: c.discipline,
+        functionalPurpose: normalizeFunctionalDimension(c),
+        distributionMedium: normalizeMediumDimension(c),
+        technicalMethod: inferTechnicalMethod(c),
+        rating: c.rating || 0,
       }));
 
       const label = group.id === 'sjtu' && schoolLabel ? schoolLabel : group.label;
@@ -938,17 +1083,7 @@ insightsRouter.get('/insights/comparison', async (req: Request, res: Response) =
         });
         if (lowerThan) {
           const label = group.id === 'sjtu' && schoolLabel ? schoolLabel : group.label;
-          if (dimKey === 'mediaType') {
-            result.push({ groupId: group.id as ComparisonGroupId, groupLabel: label, topLabel: top.label, topPercentage: top.percentage, summary: `在呈现方式上，${label}更偏向「${top.label}」（占比 ${top.percentage.toFixed(1)}%），与其他来源相比倾向性更为显著。` });
-          } else if (dimKey === 'contentType') {
-            result.push({ groupId: group.id as ComparisonGroupId, groupLabel: label, topLabel: top.label, topPercentage: top.percentage, summary: `在内容类型上，${label}更偏向「${top.label}」（占比 ${top.percentage.toFixed(1)}%），区别于其他来源的表达偏好。` });
-          } else if (dimKey === 'visualStyle') {
-            result.push({ groupId: group.id as ComparisonGroupId, groupLabel: label, topLabel: top.label, topPercentage: top.percentage, summary: `在视觉风格上，${label}更偏向「${top.label}」（占比 ${top.percentage.toFixed(1)}%），与其他来源的审美倾向存在差异。` });
-          } else if (dimKey === 'functionalPurpose') {
-            result.push({ groupId: group.id as ComparisonGroupId, groupLabel: label, topLabel: top.label, topPercentage: top.percentage, summary: `在功能用途上，${label}更偏向「${top.label}」（占比 ${top.percentage.toFixed(1)}%），反映出不同的功能定位策略。` });
-          } else {
-            result.push({ groupId: group.id as ComparisonGroupId, groupLabel: label, topLabel: top.label, topPercentage: top.percentage, summary: `在${dimLabel}维度上，${label}更偏向「${top.label}」（占比 ${top.percentage.toFixed(1)}%），表现出与其他来源的显著差异。` });
-          }
+          result.push({ groupId: group.id as ComparisonGroupId, groupLabel: label, topLabel: top.label, topPercentage: top.percentage, summary: `在${dimLabel}上，${label}更偏向「${top.label}」（占比 ${top.percentage.toFixed(1)}%），表现出与其他来源不同的视觉表达策略。` });
         }
       }
       return result;
@@ -979,14 +1114,16 @@ insightsRouter.get('/insights/comparison', async (req: Request, res: Response) =
 
 // ── Three-axis spectrum analysis ─────────────────────────────────────
 
-type SpectrumDimKey = 'functionalPurpose' | 'mediaType' | 'discipline' | 'distributionMedium' | 'visualStyle' | 'contentType';
-const SPECTRUM_DIMS: SpectrumDimKey[] = ['functionalPurpose', 'mediaType', 'discipline', 'distributionMedium', 'visualStyle', 'contentType'];
+type SpectrumDimKey = 'functionalPurpose' | 'mediaType' | 'discipline' | 'distributionMedium' | 'technicalMethod' | 'contentType';
+// The canonical three-axis view is functionalPurpose x technicalMethod x distributionMedium.
+// mediaType/contentType/discipline remain available as auxiliary or legacy drill-down dimensions.
+const SPECTRUM_DIMS: SpectrumDimKey[] = ['functionalPurpose', 'mediaType', 'discipline', 'distributionMedium', 'technicalMethod', 'contentType'];
 
 insightsRouter.get('/insights/three-axis-spectrum', async (req: Request, res: Response) => {
   try {
     const xDim = toTrimmedString(req.query.x as string, 100) || 'functionalPurpose';
-    const yDim = toTrimmedString(req.query.y as string, 100) || 'mediaType';
-    const zDim = toTrimmedString(req.query.z as string, 100) || 'discipline';
+    const yDim = toTrimmedString(req.query.y as string, 100) || 'technicalMethod';
+    const zDim = toTrimmedString(req.query.z as string, 100) || 'distributionMedium';
 
     const dims: SpectrumDimKey[] = [xDim, yDim, zDim].map(d =>
       SPECTRUM_DIMS.includes(d as SpectrumDimKey) ? (d as SpectrumDimKey) : 'functionalPurpose'
@@ -999,7 +1136,7 @@ insightsRouter.get('/insights/three-axis-spectrum', async (req: Request, res: Re
         distributionMedium: true,
         mediaType: true,
         discipline: true,
-        visualStyle: true,
+        technicalMethod: true,
         contentType: true,
         imageUrl: true,
         thumbnailPath: true,
@@ -1039,7 +1176,7 @@ insightsRouter.get('/insights/three-axis-spectrum', async (req: Request, res: Re
       distributionMedium: '传播媒介',
       mediaType: '呈现方式',
       discipline: '学科',
-      visualStyle: '视觉风格',
+      technicalMethod: '技术手段',
       contentType: '内容类型',
     };
 
@@ -1075,6 +1212,32 @@ insightsRouter.get('/insights/three-axis-spectrum', async (req: Request, res: Re
         note,
       },
     });
+  } catch (error) {
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+insightsRouter.get('/discipline-configs', async (_req: Request, res: Response) => {
+  try {
+    const configs = await getAllDisciplineConfigs();
+    res.json({ success: true, data: configs });
+  } catch (error) {
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+insightsRouter.get('/discipline-config/:discipline', async (req: Request, res: Response) => {
+  try {
+    const discipline = req.params.discipline;
+    if (!DISCIPLINES.includes(discipline as any)) {
+      res.status(400).json({
+        success: false,
+        error: `Invalid discipline. Must be one of: ${DISCIPLINES.join(', ')}`,
+      });
+      return;
+    }
+    const config = await getDisciplineConfig(discipline);
+    res.json({ success: true, data: config });
   } catch (error) {
     res.status(500).json({ success: false, error: (error as Error).message });
   }

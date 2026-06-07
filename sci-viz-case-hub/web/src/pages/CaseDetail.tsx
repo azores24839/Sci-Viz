@@ -2,13 +2,20 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../api';
 import type { VisualCase, ReviewStatus } from '../types';
-import { REVIEW_STATUS_LABELS, MEDIA_TYPES, CONTENT_TYPES, DISCIPLINES, VISUAL_STYLES, RATING_LABELS } from '../types';
+import { REVIEW_STATUS_LABELS, MEDIA_TYPES, CONTENT_TYPES, DISCIPLINES, TECHNICAL_METHODS, DISTRIBUTION_MEDIUMS, RATING_LABELS } from '../types';
 import { theme } from '../theme';
 import { Card, StatusBadge } from '../components';
+import { VideoPlayer } from '../components/VideoPlayer';
 
 function normalizeContentTypeLabel(value: string): string {
   if (value === '科研人员') return '单人肖像';
   return value;
+}
+
+function imageCandidates(c: VisualCase): string[] {
+  return [c.imagePath, c.thumbnailPath, c.imageUrl].filter((value, index, arr): value is string =>
+    Boolean(value) && arr.indexOf(value) === index
+  );
 }
 
 export default function CaseDetail() {
@@ -20,20 +27,13 @@ export default function CaseDetail() {
   const [form, setForm] = useState<Partial<VisualCase>>({});
   const [saving, setSaving] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const [imageCandidateIndex, setImageCandidateIndex] = useState(0);
 
   const handleImgError = () => {
     if (!c) return;
-    const img = document.querySelector('.case-detail-img') as HTMLImageElement | null;
-    if (!img) return;
-    if (c.thumbnailPath && !img.src.endsWith(c.thumbnailPath.replace(/^\//, ''))) {
-      img.src = c.thumbnailPath;
-    } else if (c.imagePath && !img.src.endsWith(c.imagePath.replace(/^\//, ''))) {
-      img.src = c.imagePath;
-    } else if (c.imageUrl && img.src !== c.imageUrl) {
-      img.src = c.imageUrl;
-    } else {
-      setImgError(true);
-    }
+    const nextIndex = imageCandidateIndex + 1;
+    if (nextIndex < imageCandidates(c).length) setImageCandidateIndex(nextIndex);
+    else setImgError(true);
   };
 
   const fetchCase = async () => {
@@ -43,6 +43,11 @@ export default function CaseDetail() {
   };
 
   useEffect(() => { fetchCase(); }, [id]);
+
+  useEffect(() => {
+    setImgError(false);
+    setImageCandidateIndex(0);
+  }, [c?.id, c?.imagePath, c?.thumbnailPath, c?.imageUrl]);
 
   if (!c) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 60, color: theme.colors.text.tertiary }}>
@@ -110,6 +115,8 @@ export default function CaseDetail() {
     try { return JSON.parse(val); } catch { return val ? [val] : []; }
   };
 
+  const currentImageSrc = imageCandidates(c)[imageCandidateIndex];
+
   const btnBase: React.CSSProperties = {
     padding: '6px 14px',
     borderRadius: theme.radius.md,
@@ -173,14 +180,20 @@ export default function CaseDetail() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
         <div>
           <Card padding={0} style={{ overflow: 'hidden' }}>
-            {imgError ? (
+            {c.captureType === 'video' && c.videoUrl ? (
+              <VideoPlayer
+                videoUrl={c.videoUrl}
+                videoPlatform={c.videoPlatform}
+                title={c.caseTitle || c.title}
+              />
+            ) : imgError ? (
               <div style={{ padding: 60, textAlign: 'center', color: theme.colors.text.tertiary, fontSize: 13 }}>
                 图片加载失败
               </div>
-            ) : c.imagePath || c.thumbnailPath || c.imageUrl ? (
+            ) : currentImageSrc ? (
               <img
                 className="case-detail-img"
-                src={c.imagePath || c.thumbnailPath || c.imageUrl}
+                src={currentImageSrc}
                 alt={c.title}
                 style={{ width: '100%', display: 'block' }}
                 onError={handleImgError}
@@ -226,6 +239,37 @@ export default function CaseDetail() {
             </div>
             {field('来源域名', 'sourceDomain')}
             {field('采集方式', 'captureType')}
+            {c.captureType === 'video' && c.videoUrl && (
+              <>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{
+                    display: 'block',
+                    fontSize: theme.typography.size.xs,
+                    color: theme.colors.text.tertiary,
+                    fontWeight: 500,
+                    marginBottom: 2,
+                  }}>
+                    视频链接
+                  </label>
+                  <a
+                    href={c.videoUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ fontSize: theme.typography.size.base, color: theme.colors.accent }}
+                  >
+                    在平台观看 →
+                  </a>
+                </div>
+                {field('视频平台', 'videoPlatform')}
+              </>
+            )}
+            {editing && c.captureType === 'video' && (
+              <>
+                {field('视频链接', 'videoUrl')}
+                {field('视频平台', 'videoPlatform')}
+                {field('视频时长(秒)', 'videoDuration')}
+              </>
+            )}
             {field('网页上下文', 'contextText')}
           </Card>
 
@@ -258,7 +302,8 @@ export default function CaseDetail() {
               {field('呈现方式', 'mediaType', MEDIA_TYPES)}
               {field('内容类型', 'contentType', CONTENT_TYPES)}
               {field('学科领域', 'discipline', DISCIPLINES)}
-              {field('视觉风格', 'visualStyle', VISUAL_STYLES)}
+              {field('技术手段', 'technicalMethod', TECHNICAL_METHODS)}
+              {field('传播媒介', 'distributionMedium', DISTRIBUTION_MEDIUMS)}
               {field('构图', 'composition')}
               {field('色调', 'colorTone')}
             </div>

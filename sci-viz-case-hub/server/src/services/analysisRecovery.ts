@@ -8,24 +8,30 @@ const BATCH_SIZE = 20;
 const CONCURRENCY = 3;
 
 let timerRef: ReturnType<typeof setInterval> | null = null;
+let startupTimerRef: ReturnType<typeof setTimeout> | null = null;
 
 export function startAnalysisRecovery() {
   if (timerRef) return;
 
   console.log(`[analysis-recovery] Starting recovery timer (interval=${RECOVERY_INTERVAL_MS / 1000}s, threshold=${STUCK_THRESHOLD_MINUTES}min, max-retries=${MAX_RETRIES})`);
 
-  setTimeout(() => {
+  startupTimerRef = setTimeout(() => {
+    startupTimerRef = null;
     recoverStuckCases();
     timerRef = setInterval(recoverStuckCases, RECOVERY_INTERVAL_MS);
   }, 30000);
 }
 
 export function stopAnalysisRecovery() {
+  if (startupTimerRef) {
+    clearTimeout(startupTimerRef);
+    startupTimerRef = null;
+  }
   if (timerRef) {
     clearInterval(timerRef);
     timerRef = null;
-    console.log('[analysis-recovery] Stopped');
   }
+  console.log('[analysis-recovery] Stopped');
 }
 
 async function recoverStuckCases() {

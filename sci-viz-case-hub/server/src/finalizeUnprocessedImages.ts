@@ -16,11 +16,11 @@ const UPLOADS_ROOT = path.join(SERVER_ROOT, 'uploads');
 const ORIGINALS_DIR = path.join(UPLOADS_ROOT, 'originals');
 const THUMBNAILS_DIR = path.join(UPLOADS_ROOT, 'thumbnails');
 
-const CORE_FIELDS = ['caseTitle', 'discipline', 'mediaType', 'contentType', 'visualStyle'] as const;
+const CORE_FIELDS = ['caseTitle', 'discipline', 'mediaType', 'contentType', 'technicalMethod'] as const;
 
 type CaseLite = Pick<VisualCase,
   'id' | 'imagePath' | 'thumbnailPath' | 'imageUrl' | 'pageTitle' | 'sourceUrl' | 'contextText' |
-  'caseTitle' | 'discipline' | 'mediaType' | 'contentType' | 'visualStyle' | 'reviewStatus' |
+  'caseTitle' | 'discipline' | 'mediaType' | 'contentType' | 'technicalMethod' | 'reviewStatus' |
   'imageHash'
 >;
 
@@ -161,7 +161,7 @@ async function approveCompleteCases() {
       discipline: { notIn: ['', '不确定'] },
       mediaType: { notIn: ['', '不确定'] },
       contentType: { notIn: ['', '不确定'] },
-      visualStyle: { notIn: ['', '不确定'] },
+      technicalMethod: { notIn: ['', '不确定'] },
     },
     data: { reviewStatus: 'approved' },
   });
@@ -186,7 +186,7 @@ async function finalCounts() {
           { discipline: { in: ['', '不确定'] } },
           { mediaType: { in: ['', '不确定'] } },
           { contentType: { in: ['', '不确定'] } },
-          { visualStyle: { in: ['', '不确定'] } },
+          { technicalMethod: { in: ['', '不确定'] } },
         ],
       },
     }),
@@ -227,7 +227,7 @@ async function main() {
       discipline: true,
       mediaType: true,
       contentType: true,
-      visualStyle: true,
+      technicalMethod: true,
       reviewStatus: true,
       imageHash: true,
     },

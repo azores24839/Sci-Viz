@@ -19,6 +19,24 @@ function compactNumber(value: number): string {
   return new Intl.NumberFormat('zh-CN').format(value);
 }
 
+function distributionSentence(distribution: InsightSummary['distributions'][string] | undefined, subject: string): string {
+  const useful = (distribution || []).filter(item => item.label && item.label !== '未标注' && item.label !== '不确定');
+  const [first, second] = useful;
+  if (!first) return `当前筛选范围内，${subject}尚无足够的有效标注，建议先补齐对应字段后再做比例判断。`;
+  if (!second) return `当前筛选范围内，${subject}以「${first.label}」为主，占比 ${first.percentage.toFixed(1)}%。`;
+  return `当前筛选范围内，${subject}以「${first.label}」为主，占比 ${first.percentage.toFixed(1)}%；其次是「${second.label}」，占比 ${second.percentage.toFixed(1)}%。具体数量以实时统计结果为准。`;
+}
+
+function nonStaticMediumSentence(distribution: InsightSummary['distributions'][string] | undefined): string {
+  const rows = distribution || [];
+  const staticItem = rows.find(item => item.label === '静图');
+  const dynamicCount = rows
+    .filter(item => item.label && !['静图', '未标注', '不确定'].includes(item.label))
+    .reduce((sum, item) => sum + item.count, 0);
+  if (!staticItem) return '当前筛选范围内，传播媒介尚无足够的有效标注，建议先补齐媒介维度。';
+  return `当前筛选范围内，传播媒介以「静图」为主，占比 ${staticItem.percentage.toFixed(1)}%；非静图媒介当前共有 ${compactNumber(dynamicCount)} 条。这个分布既反映采集来源偏向，也提示视频、动图、交互和实体媒介需要单独补采。`;
+}
+
 function BarRow({ label, count, percentage, total, color, index }: {
   label: string; count: number; percentage: number; total: number; color: string; index: number;
 }) {
@@ -67,15 +85,13 @@ export default function AnalysisReportPage() {
     setError('');
     Promise.all([
       api.getInsightSummary({ reviewStatus: 'approved' }),
-      api.getComparison(undefined, 'mediaType'),
       api.getComparison(undefined, 'functionalPurpose'),
-    ]).then(([sumRes, compMediaRes, compFpRes]) => {
+    ]).then(([sumRes, compFpRes]) => {
       if (ignore) return;
       if (!sumRes.success) { setError(sumRes.error || '加载失败'); return; }
       setSummary(sumRes.data);
-      if (compMediaRes.success) {
-        setComparison(compMediaRes.data);
-        (window as any).__compFp = compFpRes.success ? compFpRes.data : null;
+      if (compFpRes.success) {
+        setComparison(compFpRes.data);
       }
     }).catch((err: Error) => {
       if (!ignore) setError(err.message);
@@ -113,10 +129,11 @@ export default function AnalysisReportPage() {
           {[
             { label: '总案例数', value: compactNumber(totalCases) },
             { label: '来源数', value: compactNumber(summary.sourceCount) },
-            { label: '主要呈现方式', value: summary.leadingMediaType },
+            { label: '主要功能用途', value: summary.distributions.functionalPurpose?.find(item => item.label !== '未标注' && item.label !== '不确定')?.label || '待补齐' },
+            { label: '主要传播媒介', value: summary.distributions.distributionMedium?.find(item => item.label !== '未标注' && item.label !== '不确定')?.label || '待补齐' },
             { label: '主要学科', value: summary.leadingDiscipline },
-            { label: '主要视觉风格', value: summary.leadingVisualStyle },
-            { label: '已入案例率', value: `${Math.round(((summary as any).approvedCount || totalCases) / Math.max(totalCases, 1) * 100)}%` },
+            { label: '主要技术手段', value: summary.leadingTechnicalMethod },
+            { label: '统计口径', value: summary.filters.reviewStatus || '全部状态' },
           ].map(m => (
             <div key={m.label} style={{ padding: '12px 16px', background: theme.colors.bgSubtle, borderRadius: theme.radius.md }}>
               <div style={{ fontSize: theme.typography.size.xs, color: theme.colors.text.tertiary }}>{m.label}</div>
@@ -126,14 +143,14 @@ export default function AnalysisReportPage() {
         </div>
       </ArticleSection>
 
-      {/* Section 2: 媒介分布 */}
-      <ArticleSection title="二、呈现方式（mediaType）分布">
+      {/* Section 2: 三轴概览 */}
+      <ArticleSection title="二、三轴分布概览">
         <p style={{ margin: '0 0 16px', color: theme.colors.text.secondary, fontSize: theme.typography.size.sm, lineHeight: 1.6 }}>
-          当前案例库的呈现方式以摄影（995条）和3D渲染（955条）为主，两者合计占58.6%。信息图（423条）、显微图（360条）和数据可视化（235条）为第二梯队，混合媒介（105条）相对较少。
+          {distributionSentence(summary.distributions.technicalMethod, '技术维度')}
         </p>
-        {summary.distributions.mediaType && (
+        {summary.distributions.technicalMethod && (
           <div style={{ maxWidth: 500 }}>
-            {summary.distributions.mediaType.slice(0, 10).map((item, index) => (
+            {summary.distributions.technicalMethod.slice(0, 10).map((item, index) => (
               <BarRow key={item.label} label={item.label} count={item.count} percentage={item.percentage} total={totalCases} color={chartPalette[index % chartPalette.length]} index={index} />
             ))}
           </div>
@@ -143,7 +160,7 @@ export default function AnalysisReportPage() {
       {/* Section 3: 功能用途 */}
       <ArticleSection title="三、功能用途（functionalPurpose）分布">
         <p style={{ margin: '0 0 16px', color: theme.colors.text.secondary, fontSize: theme.typography.size.sm, lineHeight: 1.6 }}>
-          「传播」目的占56.9%（{compactNumber(totalCases > 0 ? Math.round(totalCases * 0.569) : 0)}条），远超「记录」（21.8%）和「解释」（11.2%）。这表明当前案例库以科普传播和品牌宣传为导向的视觉材料为主，而教学解释型和交互探索型内容偏少。
+          {distributionSentence(summary.distributions.functionalPurpose, '功能维度')}
         </p>
         {summary.distributions.functionalPurpose && (
           <div style={{ maxWidth: 500 }}>
@@ -205,7 +222,7 @@ export default function AnalysisReportPage() {
       {/* Section 5: 媒介差距 */}
       <ArticleSection title="五、传播媒介差距分析">
         <p style={{ margin: '0 0 16px', color: theme.colors.text.secondary, fontSize: theme.typography.size.sm, lineHeight: 1.6 }}>
-          在 {compactNumber(totalCases)} 条已入库案例中，仅 <strong>3</strong> 条的传播媒介为非「静图」（均为 NVIDIA 开发者博客的动图/GIF）。视频、交互式可视化、多媒体演示等形态在当前数据库中长期缺位。
+          {nonStaticMediumSentence(summary.distributions.distributionMedium)}
         </p>
         <p style={{ margin: '0 0 16px', color: theme.colors.text.secondary, fontSize: theme.typography.size.sm, lineHeight: 1.6 }}>
           这表明：
@@ -251,10 +268,10 @@ export default function AnalysisReportPage() {
       {/* Section 7: 建议 */}
       <ArticleSection title="七、建议与后续行动">
         <ol style={{ margin: 0, paddingLeft: 20, color: theme.colors.text.primary, fontSize: theme.typography.size.sm, lineHeight: 1.9 }}>
-          <li><strong>补齐视频/多媒体案例：</strong>通过微信公众号、B站、企业案例库等渠道，采集至少 100 条视频/动图/交互类案例，建立多媒体案例子库。</li>
-          <li><strong>完善编码本：</strong>在三轴（功能用途、传播媒介、呈现方式）基础上，补齐构图、景别、用光、色调、色彩方案、视觉焦点、信息层级、后期风格、情感基调等维度，建立 10 维编码体系。</li>
-          <li><strong>人工抽检标注：</strong>从 6 个学科中各抽 5 条案例，人工验证三轴标注的准确性，计算偏差率并修正系统性问题。</li>
-          <li><strong>企业商业化基准深化：</strong>完成 Autodesk/Microsoft/Arm 等企业源的 browser_render 采集，将企业 approved 案例从 27 条扩展到 50+ 条。</li>
+          <li><strong>补齐视频/多媒体案例：</strong>通过微信公众号、B站、企业案例库等渠道，持续补充视频、动图、交互和实体媒介案例，建立多媒体案例子库。</li>
+          <li><strong>完善编码本：</strong>以三轴（功能用途、传播媒介、技术手段）为核心，补充构图、景别、用光、色调、视觉焦点、信息层级、后期风格、情感基调等辅助维度。</li>
+          <li><strong>人工抽检标注：</strong>按学科和来源分层抽样，人工验证三轴标注的准确性，计算偏差率并修正系统性问题。</li>
+          <li><strong>企业商业化基准深化：</strong>继续补齐核心企业源，确保企业参照组可以进入均衡样本比较。</li>
           <li><strong>撰写最终策略报告：</strong>基于上述分析，形成面向工作室交付的「科研影像创作流程建议」和「媒介选择决策矩阵」。</li>
         </ol>
       </ArticleSection>

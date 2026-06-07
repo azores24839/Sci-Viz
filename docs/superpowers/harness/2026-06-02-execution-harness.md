@@ -110,7 +110,7 @@
 
 | 阻塞项 | 原因 |
 |--------|------|
-| 浙江大学无数据 | news.zju.edu.cn 解析到 VPN IP (198.18.x.x)，本网络无法访问 |
+| 浙江大学无数据 | ~~news.zju.edu.cn 解析到 VPN IP (198.18.x.x)，本网络无法访问~~ ✅ 已解决：HTTP (非HTTPS) 可正常访问，已抓取65条案例 |
 | 多个企业商业入口静态抓取失败 | Autodesk Customer Stories、Caterpillar Customer Stories、Microsoft AI Customer Stories、Microsoft AI Co-Innovation Labs、Arm Success Library 静态 fetch 失败，已标为 needs_adapter_tuning |
 
 ---

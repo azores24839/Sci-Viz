@@ -24,9 +24,13 @@ export async function runAnalysis(
       contextText,
     });
 
-    const reviewStatus = visionResult.confidence >= 0.8
-      ? 'needs_review'
-      : 'low_confidence_review';
+    const isAnalysisFailure = visionResult.confidence <= 0
+      && /失败|无法读取|等待AI分析/.test(visionResult.ai_summary || '');
+    const reviewStatus = isAnalysisFailure
+      ? 'analysis_failed'
+      : visionResult.confidence >= 0.8
+        ? 'needs_review'
+        : 'low_confidence_review';
 
     await prisma.visualCase.update({
       where: { id: caseId },
@@ -34,10 +38,12 @@ export async function runAnalysis(
         mediaType: visionResult.media_type,
         contentType: visionResult.content_type,
         discipline: visionResult.discipline,
-        visualStyle: visionResult.visual_style,
+        technicalMethod: visionResult.technical_method,
         composition: visionResult.composition,
         colorTone: visionResult.color_tone,
         useCase: JSON.stringify(visionResult.use_case),
+        functionalPurpose: visionResult.functional_purpose || undefined,
+        distributionMedium: visionResult.distribution_medium || undefined,
         aiSummary: visionResult.ai_summary,
         caseTitle: visionResult.case_title,
         borrowablePoints: JSON.stringify(visionResult.borrowable_points),

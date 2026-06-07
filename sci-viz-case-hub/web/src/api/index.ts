@@ -41,14 +41,14 @@ export const api = {
     return request<InsightSummary>(`/insights/summary?${qs}`);
   },
 
-  getComparison(school?: string, dimension = 'mediaType') {
+  getComparison(school?: string, dimension = 'functionalPurpose') {
     const params: Record<string, string> = { dimension };
     if (school) params.school = school;
     const qs = new URLSearchParams(params).toString();
     return request<ComparisonData>(`/insights/comparison?${qs}`);
   },
 
-  getThreeAxisSpectrum(x = 'functionalPurpose', y = 'mediaType', z = 'discipline') {
+  getThreeAxisSpectrum(x = 'functionalPurpose', y = 'technicalMethod', z = 'distributionMedium') {
     const qs = new URLSearchParams({ x, y, z }).toString();
     return request<ThreeAxisSpectrum>(`/insights/three-axis-spectrum?${qs}`);
   },
@@ -66,6 +66,13 @@ export const api = {
 
   deleteCase(id: string) {
     return request<void>(`/cases/${id}`, { method: 'DELETE' });
+  },
+
+  batchDeleteCases(ids: string[]) {
+    return request<{ deleted: number; requested: number }>('/cases/batch/delete', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    });
   },
 
   reanalyze(id: string) {

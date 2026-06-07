@@ -1,29 +1,23 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { getVisionConfig, getVisionHeaders } from './visionConfig.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ORIGINALS_DIR = path.join(__dirname, '..', '..', 'uploads', 'originals');
 const REPO_ROOT = path.join(__dirname, '..', '..', '..');
 
-function getVisionConfig() {
-  return {
-    url: process.env.VISION_API_URL || '',
-    key: process.env.VISION_API_KEY || '',
-  };
-}
-
-const MODEL = 'qwen/qwen3-vl-8b-instruct';
-
 export interface VisionAnalysisResult {
   media_type: string;
   content_type: string;
   discipline: string;
-  visual_style: string;
+  technical_method: string;
   composition: string;
   color_tone: string;
   use_case: string[];
+  functional_purpose: string;
+  distribution_medium: string;
   ai_summary: string;
   case_title: string;
   borrowable_points: string[];
@@ -65,9 +59,11 @@ const SYSTEM_PROMPT = `你是一个科研视觉分析专家。仔细观察图片
   "media_type": "从 [摄影, 手绘图, 3D渲染, 信息图, 显微图, 数据可视化, 混合媒介, 不确定] 选一项",
   "content_type": "从 [单人肖像, 群体肖像, 绘画肖像, 实验设备, 实验过程, 微观样本, 机制模型, 数据结果, 空间环境, 团队场景, 科普传播, 不确定] 选一项",
   "discipline": "从 [生命科学, 材料, 医学, 工程, 物理, 化学, 信息科学, 环境科学, 综合交叉, 不确定] 选一项",
-  "visual_style": "从 [纪实, 科技, 极简, 人文, 艺术化, 教学解释, 商业宣传, 顶刊封面, 不确定] 选一项",
+  "technical_method": "从 [拍摄, 成像, 绘设, 数据, 渲染, 生成] 选一项",
   "composition": "从 [中心式, 对称式, 引导线, 特写局部, 多元素并列, 开放式, 不确定] 选一项",
   "color_tone": "从 [冷调, 暖调, 中性, 低饱和, 高饱和, 黑白, 单色系, 不确定] 选一项",
+  "functional_purpose": "从 [记录, 解释, 数据, 展示, 传播, 交互] 选一项",
+  "distribution_medium": "从 [静图, 动图, 视频, 图组, 交互, 实体] 选一项",
   "use_case": "从 [官网宣传, 论文配图, 期刊封面, 项目申报, 招生宣传, 科普传播, 展览, 教学材料] 选适用的",
   "ai_summary": "一句话描述这张图的视觉内容",
   "case_title": "10字内精炼标题",
@@ -75,6 +71,43 @@ const SYSTEM_PROMPT = `你是一个科研视觉分析专家。仔细观察图片
   "risk_notes": [],
   "confidence": 0.0
 }
+
+三轴分类规则（这是最重要的分类体系，三个维度相互独立）：
+
+轴一：功能用途——这张影像是用来干什么的？
+- 记录：保存真实对象、事件、人物或过程（实验现场、设备外观、人物肖像、会议照片）
+- 解释：说明复杂机制、结构、流程和原理（工作原理图、系统架构图、流程步骤图）
+- 数据：呈现研究结果、模型和变化趋势（性能对比图、统计图表、趋势曲线）
+- 展示：呈现成果、产品、空间或项目形象（产品照片、成果外观、空间展示、项目主视觉）
+- 传播：面向公众、品牌和科普传播（Nature封面、科普信息图、新闻配图、招生海报）
+- 交互：支持用户操作、浏览、筛选和决策（数据仪表盘、可交互地图、可旋转3D模型）
+判断要点：
+- Nature封面图的主功能是传播，不是展示
+- 产品实拍如果强调"看我们做出了什么"→展示，如果只是存档→记录
+- 原理解释图即使包含数据元素，主功能仍是解释
+- 可交互的界面截图→传播（因为截图本身不能交互），真正的交互页面→交互
+
+轴二：传播媒介——这张影像以什么形式存在？
+- 静图：单张静态图像（照片、插图、图表、渲染图）
+- 动图：带有简单运动或循环效果的图像（GIF、循环动效）
+- 视频：连续影像内容（实验视频、讲解视频、动画）
+- 图组：多张图像有逻辑地组合在一起（论文多子图、步骤对比图、信息图长图）
+- 交互：可被用户操作和探索的视觉界面（仪表盘、可缩放地图、交互可视化）
+- 实体：转化到现实空间中的视觉媒介（海报、展板、印刷物）
+判断要点：
+- 看形式而不是内容——一张照片内容再丰富，媒介维度仍是静图
+- 论文中包含(a)(b)(c)(d)多子图的Figure→图组
+- 信息图如果由多组件组合→图组
+
+轴三：技术手段——这张影像是怎么生产出来的？
+- 拍摄：通过相机、摄像机等获取现实影像
+- 成像：通过专业设备获取不可见或微观影像（显微镜、CT/MRI、遥感、热成像）
+- 绘设：通过人工绘制和视觉设计方法生成（插画、图标、流程图、排版）
+- 数据：通过数据处理与可视化生成（图表、数据地图、网络图）
+- 渲染：通过三维建模、仿真和工程软件生成（3D产品渲染、3D机制图、仿真场景）
+- 生成：通过AI或算法生成、增强或转化
+判断要点：
+- 看核心生产方式——照片经过后期PS仍是拍摄，3D渲染后排版仍是渲染
 
 confidence说明：
 - 0.9+：非常确定，图片清晰、类别明确、与网页标题高度一致
@@ -139,7 +172,7 @@ export async function analyzeImage(params: {
   sourceUrl: string;
   contextText: string;
 }): Promise<VisionAnalysisResult> {
-  const { url: apiUrl, key: apiKey } = getVisionConfig();
+  const { url: apiUrl, key: apiKey, model, provider } = getVisionConfig();
   const isPlaceholder = !apiUrl || !apiKey
     || apiKey.includes('your-');
   if (isPlaceholder) {
@@ -163,12 +196,9 @@ export async function analyzeImage(params: {
 
     const response = await fetch(apiUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
+      headers: getVisionHeaders(apiKey),
       body: JSON.stringify({
-        model: MODEL,
+        model,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           {
@@ -186,7 +216,7 @@ export async function analyzeImage(params: {
 
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
-      throw new Error(`OpenRouter API ${response.status}: ${errText}`);
+      throw new Error(`${provider} API ${response.status}: ${errText}`);
     }
 
     const data = await response.json() as {
@@ -195,7 +225,7 @@ export async function analyzeImage(params: {
     const msg = data.choices?.[0]?.message;
     let content = msg?.content || msg?.reasoning || '';
     if (!content) {
-      throw new Error('Empty response from OpenRouter');
+      throw new Error(`Empty response from ${provider}`);
     }
 
     // Extract JSON from the response (handle possible markdown code fences)
@@ -206,9 +236,11 @@ export async function analyzeImage(params: {
       media_type: result.media_type || '不确定',
       content_type: result.content_type || '不确定',
       discipline: result.discipline || '不确定',
-      visual_style: result.visual_style || '不确定',
+      technical_method: result.technical_method || '不确定',
       composition: result.composition || '不确定',
       color_tone: result.color_tone || '不确定',
+      functional_purpose: result.functional_purpose || '',
+      distribution_medium: result.distribution_medium || '',
       use_case: result.use_case || [],
       ai_summary: result.ai_summary || '',
       case_title: result.case_title || '',
@@ -227,7 +259,7 @@ function sanitizeResult(result: VisionAnalysisResult): VisionAnalysisResult {
   const mediaTypes = ['摄影', '手绘图', '3D渲染', '信息图', '显微图', '数据可视化', '期刊封面', '混合媒介', '不确定'];
   const contentTypes = ['单人肖像', '群体肖像', '绘画肖像', '实验设备', '实验过程', '微观样本', '机制模型', '数据结果', '空间环境', '团队场景', '科普传播', '不确定'];
   const disciplines = ['生命科学', '材料', '医学', '工程', '物理', '化学', '信息科学', '环境科学', '综合交叉', '不确定'];
-  const visualStyles = ['纪实', '科技', '极简', '人文', '艺术化', '教学解释', '商业宣传', '顶刊封面', '不确定'];
+  const technicalMethods = ['拍摄', '成像', '绘设', '数据', '渲染', '生成'];
 
   const normalize = (value: string, valid: string[]): string => {
     const trimmed = (value || '').trim();
@@ -243,7 +275,16 @@ function sanitizeResult(result: VisionAnalysisResult): VisionAnalysisResult {
   result.media_type = normalize(result.media_type, mediaTypes);
   result.content_type = normalize(result.content_type, contentTypes);
   result.discipline = normalize(result.discipline, disciplines);
-  result.visual_style = normalize(result.visual_style, visualStyles);
+  result.technical_method = normalize(result.technical_method, technicalMethods);
+
+  const functionalPurposes = ['记录', '解释', '数据', '展示', '传播', '交互'];
+  const distributionMediums = ['静图', '动图', '视频', '图组', '交互', '实体'];
+  if (!functionalPurposes.includes((result.functional_purpose || '').trim())) {
+    result.functional_purpose = '';
+  }
+  if (!distributionMediums.includes((result.distribution_medium || '').trim())) {
+    result.distribution_medium = '';
+  }
 
   if (result.media_type === '不确定' && result.content_type === '不确定' && result.discipline === '不确定') {
     result.confidence = Math.min(result.confidence || 0, 0.3);
@@ -292,9 +333,11 @@ function mockResult(summary: string): VisionAnalysisResult {
     media_type: '不确定',
     content_type: '不确定',
     discipline: '不确定',
-    visual_style: '不确定',
+    technical_method: '不确定',
     composition: '不确定',
     color_tone: '不确定',
+    functional_purpose: '',
+    distribution_medium: '',
     use_case: [],
     ai_summary: summary,
     case_title: '',
@@ -328,7 +371,7 @@ export async function classifyMediaType(params: {
   pageTitle: string;
   contextText: string;
 }): Promise<string> {
-  const { url: apiUrl, key: apiKey } = getVisionConfig();
+  const { url: apiUrl, key: apiKey, model } = getVisionConfig();
   const isPlaceholder = !apiUrl || !apiKey || apiKey.includes('your-');
   if (isPlaceholder) return '不确定';
 
@@ -345,12 +388,9 @@ export async function classifyMediaType(params: {
   try {
     const response = await fetch(apiUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
+      headers: getVisionHeaders(apiKey),
       body: JSON.stringify({
-        model: MODEL,
+        model,
         messages: [
           { role: 'system', content: MEDIA_TYPE_SYSTEM },
           {

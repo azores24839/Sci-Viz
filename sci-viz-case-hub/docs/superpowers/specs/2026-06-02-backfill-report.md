@@ -51,7 +51,7 @@
 | 3D产品渲染 | 30 |
 | (空) | 113 |
 
-空值对应：混合媒介、视频、PDF/文档、不确定 等mediaType（按规则不标）
+空值对应：混合媒介、不确定等暂难细分的 `mediaType`（按规则不标）。2026-06-05 起，视频不再作为 `mediaType`，统一使用 `distributionMedium=视频`。
 
 ### contentSubType
 | 值 | 数量 |
@@ -72,7 +72,7 @@
 ## 推断规则摘要
 
 - **functionalPurpose**: 按 visualStyle → contentType → visualStyle 4级优先级推断
-- **distributionMedium**: 基于 mediaType（视频→视频）+ sourceDomain（nature.com信息图→图组）
+- **distributionMedium**: 2026-06-05 后基于 captureType/videoUrl/sourceDomain/contextText 推断；视频统一进入 `distributionMedium=视频`，不进入 `mediaType`
 - **mediaSubType**: mediaType + visualStyle/discipline 交叉推断
 - **contentSubType**: contentType 一对一映射
 

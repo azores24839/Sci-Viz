@@ -4,6 +4,7 @@ import { prisma } from '../prisma.js';
 import { discoverLinks } from './discoverLinks.js';
 import { processSingleUrl } from './runUrlCrawl.js';
 import { discoverNasaImages, ingestNasaImage } from './nasaAdapter.js';
+import { findDuplicateByUrl } from '../services/dedupe.js';
 
 export interface SourceCrawlOptions {
   maxLinks?: number;
@@ -13,8 +14,31 @@ export interface SourceCrawlOptions {
 
 export const EASY_STATIC_SOURCE_NAMES = [
   'MIT News - Research',
+  'MIT News - Science',
+  'MIT News - Engineering',
+  'MIT News - Biology',
+  'MIT News - Physics',
   'Harvard Gazette',
+  'Harvard Gazette - Science',
+  'Harvard Gazette - Health',
+  'Harvard Gazette - Nation',
   'Berkeley Lab News Center',
+  'Berkeley Lab News - Research',
+  'Berkeley Lab - Computing Sciences',
+  'Berkeley Lab - Energy',
+  'Berkeley Lab - Physical Sciences',
+  'Max Planck Society Newsroom',
+  'Max Planck Research Highlights',
+  'Max Planck - Physics',
+  'Max Planck - Biology Medicine',
+  'Max Planck - Chemistry',
+  'Stanford Engineering News',
+  'Stanford Engineering - News Feed',
+  'Stanford Report - Science',
+  'Stanford Report - Health',
+  'Stanford Report - Technology',
+  'NASA EO - Climate',
+  'NASA EO - Hazards',
   'CAS Research Progress',
   'ScienceNet',
 ];
@@ -91,10 +115,8 @@ async function runStaticSourceCrawl(source: CrawlSource, jobId: number, options:
   await Promise.all(articleUrls.map(url =>
     limit(async () => {
       try {
-        const existing = await prisma.visualCase.findFirst({
-          where: { sourceUrl: url }, select: { id: true },
-        });
-        if (!existing) {
+        const dupe = await findDuplicateByUrl(url);
+        if (!dupe) {
           const result = await processSingleUrl(url, source.name, source.sourceType);
           totalNewCases += result.createdCaseCount;
         }
