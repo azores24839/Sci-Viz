@@ -1,0 +1,9 @@
+{
+  "name": "@studio/fixtures",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": { "typecheck": "tsc -p tsconfig.json --noEmit", "test": "vitest run --passWithNoTests" },
+  "dependencies": { "@studio/contracts": "*", "@studio/workflow-core": "*" }
+}

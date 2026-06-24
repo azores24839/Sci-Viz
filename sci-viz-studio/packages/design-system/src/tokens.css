@@ -1,0 +1,19 @@
+:root {
+  --studio-ink: #111827;
+  --studio-ink-soft: #394150;
+  --studio-muted: #7c8799;
+  --studio-line: #dfe5ee;
+  --studio-surface: #ffffff;
+  --studio-canvas: #f8fafc;
+  --studio-blue: #1769f3;
+  --studio-blue-soft: #eaf2ff;
+  --studio-success: #138a5b;
+  --studio-warning: #b56a00;
+  --studio-danger: #c33b44;
+  --studio-radius-sm: 8px;
+  --studio-radius-md: 14px;
+  --studio-radius-lg: 24px;
+  --studio-shadow-panel: 0 18px 55px rgb(28 47 76 / 8%);
+  --studio-font-body: "Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --studio-font-display: "Avenir Next", "DIN Alternate", "PingFang SC", system-ui, sans-serif;
+}
