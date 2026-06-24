@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 构建一个可本地运行、可持久化、可端到端验证的科研摄影阶段式 AI 工作台，以“长兴海洋实验室”为完整 Mock 项目。
+**Goal:** 构建一个可本地运行、可持久化、可端到端验证的科研摄影 AI Studio，以固定业务节点画布呈现“长兴海洋实验室”完整 Mock 工作流。
 
-**Architecture:** 在 `sci-viz-studio/` 中建立 npm workspace 模块化单体。React Web 通过 Fastify API 访问 PGlite；Server 与 Worker 共用领域、契约和数据访问代码，但使用不同进程入口。所有 Agent 通过结构化 `ModelGateway` 和持久 `AgentJob` 执行，MVP 默认使用确定性 Mock Gateway。
+**Architecture:** 在 `sci-viz-studio/` 中建立 npm workspace 模块化单体。React Web 通过 Fastify API 访问 PGlite；Server 与 Worker 共用领域、契约和数据访问代码，但使用不同进程入口。`workflow-core` 保存与 UI 无关的版本化流程模板和推进规则，Web 的 `workflow-canvas` 适配层负责把领域 DTO 映射到 React Flow。所有 Agent 通过结构化 `ModelGateway` 和持久 `AgentJob` 执行，MVP 默认使用确定性 Mock Gateway，DeepSeek 只通过 Server 端 Adapter 接入。
 
-**Tech Stack:** TypeScript, React, Vite, React Router, TanStack Query, Fastify, Zod, PGlite, Drizzle ORM, Vitest, Testing Library, Playwright, npm workspaces
+**Tech Stack:** TypeScript, React, Vite, React Flow (`@xyflow/react`), React Router, TanStack Query, Fastify, Zod, PGlite, Drizzle ORM, Vitest, Testing Library, Playwright, npm workspaces
 
 ---
 
@@ -15,6 +15,7 @@
 ```text
 sci-viz-studio/
 ├── .gitignore
+├── .env.example
 ├── .nvmrc
 ├── package.json
 ├── tsconfig.base.json
@@ -25,9 +26,11 @@ sci-viz-studio/
 │   └── migrations/
 ├── packages/
 │   ├── contracts/src/index.ts
-│   ├── domain/src/{index,projectStage,reviewGate,progress}.ts
+│   ├── domain/src/{index,reviewGate,progress}.ts
+│   ├── workflow-core/src/{index,types,template,transitions}.ts
 │   ├── fixtures/src/{index,changxing}.ts
-│   ├── ai-workflows/src/{index,modelGateway,mockModelGateway,tasks}.ts
+│   ├── ai-workflows/src/{index,modelGateway,mockModelGateway,deepSeekGateway,tasks}.ts
+│   ├── ai-workflows/src/prompts/{README,researchAnalyst,scienceReviewer,visualPlanner,photographyDirector}.ts
 │   └── design-system/src/{index,tokens.css}.ts
 ├── apps/
 │   ├── server/src/
@@ -39,12 +42,13 @@ sci-viz-studio/
 │   └── web/src/
 │       ├── {main,App}.tsx
 │       ├── api/client.ts
-│       ├── components/{AppShell,StageRail,AgentCard,EvidenceBadge,RunTimeline}.tsx
+│       ├── components/{AppShell,AgentCard,EvidenceBadge,RunTimeline}.tsx
+│       ├── features/workflow-canvas/{WorkflowCanvas,WorkflowNodeCard,WorkflowNodeRegistry,WorkflowFallbackList,AgentContextPanel,adapter}.tsx
 │       ├── features/understand/*
 │       ├── features/review/*
 │       ├── features/plan/*
 │       ├── features/capture/*
-│       ├── pages/{ProjectList,NewProject,Understand,Review,Plan,Capture,ExternalReview}.tsx
+│       ├── pages/{ProjectList,NewProject,Studio,Understand,Review,Plan,Capture,ExternalReview}.tsx
 │       └── styles/{global,layout}.css
 └── tests/e2e/studio.spec.ts
 ```
@@ -88,7 +92,7 @@ Use this root shape:
 }
 ```
 
-Set `.nvmrc` to `22`, ignore `node_modules/`, `dist/`, `data/`, `.env`, and Playwright artifacts.
+Set `.nvmrc` to `22`, ignore `node_modules/`, `dist/`, `data/`, `.env`, `.env.*`（但保留 `!.env.example`）, and Playwright artifacts. Root `.env.example` documents provider selection; `apps/server/.env.example` documents `AI_PROVIDER`, `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, and `DATABASE_PATH` with empty secrets.
 
 - [ ] **Step 3: Install pinned-by-lock dependencies**
 
@@ -99,6 +103,7 @@ npm install -D concurrently typescript vitest @vitest/coverage-v8 drizzle-kit
 npm install -w @studio/contracts zod
 npm install -w @studio/server fastify @fastify/cors @electric-sql/pglite drizzle-orm zod
 npm install -w @studio/web react react-dom react-router-dom @tanstack/react-query
+npm install -w @studio/web @xyflow/react
 npm install -D -w @studio/web vite @vitejs/plugin-react @types/react @types/react-dom @testing-library/react @testing-library/user-event jsdom
 npm install -D -w @studio/server tsx @types/node
 ```
@@ -126,54 +131,44 @@ Expected: one `sci-viz-studio/package-lock.json`; no lockfile change under `sci-
 
 Run `npm install`, `npm run check`, then commit only `sci-viz-studio/` scaffold files with `chore: scaffold sci-viz studio workspace`.
 
-## Task 2: Define contracts and domain rules with tests
+## Task 2: Define workflow contracts and domain rules with tests
 
 **Files:**
 - Create: `packages/contracts/src/index.ts`
-- Create: `packages/domain/src/projectStage.ts`
+- Create: `packages/workflow-core/src/types.ts`
+- Create: `packages/workflow-core/src/template.ts`
+- Create: `packages/workflow-core/src/transitions.ts`
 - Create: `packages/domain/src/reviewGate.ts`
 - Create: `packages/domain/src/progress.ts`
 - Test: `packages/domain/src/*.test.ts`
 
-- [ ] **Step 1: Write failing stage transition tests**
+- [ ] **Step 1: Write failing workflow topology and transition tests**
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { canTransition } from './projectStage';
+import { canEnterNode, validateTemplate } from './transitions';
 
-describe('canTransition', () => {
-  it('allows the golden path', () => {
-    expect(canTransition('UNDERSTANDING', 'REVIEWING')).toBe(true);
-    expect(canTransition('REVIEWING', 'PLANNING')).toBe(true);
+describe('research photo workflow', () => {
+  it('uses stable semantic ids and an acyclic topology', () => {
+    expect(validateTemplate(researchPhotoV1)).toEqual({ valid: true });
   });
 
-  it('rejects skipping stages', () => {
-    expect(canTransition('UNDERSTANDING', 'CAPTURING')).toBe(false);
+  it('rejects entering a downstream node while a blocker gate is open', () => {
+    expect(canEnterNode('visual-plan', openBlockerState)).toBe(false);
   });
 });
 ```
 
 Run `npm test -w @studio/domain`; expected FAIL because the function does not exist.
 
-- [ ] **Step 2: Implement explicit stage transitions**
+- [ ] **Step 2: Implement the versioned `research-photo-v1` workflow**
 
 ```ts
-export type ProjectStatus =
-  | 'DRAFT' | 'UNDERSTANDING' | 'REVIEWING'
-  | 'PLANNING' | 'CAPTURING' | 'COMPLETED';
-
-const transitions: Record<ProjectStatus, ProjectStatus[]> = {
-  DRAFT: ['UNDERSTANDING'],
-  UNDERSTANDING: ['REVIEWING'],
-  REVIEWING: ['PLANNING'],
-  PLANNING: ['CAPTURING'],
-  CAPTURING: ['COMPLETED'],
-  COMPLETED: [],
-};
-
-export const canTransition = (from: ProjectStatus, to: ProjectStatus) =>
-  transitions[from].includes(to);
+source-intake → research-analysis → science-review → fact-confirmation
+→ visual-plan → capture-preparation → plan-output
 ```
+
+Keep template topology, stable IDs, default layout, and entry conditions in `workflow-core`; do not import React Flow types.
 
 - [ ] **Step 3: Write failing review gate and progress tests**
 
@@ -212,7 +207,7 @@ The test creates PGlite at `memory://`, runs migrations, inserts a workspace and
 
 - [ ] **Step 2: Define normalized Drizzle tables**
 
-Create tables from spec section 8 with foreign keys and indexes. Required unique constraints:
+Create tables from spec section 8 with foreign keys and indexes, including `project_workflow`, `workflow_node_state`, and `canvas_layout`. Required unique constraints:
 
 ```text
 artifact(project_id, type)
@@ -220,6 +215,9 @@ artifact_version(artifact_id, version)
 agent_job(idempotency_key)
 capture_item(shot_card_id)
 review_link(token_hash)
+project_workflow(project_id)
+workflow_node_state(project_workflow_id, node_id)
+canvas_layout(project_id)
 ```
 
 Store structured artifact bodies as `jsonb`; keep stage, status, severity, position, and timestamps as queryable columns.
@@ -253,7 +251,7 @@ Commit: `feat: add embedded postgres persistence`.
 
 - [ ] **Step 1: Write the failing seed integrity test**
 
-Assert exactly one default workspace and one `PHOTO` project, at least four source kinds, at least six claims spanning all confidence states, at least three review questions including one blocker, four Agent roles, at least six shot cards, and one capture item per shot card.
+Assert exactly one default workspace and one `PHOTO` project, one `research-photo-v1` project workflow, all seven stable node states, at least four source kinds, at least six claims spanning all confidence states, at least three review questions including one blocker, four Agent roles, at least six shot cards, and one capture item per shot card.
 
 - [ ] **Step 2: Implement evidence-backed fixture content**
 
@@ -273,6 +271,7 @@ Commit: `feat: seed changxing photography demo`.
 - Create: `packages/ai-workflows/src/modelGateway.ts`
 - Create: `packages/ai-workflows/src/mockModelGateway.ts`
 - Create: `packages/ai-workflows/src/tasks.ts`
+- Create: `packages/ai-workflows/src/prompts/*`
 - Create: `apps/server/src/repositories/job.ts`
 - Create: `apps/server/src/services/workflow.ts`
 - Create: `apps/server/src/worker.ts`
@@ -303,6 +302,8 @@ export interface ModelGateway {
 ```
 
 The mock implementation returns deterministic Changxing fixtures and always parses through the supplied schema.
+
+Create a `DeepSeekGateway` skeleton that reads credentials only from the Server process and implements the same interface. It must fail closed with `AI_PROVIDER_NOT_CONFIGURED` when no key is present; MVP tests and default runtime continue using `MockModelGateway`. Prompt modules export versioned role instructions and Zod-bound task definitions; user-authored prompt text can replace content without changing callers.
 
 - [ ] **Step 3: Write failing idempotency and retry tests**
 
@@ -409,7 +410,7 @@ Return `overallPercent`, `mustPercent`, `captured`, `reshoot`, and `remaining`. 
 
 Commit: `feat: add plan and capture persistence`.
 
-## Task 9: Create the design system and application shell
+## Task 9: Create the design system, Studio shell, and workflow canvas
 
 **Files:**
 - Create: `packages/design-system/src/tokens.css`
@@ -417,14 +418,14 @@ Commit: `feat: add plan and capture persistence`.
 - Create: `apps/web/src/styles/global.css`
 - Create: `apps/web/src/styles/layout.css`
 - Create: `apps/web/src/components/AppShell.tsx`
-- Create: `apps/web/src/components/StageRail.tsx`
+- Create: `apps/web/src/features/workflow-canvas/*`
 - Create: `apps/web/src/components/AgentCard.tsx`
 - Create: `apps/web/public/agents/README.md`
 - Test: component tests
 
-- [ ] **Step 1: Write failing shell accessibility tests**
+- [ ] **Step 1: Write failing shell and canvas accessibility tests**
 
-Assert one `main`, labelled navigation, current stage via `aria-current="step"`, keyboard-focusable stage links, and visible Mock AI badge.
+Assert one `main`, a labelled workflow region, keyboard-selectable nodes, selected node state, visible Mock AI badge, and a linear fallback list.
 
 - [ ] **Step 2: Implement token contract**
 
@@ -447,31 +448,36 @@ Assert one `main`, labelled navigation, current stage via `aria-current="step"`,
 
 No gradients, neon glow, purple accents, or color-only status semantics.
 
-- [ ] **Step 3: Build responsive three-column shell**
+- [ ] **Step 3: Build the reference-aligned Studio shell**
 
-Desktop: 240 px StageRail, flexible main content, 300 px Agent panel. Below 1000 px, Agent panel becomes an expandable section. Capture route below 760 px uses single-column list and sticky progress header.
+Desktop: compact top project bar, flexible React Flow canvas, and 360–420 px Agent context panel. Implement pan, zoom, fitView, lock, MiniMap, selected-node emphasis, and horizontal default layout. Disable node deletion and reconnection. Below 1000 px, Agent panel becomes a drawer; below 760 px, replace the canvas with `WorkflowFallbackList`. Capture route remains a single-column list with sticky progress header.
 
-- [ ] **Step 4: Add avatar fallback contract**
+- [ ] **Step 4: Add the React Flow isolation adapter**
+
+Only `features/workflow-canvas` may import `@xyflow/react`. Convert domain workflow DTOs to view nodes/edges in a pure `adapter.ts`; never persist React Flow selection or dragging fields. Layout reset must not mutate business state.
+
+- [ ] **Step 5: Add avatar fallback contract**
 
 Attempt the approved filenames; `onError` swaps to deterministic initial avatar. README states 512×512 PNG/WebP, ≤1 MB.
 
-- [ ] **Step 5: Run component tests and commit**
+- [ ] **Step 6: Run component tests and commit**
 
 Commit: `feat: build studio design system shell`.
 
-## Task 10: Build project list and understanding stage
+## Task 10: Build project list, Studio page, and understanding detail
 
 **Files:**
 - Create: `apps/web/src/api/client.ts`
 - Create: `apps/web/src/pages/ProjectList.tsx`
 - Create: `apps/web/src/pages/NewProject.tsx`
+- Create: `apps/web/src/pages/Studio.tsx`
 - Create: `apps/web/src/pages/Understand.tsx`
 - Create: `apps/web/src/features/understand/{SourceCard,ClaimCard,EvidenceDrawer}.tsx`
 - Test: page/component tests
 
 - [ ] **Step 1: Write failing UI tests**
 
-Assert Changxing project card, PHOTO label, progress, four source types, one-line summary, all evidence confidence labels, and evidence drawer source excerpt.
+Assert Changxing project card, PHOTO label, seven workflow nodes, selected node context, progress, four source types, one-line summary, all evidence confidence labels, and evidence drawer source excerpt.
 
 - [ ] **Step 2: Implement typed API client**
 
@@ -479,7 +485,7 @@ Every response is parsed with contracts. Non-2xx responses become `ApiError` wit
 
 - [ ] **Step 3: Implement project and understand pages**
 
-Use TanStack Query keys `['projects']`, `['project', id]`, `['claims', id]`, and `['runs', id]`. Add visible loading, empty, error, and retry states.
+Use TanStack Query keys `['projects']`, `['project', id]`, `['workflow', id]`, `['claims', id]`, and `['runs', id]`. Add visible loading, empty, error, and retry states. Node selection is URL-addressable through `?node=research-analysis` but does not advance workflow state.
 
 - [ ] **Step 4: Verify keyboard and narrow viewport behavior**
 
@@ -569,7 +575,7 @@ Commit: `feat: add field capture checklist`.
 
 - [ ] **Step 1: Write the complete golden-path E2E test**
 
-Automate the eleven steps from design section 13.4. Use stable `data-testid` only for elements lacking strong semantic roles. Seed a fresh temporary database before the run.
+Automate the thirteen steps from design section 13.4, including canvas selection, layout/state separation, refresh recovery, and mobile linear fallback. Use stable `data-testid` only for elements lacking strong semantic roles. Seed a fresh temporary database before the run.
 
 - [ ] **Step 2: Add failure-path E2E coverage**
 
@@ -588,7 +594,7 @@ npm run build
 npx playwright test
 ```
 
-Expected: all exit 0; no TypeScript errors; all four workspaces build; golden path passes at desktop and mobile viewport.
+Expected: all exit 0; no TypeScript errors; all workspaces build; golden path passes at desktop and mobile viewport.
 
 - [ ] **Step 5: Perform browser visual QA**
 
@@ -607,4 +613,3 @@ Commit: `feat: complete sci-viz studio MVP`.
 ## Execution Mode
 
 This plan will be executed inline in the current session. The repository instruction prohibits spawning subagents unless the user explicitly requests delegation. Implementation must preserve all unrelated dirty changes and commit only `sci-viz-studio/` plus the approved spec/plan documents.
-
