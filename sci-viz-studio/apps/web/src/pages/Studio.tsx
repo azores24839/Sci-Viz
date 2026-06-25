@@ -11,7 +11,7 @@ import {
   type WorkflowNodeDefinition,
   type WorkflowNodeState,
 } from '@studio/workflow-core';
-import type { AgentRole } from '@studio/contracts';
+import type { AgentDraftRequest, AgentDraftResponse, AgentRole, AgentTask } from '@studio/contracts';
 import { WorkflowCanvas } from '../features/workflow-canvas/WorkflowCanvas';
 import { WorkflowFallbackList } from '../features/workflow-canvas/WorkflowFallbackList';
 import { AgentContextPanel } from '../features/workflow-canvas/AgentContextPanel';
@@ -24,6 +24,16 @@ const nodeAgent: Record<string, AgentRole> = {
   'visual-plan': 'VISUAL_PLANNER',
   'capture-preparation': 'PHOTOGRAPHY_DIRECTOR',
   'plan-output': 'PHOTOGRAPHY_DIRECTOR',
+};
+
+const nodeTask: Record<string, AgentTask> = {
+  'source-intake': 'ANALYZE_PROJECT',
+  'research-analysis': 'ANALYZE_PROJECT',
+  'science-review': 'REVIEW_SCIENCE',
+  'fact-confirmation': 'REVIEW_SCIENCE',
+  'visual-plan': 'GENERATE_VISUAL_PLAN',
+  'capture-preparation': 'GENERATE_CAPTURE_LIST',
+  'plan-output': 'GENERATE_CAPTURE_LIST',
 };
 
 function createDemoArtifact(node: WorkflowNodeDefinition, state: WorkflowNodeState) {
@@ -75,15 +85,99 @@ function createDemoArtifact(node: WorkflowNodeDefinition, state: WorkflowNodeSta
   };
 }
 
+function collectUpstreamArtifacts(states: WorkflowNodeState[]) {
+  return states
+    .filter((state) => state.artifactBody)
+    .map((state) => ({
+      nodeId: state.nodeId,
+      label: state.artifactLabel ?? state.nodeId,
+      body: state.artifactBody!,
+    }));
+}
+
+async function requestAgentDraft(
+  node: WorkflowNodeDefinition,
+  state: WorkflowNodeState,
+  states: WorkflowNodeState[],
+): Promise<AgentDraftResponse> {
+  const request: AgentDraftRequest = {
+    projectId: changxingProject.id,
+    projectName: changxingProject.name,
+    nodeId: node.id,
+    nodeLabel: node.label,
+    agentRole: nodeAgent[node.id] ?? 'RESEARCH_ANALYST',
+    task: nodeTask[node.id] ?? 'ANALYZE_PROJECT',
+    inputLabel: node.inputLabel,
+    outputLabel: node.outputLabel,
+    planLabel: state.planLabel ?? 'Plan A',
+    revision: state.revision,
+    ...(state.summary.startsWith('收到修改意见：') ? { revisionInstruction: state.summary.replace('收到修改意见：', '') } : {}),
+    upstreamArtifacts: collectUpstreamArtifacts(states),
+  };
+
+  const response = await fetch('http://127.0.0.1:3011/api/v1/agent-drafts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+
+  const payload = await response.json() as {
+    success: boolean;
+    data?: AgentDraftResponse;
+    error?: { code: string; message: string };
+  };
+
+  if (!response.ok || !payload.success || !payload.data) {
+    throw new Error(payload.error?.message ?? `AGENT_DRAFT_REQUEST_FAILED:${response.status}`);
+  }
+
+  return payload.data;
+}
+
+function createInitialStudioStates() {
+  return createDirectorWorkflowStates(researchPhotoWorkflowV1, ['source-intake']).map((state) => {
+    if (state.nodeId !== 'source-intake') return state;
+    return {
+      ...state,
+      artifactLabel: '资料集 v1',
+      artifactBody: [
+        '项目背景：长兴海洋实验室希望围绕海洋装备、绿色动力、智能制造和深海实验场景形成科研影像方案。',
+        '可用素材：实验室空间、科研设备、团队协作、控制屏幕、设备局部、访谈内容和部分可公开项目资料。',
+        '表达目标：面向科研合作、公众传播和项目汇报，强调可信、克制、清晰的科研视觉语言。',
+        '限制条件：设备运行状态、屏幕数据、合作单位名称和部分实验细节需要科研人员确认后才能公开。',
+      ].join('\n'),
+    };
+  });
+}
+
 export function Studio() {
-  const [states, setStates] = useState(() => createDirectorWorkflowStates(researchPhotoWorkflowV1, ['source-intake']));
+  const [states, setStates] = useState(createInitialStudioStates);
   const currentNodeId = getCurrentDirectorNodeId(researchPhotoWorkflowV1, states);
   const [selectedNodeId, setSelectedNodeId] = useState(currentNodeId);
   const [revisionText, setRevisionText] = useState('');
+  const [aiProviderLabel, setAiProviderLabel] = useState('AI 检查中');
 
   useEffect(() => {
     if (currentNodeId) setSelectedNodeId(currentNodeId);
   }, [currentNodeId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadProvider = async () => {
+      try {
+        const response = await fetch('http://127.0.0.1:3011/api/v1/config/ai');
+        const payload = await response.json() as { success: boolean; data?: { provider: 'mock' | 'deepseek'; configured: boolean } };
+        if (cancelled) return;
+        setAiProviderLabel(payload.data?.provider === 'deepseek' ? 'DeepSeek AI' : 'Mock AI');
+      } catch {
+        if (!cancelled) setAiProviderLabel('AI 离线');
+      }
+    };
+    void loadProvider();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const currentNode = researchPhotoWorkflowV1.nodes.find((node) => node.id === currentNodeId);
   const currentState = states.find((state) => state.nodeId === currentNodeId);
@@ -99,16 +193,48 @@ export function Studio() {
   useEffect(() => {
     if (!currentNode || currentStatus !== 'RUNNING') return;
 
-    const timer = window.setTimeout(() => {
-      setStates((value) => {
-        const latest = value.find((state) => state.nodeId === currentNode.id);
-        if (!latest || latest.status !== 'RUNNING') return value;
-        return completeNodeDraft(value, currentNode.id, createDemoArtifact(currentNode, latest));
-      });
-    }, 900);
+    let cancelled = false;
 
-    return () => window.clearTimeout(timer);
-  }, [currentNode, currentStatus, currentRevision]);
+    const generate = async () => {
+      try {
+        const draft = await requestAgentDraft(currentNode, currentState!, states);
+        if (cancelled) return;
+        setStates((value) => {
+          const latest = value.find((state) => state.nodeId === currentNode.id);
+          if (!latest || latest.status !== 'RUNNING') return value;
+          return completeNodeDraft(value, currentNode.id, {
+            label: draft.label,
+            body: draft.body,
+            blockerCount: draft.blockerCount,
+          });
+        });
+      } catch (error) {
+        if (cancelled) return;
+        setStates((value) => {
+          const latest = value.find((state) => state.nodeId === currentNode.id);
+          if (!latest || latest.status !== 'RUNNING') return value;
+          const fallback = createDemoArtifact(currentNode, latest);
+          const message = error instanceof Error ? error.message : '未知错误';
+          return completeNodeDraft(value, currentNode.id, {
+            ...fallback,
+            body: [
+              `> DeepSeek 暂时没有返回可用结果，已切换为本地测试草案。错误：${message}`,
+              '',
+              fallback.body,
+            ].join('\n'),
+            blockerCount: Math.max(fallback.blockerCount, 1),
+          });
+        });
+      }
+    };
+
+    const timer = window.setTimeout(() => void generate(), 450);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [currentNode, currentState, currentStatus, currentRevision, states]);
 
   const selectedNode = researchPhotoWorkflowV1.nodes.find((node) => node.id === selectedNodeId) ?? researchPhotoWorkflowV1.nodes[0]!;
   const selectedState = states.find((state) => state.nodeId === selectedNode.id) ?? states[0]!;
@@ -133,7 +259,7 @@ export function Studio() {
       <div className="brand"><span className="brand-mark" aria-hidden="true"><span /></span><span>科研影像 AI Studio</span></div>
       <span className="header-divider" />
       <span className="project-name">{changxingProject.name}</span>
-      <span className="mock-badge">Mock AI</span>
+      <span className="mock-badge">{aiProviderLabel}</span>
       <span className="header-spacer" />
       <button type="button" className="icon-button" aria-label="通知">♧</button>
       <span className="avatar-chip" aria-label="当前用户 ZH">ZH</span>

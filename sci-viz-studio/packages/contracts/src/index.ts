@@ -38,8 +38,39 @@ export const AgentMessageSchema = z.object({
   createdAt: z.string(),
 });
 
+export const AgentDraftArtifactSchema = z.object({
+  nodeId: z.string(),
+  label: z.string(),
+  body: z.string(),
+});
+
+export const AgentDraftRequestSchema = z.object({
+  projectId: z.string(),
+  projectName: z.string(),
+  nodeId: z.string(),
+  nodeLabel: z.string(),
+  agentRole: AgentRoleSchema,
+  task: AgentTaskSchema,
+  inputLabel: z.string(),
+  outputLabel: z.string(),
+  planLabel: z.string(),
+  revision: z.number().int().positive(),
+  revisionInstruction: z.string().optional(),
+  upstreamArtifacts: z.array(AgentDraftArtifactSchema),
+});
+
+export const AgentDraftResponseSchema = z.object({
+  label: z.string(),
+  body: z.string(),
+  blockerCount: z.number().int().min(0),
+  provider: z.enum(['mock', 'deepseek']),
+});
+
 export type AgentRole = z.infer<typeof AgentRoleSchema>;
 export type AgentTask = z.infer<typeof AgentTaskSchema>;
 export type Project = z.infer<typeof ProjectSchema>;
 export type AgentProfile = z.infer<typeof AgentProfileSchema>;
 export type AgentMessage = z.infer<typeof AgentMessageSchema>;
+export type AgentDraftArtifact = z.infer<typeof AgentDraftArtifactSchema>;
+export type AgentDraftRequest = z.infer<typeof AgentDraftRequestSchema>;
+export type AgentDraftResponse = z.infer<typeof AgentDraftResponseSchema>;
