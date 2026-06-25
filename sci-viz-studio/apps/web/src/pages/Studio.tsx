@@ -256,7 +256,10 @@ export function Studio() {
   return <div className="studio-shell">
     <header className="studio-header">
       <button type="button" className="menu-button" aria-label="打开项目菜单">☷</button>
-      <div className="brand"><span className="brand-mark" aria-hidden="true"><span /></span><span>科研影像 AI Studio</span></div>
+      <div className="brand">
+        <img className="brand-logo" src="/logo.png" alt="研影" />
+        <span>AI Studio</span>
+      </div>
       <span className="header-divider" />
       <span className="project-name">{changxingProject.name}</span>
       <span className="mock-badge">{aiProviderLabel}</span>

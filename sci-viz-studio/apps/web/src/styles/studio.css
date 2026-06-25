@@ -33,7 +33,7 @@
 .brand {
   display: flex;
   align-items: center;
-  gap: 13px;
+  gap: 12px;
   font-family: var(--studio-font-display);
   font-size: 20px;
   font-weight: 700;
@@ -41,23 +41,12 @@
   white-space: nowrap;
 }
 
-.brand-mark {
-  position: relative;
-  width: 28px;
-  height: 28px;
-  color: var(--studio-blue);
+.brand-logo {
+  display: block;
+  width: 112px;
+  height: 36px;
+  object-fit: contain;
 }
-
-.brand-mark::before, .brand-mark::after {
-  content: "";
-  position: absolute;
-  inset: 3px 12px;
-  border-radius: 999px;
-  background: currentColor;
-}
-
-.brand-mark::after { transform: rotate(90deg); }
-.brand-mark span { position: absolute; inset: 8px; border-radius: 50%; background: white; box-shadow: 0 0 0 3px currentColor; }
 
 .header-divider { width: 1px; height: 30px; background: var(--studio-line); }
 .project-name { font-size: 16px; font-weight: 650; white-space: nowrap; }
