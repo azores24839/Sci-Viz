@@ -18,13 +18,13 @@ export const agentProfiles: AgentProfile[] = [
 ];
 
 export const changxingNodeStates: WorkflowNodeState[] = [
-  { nodeId: 'source-intake', status: 'COMPLETED', blockerCount: 0, progress: 100, summary: '4 类资料已整理', artifactLabel: '资料集' },
-  { nodeId: 'research-analysis', status: 'COMPLETED', blockerCount: 0, progress: 100, summary: '完成资料归纳与视觉机会识别', artifactLabel: '科研理解包 v3' },
-  { nodeId: 'science-review', status: 'AWAITING_HUMAN', blockerCount: 2, progress: 72, summary: '发现 2 项需科研人员确认', artifactLabel: '审校结果' },
-  { nodeId: 'fact-confirmation', status: 'READY', blockerCount: 2, progress: 25, summary: '审核链接待发送', artifactLabel: '审核记录' },
-  { nodeId: 'visual-plan', status: 'LOCKED', blockerCount: 0, progress: 0, summary: '等待事实确认', artifactLabel: '拍摄方案' },
-  { nodeId: 'capture-preparation', status: 'LOCKED', blockerCount: 0, progress: 0, summary: '等待方案确认', artifactLabel: '拍摄清单' },
-  { nodeId: 'plan-output', status: 'LOCKED', blockerCount: 0, progress: 0, summary: '等待现场清单', artifactLabel: '摄影策划方案' },
+  { nodeId: 'source-intake', status: 'COMPLETED', blockerCount: 0, progress: 100, summary: '4 类资料已整理', artifactLabel: '资料集', revision: 1 },
+  { nodeId: 'research-analysis', status: 'COMPLETED', blockerCount: 0, progress: 100, summary: '完成资料归纳与视觉机会识别', artifactLabel: '科研理解包 v3', revision: 1 },
+  { nodeId: 'science-review', status: 'AWAITING_HUMAN', blockerCount: 2, progress: 72, summary: '发现 2 项需科研人员确认', artifactLabel: '审校结果', revision: 1 },
+  { nodeId: 'fact-confirmation', status: 'READY', blockerCount: 2, progress: 25, summary: '审核链接待发送', artifactLabel: '审核记录', revision: 1 },
+  { nodeId: 'visual-plan', status: 'LOCKED', blockerCount: 0, progress: 0, summary: '等待事实确认', artifactLabel: '拍摄方案', revision: 1 },
+  { nodeId: 'capture-preparation', status: 'LOCKED', blockerCount: 0, progress: 0, summary: '等待方案确认', artifactLabel: '拍摄清单', revision: 1 },
+  { nodeId: 'plan-output', status: 'LOCKED', blockerCount: 0, progress: 0, summary: '等待现场清单', artifactLabel: '摄影策划方案', revision: 1 },
 ];
 
 export const agentMessages: AgentMessage[] = [

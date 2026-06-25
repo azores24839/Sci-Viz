@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Background,
   Controls,
@@ -24,6 +24,16 @@ export function WorkflowCanvas({ template, states, selectedNodeId, onSelectNode 
   const initial = useMemo(() => toFlowElements(template, states), [template, states]);
   const [nodes, setNodes] = useState<StudioFlowNode[]>(initial.nodes);
   const [locked, setLocked] = useState(false);
+
+  useEffect(() => {
+    setNodes((current) => {
+      const positionById = new Map(current.map((node) => [node.id, node.position]));
+      return initial.nodes.map((node) => ({
+        ...node,
+        position: positionById.get(node.id) ?? node.position,
+      }));
+    });
+  }, [initial.nodes]);
 
   const onNodesChange = useCallback((changes: NodeChange<StudioFlowNode>[]) => {
     setNodes((current) => applyNodeChanges(changes, current));

@@ -48,4 +48,9 @@ export interface WorkflowNodeState {
   progress: number;
   summary: string;
   artifactLabel?: string;
+  artifactBody?: string;
+  revision: number;
+  planLabel?: string;
+  confirmedAt?: string;
+  updatedAt?: string;
 }

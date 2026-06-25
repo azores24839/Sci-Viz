@@ -19,14 +19,15 @@ export function toFlowElements(template: WorkflowTemplate, states: WorkflowNodeS
     position: definition.defaultPosition,
     data: {
       definition,
-      state: stateById.get(definition.id) ?? {
-        nodeId: definition.id,
-        status: 'LOCKED',
-        blockerCount: 0,
-        progress: 0,
-        summary: '尚未开始',
+        state: stateById.get(definition.id) ?? {
+          nodeId: definition.id,
+          status: 'LOCKED',
+          blockerCount: 0,
+          progress: 0,
+          summary: '尚未开始',
+          revision: 1,
+        },
       },
-    },
     draggable: true,
     selectable: true,
     deletable: false,
