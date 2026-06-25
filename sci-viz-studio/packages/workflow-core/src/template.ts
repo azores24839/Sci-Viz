@@ -25,23 +25,19 @@ const node = (
 
 export const researchPhotoWorkflowV1: WorkflowTemplate = {
   id: 'research-photo-v1',
-  version: 1,
+  version: 2,
   projectType: 'PHOTO',
   nodes: [
-    node('source-intake', 1, '资料输入', '输入', 'INPUT', '资料管理员', '整理项目资料与来源', '文件 / 网页 / 访谈 / 图片', '资料集'),
-    node('research-analysis', 2, '科研分析', '分析', 'AGENT', '科研分析师', '理解研究内容并发现视觉机会', '资料集', '科研理解包'),
-    node('science-review', 3, '科学审校', '审校', 'AGENT', '科学审校员', '检查证据、矛盾与表达风险', '科研理解包', '审校结果'),
-    node('fact-confirmation', 4, '科研人员确认', '确认', 'HUMAN_GATE', '科研人员', '确认事实、公开边界与安全要求', '审校问题', '审核记录'),
-    node('visual-plan', 5, '影像方案', '方案', 'AGENT', '影像策划师', '形成视觉概念与摄影叙事', '已确认事实', '拍摄方案'),
-    node('capture-preparation', 6, '现场执行', '成篇', 'EXECUTION', '摄影指导', '生成画面卡与现场清单', '拍摄方案', '拍摄清单'),
-    node('plan-output', 7, '方案输出', '输出', 'OUTPUT', '项目负责人', '汇总可执行的网页方案', '画面卡与清单', '摄影策划方案'),
+    node('project-brief', 1, '项目简报', '简报', 'AGENT', '项目制片人', '确认拍摄目的、受众、输出形式与限制条件', '资料 / 需求 / 目标', '项目简报'),
+    node('research-curation', 2, '科研叙事', '叙事', 'AGENT', '科研策展人', '把科研资料转成准确、可传播、可拍摄的科学叙事', '项目简报 + 科研资料', '科研叙事包'),
+    node('visual-strategy', 3, '影像方案', '方案', 'AGENT', '影像策划师', '把科研叙事转成视觉概念、画面结构与风格策略', '科研叙事包', '影像方案'),
+    node('production-plan', 4, '拍摄执行', '执行', 'EXECUTION', '拍摄导演', '把影像方案转成镜头清单、素材清单与现场执行计划', '影像方案', '拍摄执行单'),
+    node('plan-output', 5, '方案输出', '输出', 'OUTPUT', '项目制片人', '汇总可交付的科研影像方案', '项目简报 + 执行单', '完整方案'),
   ],
   edges: [
-    ['source-intake', 'research-analysis'],
-    ['research-analysis', 'science-review'],
-    ['science-review', 'fact-confirmation'],
-    ['fact-confirmation', 'visual-plan'],
-    ['visual-plan', 'capture-preparation'],
-    ['capture-preparation', 'plan-output'],
+    ['project-brief', 'research-curation'],
+    ['research-curation', 'visual-strategy'],
+    ['visual-strategy', 'production-plan'],
+    ['production-plan', 'plan-output'],
   ].map(([source, target]) => ({ id: `${source}-${target}`, source: source!, target: target! })),
 };

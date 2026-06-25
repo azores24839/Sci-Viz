@@ -11,20 +11,18 @@ export const changxingProject: Project = {
 };
 
 export const agentProfiles: AgentProfile[] = [
-  { role: 'RESEARCH_ANALYST', name: '科研分析师', avatar: '/agents/research-analyst.png', responsibility: '资料归纳、通俗解释、事实与视觉机会', promptVersion: 'research-analyst-v1' },
-  { role: 'SCIENCE_REVIEWER', name: '科学审校员', avatar: '/agents/science-reviewer.png', responsibility: '证据检查、矛盾识别与风险提示', promptVersion: 'science-reviewer-v1' },
-  { role: 'VISUAL_PLANNER', name: '影像策划师', avatar: '/agents/visual-planner.png', responsibility: '视觉概念、叙事结构与摄影方案', promptVersion: 'visual-planner-v1' },
-  { role: 'PHOTOGRAPHY_DIRECTOR', name: '摄影指导', avatar: '/agents/photography-director.png', responsibility: '画面卡、构图、光线与现场清单', promptVersion: 'photography-director-v1' },
+  { role: 'PROJECT_PRODUCER', name: '项目制片人', avatar: '/agents/research-analyst.png', responsibility: '确认目标、受众、输出形式与项目边界', promptVersion: 'project-producer-v1' },
+  { role: 'RESEARCH_CURATOR', name: '科研策展人', avatar: '/agents/science-reviewer.png', responsibility: '把科研资料转成准确、可传播、可拍摄的科学叙事', promptVersion: 'research-curator-v1' },
+  { role: 'VISUAL_STRATEGIST', name: '影像策划师', avatar: '/agents/visual-planner.png', responsibility: '视觉概念、叙事结构、画面语言与风格策略', promptVersion: 'visual-strategist-v1' },
+  { role: 'PRODUCTION_DIRECTOR', name: '拍摄导演', avatar: '/agents/photography-director.png', responsibility: '镜头清单、素材清单、现场执行与风险控制', promptVersion: 'production-director-v1' },
 ];
 
 export const changxingNodeStates: WorkflowNodeState[] = [
-  { nodeId: 'source-intake', status: 'COMPLETED', blockerCount: 0, progress: 100, summary: '4 类资料已整理', artifactLabel: '资料集', revision: 1 },
-  { nodeId: 'research-analysis', status: 'COMPLETED', blockerCount: 0, progress: 100, summary: '完成资料归纳与视觉机会识别', artifactLabel: '科研理解包 v3', revision: 1 },
-  { nodeId: 'science-review', status: 'AWAITING_HUMAN', blockerCount: 2, progress: 72, summary: '发现 2 项需科研人员确认', artifactLabel: '审校结果', revision: 1 },
-  { nodeId: 'fact-confirmation', status: 'READY', blockerCount: 2, progress: 25, summary: '审核链接待发送', artifactLabel: '审核记录', revision: 1 },
-  { nodeId: 'visual-plan', status: 'LOCKED', blockerCount: 0, progress: 0, summary: '等待事实确认', artifactLabel: '拍摄方案', revision: 1 },
-  { nodeId: 'capture-preparation', status: 'LOCKED', blockerCount: 0, progress: 0, summary: '等待方案确认', artifactLabel: '拍摄清单', revision: 1 },
-  { nodeId: 'plan-output', status: 'LOCKED', blockerCount: 0, progress: 0, summary: '等待现场清单', artifactLabel: '摄影策划方案', revision: 1 },
+  { nodeId: 'project-brief', status: 'AWAITING_HUMAN', blockerCount: 0, progress: 40, summary: '等待确认拍摄目的', artifactLabel: '项目简报', revision: 1 },
+  { nodeId: 'research-curation', status: 'LOCKED', blockerCount: 0, progress: 0, summary: '等待项目简报', artifactLabel: '科研叙事包', revision: 1 },
+  { nodeId: 'visual-strategy', status: 'LOCKED', blockerCount: 0, progress: 0, summary: '等待科研叙事', artifactLabel: '影像方案', revision: 1 },
+  { nodeId: 'production-plan', status: 'LOCKED', blockerCount: 0, progress: 0, summary: '等待影像方案', artifactLabel: '拍摄执行单', revision: 1 },
+  { nodeId: 'plan-output', status: 'LOCKED', blockerCount: 0, progress: 0, summary: '等待执行计划', artifactLabel: '完整方案', revision: 1 },
 ];
 
 export const agentMessages: AgentMessage[] = [

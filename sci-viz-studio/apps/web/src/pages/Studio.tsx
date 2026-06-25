@@ -17,24 +17,35 @@ import { WorkflowFallbackList } from '../features/workflow-canvas/WorkflowFallba
 import { AgentContextPanel } from '../features/workflow-canvas/AgentContextPanel';
 
 const nodeAgent: Record<string, AgentRole> = {
-  'source-intake': 'RESEARCH_ANALYST',
-  'research-analysis': 'RESEARCH_ANALYST',
-  'science-review': 'SCIENCE_REVIEWER',
-  'fact-confirmation': 'SCIENCE_REVIEWER',
-  'visual-plan': 'VISUAL_PLANNER',
-  'capture-preparation': 'PHOTOGRAPHY_DIRECTOR',
-  'plan-output': 'PHOTOGRAPHY_DIRECTOR',
+  'project-brief': 'PROJECT_PRODUCER',
+  'research-curation': 'RESEARCH_CURATOR',
+  'visual-strategy': 'VISUAL_STRATEGIST',
+  'production-plan': 'PRODUCTION_DIRECTOR',
+  'plan-output': 'PROJECT_PRODUCER',
 };
 
 const nodeTask: Record<string, AgentTask> = {
-  'source-intake': 'ANALYZE_PROJECT',
-  'research-analysis': 'ANALYZE_PROJECT',
-  'science-review': 'REVIEW_SCIENCE',
-  'fact-confirmation': 'REVIEW_SCIENCE',
-  'visual-plan': 'GENERATE_VISUAL_PLAN',
-  'capture-preparation': 'GENERATE_CAPTURE_LIST',
-  'plan-output': 'GENERATE_CAPTURE_LIST',
+  'project-brief': 'CREATE_PROJECT_BRIEF',
+  'research-curation': 'CURATE_RESEARCH_NARRATIVE',
+  'visual-strategy': 'DESIGN_VISUAL_STRATEGY',
+  'production-plan': 'PLAN_PRODUCTION',
+  'plan-output': 'COMPILE_FINAL_PLAN',
 };
+
+export interface ShootingPurposeOption {
+  id: string;
+  label: string;
+  description: string;
+}
+
+const shootingPurposeOptions: ShootingPurposeOption[] = [
+  { id: 'research-showcase', label: '科研展示', description: '突出科学问题、技术路线和证据链。' },
+  { id: 'commercial-promo', label: '商业宣传', description: '突出应用价值、成果转化和产业场景。' },
+  { id: 'government-report', label: '党政报告', description: '突出平台能力、战略意义和规范表达。' },
+  { id: 'public-science', label: '大众科普', description: '降低理解门槛，强调故事性和吸引力。' },
+  { id: 'project-defense', label: '项目答辩', description: '突出创新点、路线图、成果和风险控制。' },
+  { id: 'talent-recruiting', label: '招生/引才', description: '突出团队氛围、科研环境和成长机会。' },
+];
 
 function createDemoArtifact(node: WorkflowNodeDefinition, state: WorkflowNodeState) {
   const version = state.revision;
@@ -42,30 +53,25 @@ function createDemoArtifact(node: WorkflowNodeDefinition, state: WorkflowNodeSta
   const label = `${node.outputLabel} ${suffix}`;
 
   const drafts: Record<string, string> = {
-    'research-analysis': [
-      `### ${state.planLabel ?? 'Plan A'} · 科研分析草案`,
-      '- 研究主题：长兴海洋实验室的智能装备、绿色动力与深海实验场景。',
-      '- 视觉机会：设备尺度、人员协作、控制屏幕、海洋环境与实验流程可以形成清晰叙事。',
-      '- 待确认：哪些设备可以公开拍摄，哪些数据界面需要脱敏。',
+    'project-brief': [
+      `### ${state.planLabel ?? 'Plan A'} · 项目简报`,
+      '- 主目的：科研展示；辅助目的：大众科普、项目答辩。',
+      '- 目标受众：科研合作方、项目评审与非专业公众。',
+      '- 约束：屏幕数据、设备运行状态和合作单位名称需要确认。',
     ].join('\n'),
-    'science-review': [
-      `### ${state.planLabel ?? 'Plan A'} · 科学审校意见`,
-      '- 通过项：研究方向和场景归纳可以作为策划基础。',
-      '- 风险项：不要把“设备先进性”表达成未经证实的性能结论。',
-      '- 需确认：控制屏幕、实验样品、合作单位名称是否允许公开。',
+    'research-curation': [
+      `### ${state.planLabel ?? 'Plan A'} · 科研叙事草案`,
+      '- 科学问题：围绕海洋装备、绿色动力、智能制造和深海实验构建科研叙事。',
+      '- 可视化机会：设备尺度、人员协作、控制屏幕、实验环境和应用场景。',
+      '- 表达边界：不要把设备先进性写成未经验证的性能结论。',
     ].join('\n'),
-    'fact-confirmation': [
-      `### ${state.planLabel ?? 'Plan A'} · 人工确认清单`,
-      '- 请确认可公开拍摄区域、不可出现设备编号、涉密屏幕处理方式。',
-      '- 若无法确认，后续方案默认采用抽象化、局部特写和示意图替代。',
-    ].join('\n'),
-    'visual-plan': [
+    'visual-strategy': [
       `### ${state.planLabel ?? 'Plan A'} · 影像方案草案`,
       '- 核心概念：把实验室表现为“海洋工程问题被看见、被验证、被转译”的空间。',
       '- 画面结构：环境建立镜头、设备细节、人员操作、数据界面、成果输出。',
       '- 风格：白底克制、冷蓝点缀、强调可信和清洁的科研质感。',
     ].join('\n'),
-    'capture-preparation': [
+    'production-plan': [
       `### ${state.planLabel ?? 'Plan A'} · 执行清单`,
       '- 拍摄清单：实验室外观、核心设备、操作手部、科研人员讨论、屏幕抽象化画面。',
       '- 准备事项：确认安全边界、设备运行状态、脱敏素材、人员授权。',
@@ -81,7 +87,7 @@ function createDemoArtifact(node: WorkflowNodeDefinition, state: WorkflowNodeSta
   return {
     label,
     body: drafts[node.id] ?? `${node.label}草案已生成。`,
-    blockerCount: node.id === 'science-review' ? 2 : 0,
+    blockerCount: node.id === 'research-curation' ? 2 : 0,
   };
 }
 
@@ -105,8 +111,8 @@ async function requestAgentDraft(
     projectName: changxingProject.name,
     nodeId: node.id,
     nodeLabel: node.label,
-    agentRole: nodeAgent[node.id] ?? 'RESEARCH_ANALYST',
-    task: nodeTask[node.id] ?? 'ANALYZE_PROJECT',
+    agentRole: nodeAgent[node.id] ?? 'PROJECT_PRODUCER',
+    task: nodeTask[node.id] ?? 'CREATE_PROJECT_BRIEF',
     inputLabel: node.inputLabel,
     outputLabel: node.outputLabel,
     planLabel: state.planLabel ?? 'Plan A',
@@ -134,28 +140,28 @@ async function requestAgentDraft(
   return payload.data;
 }
 
-function createInitialStudioStates() {
-  return createDirectorWorkflowStates(researchPhotoWorkflowV1, ['source-intake']).map((state) => {
-    if (state.nodeId !== 'source-intake') return state;
+function createInitialStudioStates(): WorkflowNodeState[] {
+  return createDirectorWorkflowStates(researchPhotoWorkflowV1).map((state) => {
+    if (state.nodeId !== 'project-brief') return state;
     return {
       ...state,
-      artifactLabel: '资料集 v1',
-      artifactBody: [
-        '项目背景：长兴海洋实验室希望围绕海洋装备、绿色动力、智能制造和深海实验场景形成科研影像方案。',
-        '可用素材：实验室空间、科研设备、团队协作、控制屏幕、设备局部、访谈内容和部分可公开项目资料。',
-        '表达目标：面向科研合作、公众传播和项目汇报，强调可信、克制、清晰的科研视觉语言。',
-        '限制条件：设备运行状态、屏幕数据、合作单位名称和部分实验细节需要科研人员确认后才能公开。',
-      ].join('\n'),
+      status: 'AWAITING_HUMAN' as const,
+      progress: 50,
+      summary: '请选择拍摄目的',
+      artifactLabel: '项目简报',
+      artifactBody: '项目制片人需要先确认拍摄目的。请选择一个主目的，也可以选择多个辅助目的；后续 Agent 会围绕这个方向制定内容。',
     };
   });
 }
 
 export function Studio() {
-  const [states, setStates] = useState(createInitialStudioStates);
+  const [states, setStates] = useState<WorkflowNodeState[]>(createInitialStudioStates);
   const currentNodeId = getCurrentDirectorNodeId(researchPhotoWorkflowV1, states);
   const [selectedNodeId, setSelectedNodeId] = useState(currentNodeId);
   const [revisionText, setRevisionText] = useState('');
   const [aiProviderLabel, setAiProviderLabel] = useState('AI 检查中');
+  const [selectedPurposeIds, setSelectedPurposeIds] = useState<string[]>(['research-showcase']);
+  const [primaryPurposeId, setPrimaryPurposeId] = useState('research-showcase');
 
   useEffect(() => {
     if (currentNodeId) setSelectedNodeId(currentNodeId);
@@ -178,6 +184,29 @@ export function Studio() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const selectedPurposes = shootingPurposeOptions.filter((option) => selectedPurposeIds.includes(option.id));
+    const primaryPurpose = shootingPurposeOptions.find((option) => option.id === primaryPurposeId) ?? selectedPurposes[0];
+    const supportPurposes = selectedPurposes.filter((option) => option.id !== primaryPurpose?.id);
+    const body = [
+      '### Plan A · 项目简报',
+      `- 主目的：${primaryPurpose?.label ?? '待选择'}`,
+      `- 辅助目的：${supportPurposes.length > 0 ? supportPurposes.map((option) => option.label).join('、') : '暂无'}`,
+      '- 项目背景：长兴海洋实验室希望围绕海洋装备、绿色动力、智能制造和深海实验场景形成科研影像方案。',
+      '- 可用素材：实验室空间、科研设备、团队协作、控制屏幕、设备局部、访谈内容和部分可公开项目资料。',
+      '- 限制条件：设备运行状态、屏幕数据、合作单位名称和部分实验细节需要科研人员确认后才能公开。',
+    ].join('\n');
+
+    setStates((current) => current.map((state) => state.nodeId === 'project-brief' && state.status !== 'COMPLETED'
+      ? {
+          ...state,
+          artifactBody: body,
+          artifactLabel: '项目简报 v1',
+          summary: primaryPurpose ? `主目的：${primaryPurpose.label}` : '请选择拍摄目的',
+        }
+      : state));
+  }, [primaryPurposeId, selectedPurposeIds]);
 
   const currentNode = researchPhotoWorkflowV1.nodes.find((node) => node.id === currentNodeId);
   const currentState = states.find((state) => state.nodeId === currentNodeId);
@@ -239,9 +268,19 @@ export function Studio() {
   const selectedNode = researchPhotoWorkflowV1.nodes.find((node) => node.id === selectedNodeId) ?? researchPhotoWorkflowV1.nodes[0]!;
   const selectedState = states.find((state) => state.nodeId === selectedNode.id) ?? states[0]!;
   const agent = useMemo(() => {
-    const role = nodeAgent[selectedNode.id] ?? 'RESEARCH_ANALYST';
+    const role = nodeAgent[selectedNode.id] ?? 'PROJECT_PRODUCER';
     return agentProfiles.find((profile) => profile.role === role) ?? agentProfiles[0]!;
   }, [selectedNode.id]);
+
+  const togglePurpose = (purposeId: string) => {
+    setSelectedPurposeIds((current) => {
+      const exists = current.includes(purposeId);
+      const next = exists ? current.filter((id) => id !== purposeId) : [...current, purposeId];
+      if (next.length === 0) return current;
+      if (!next.includes(primaryPurposeId)) setPrimaryPurposeId(next[0]!);
+      return next;
+    });
+  };
 
   const confirmSelectedNode = () => {
     setStates((value) => confirmNodeAndQueueNext(researchPhotoWorkflowV1, value, selectedNode.id));
@@ -281,6 +320,11 @@ export function Studio() {
         onRevisionTextChange={setRevisionText}
         onConfirm={confirmSelectedNode}
         onRevise={reviseSelectedNode}
+        purposeOptions={shootingPurposeOptions}
+        selectedPurposeIds={selectedPurposeIds}
+        primaryPurposeId={primaryPurposeId}
+        onTogglePurpose={togglePurpose}
+        onSetPrimaryPurpose={setPrimaryPurposeId}
       />
     </main>
   </div>;

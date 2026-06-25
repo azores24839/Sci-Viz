@@ -1,15 +1,15 @@
 import type { AgentDraftRequest, AgentDraftResponse, AgentRole } from '@studio/contracts';
 import type { ModelGateway } from './modelGateway';
-import { photographyDirectorPrompt } from './prompts/photographyDirector';
-import { researchAnalystPrompt } from './prompts/researchAnalyst';
-import { scienceReviewerPrompt } from './prompts/scienceReviewer';
-import { visualPlannerPrompt } from './prompts/visualPlanner';
+import { productionDirectorPrompt } from './prompts/productionDirector';
+import { projectProducerPrompt } from './prompts/projectProducer';
+import { researchCuratorPrompt } from './prompts/researchCurator';
+import { visualStrategistPrompt } from './prompts/visualStrategist';
 
 const prompts = {
-  RESEARCH_ANALYST: researchAnalystPrompt,
-  SCIENCE_REVIEWER: scienceReviewerPrompt,
-  VISUAL_PLANNER: visualPlannerPrompt,
-  PHOTOGRAPHY_DIRECTOR: photographyDirectorPrompt,
+  PROJECT_PRODUCER: projectProducerPrompt,
+  RESEARCH_CURATOR: researchCuratorPrompt,
+  VISUAL_STRATEGIST: visualStrategistPrompt,
+  PRODUCTION_DIRECTOR: productionDirectorPrompt,
 } satisfies Record<AgentRole, { version: string; instructions: string }>;
 
 export function getPromptForAgent(role: AgentRole) {
@@ -44,28 +44,28 @@ export function createMockAgentDraft(request: AgentDraftRequest): AgentDraftResp
     ? `\n- 已根据修改意见调整：${request.revisionInstruction}`
     : '';
   const bodyByRole: Record<AgentRole, string> = {
-    RESEARCH_ANALYST: [
+    PROJECT_PRODUCER: [
       heading,
-      '- 研究主题：围绕项目资料提炼核心科学问题、实验对象与影像表达机会。',
-      '- 视觉机会：优先呈现设备、样品、人员协作、数据界面和实验环境之间的关系。',
-      '- 待确认：公开边界、关键术语、可拍摄设备和原始数据可见范围。',
+      '- 主目的：科研展示；辅助目的：公众传播、项目汇报。',
+      '- 目标受众：科研合作方、项目评审与非专业公众。',
+      '- 约束：屏幕数据、设备运行状态和合作单位名称需要确认后公开。',
       revisionNote,
     ].join('\n'),
-    SCIENCE_REVIEWER: [
+    RESEARCH_CURATOR: [
       heading,
-      '- 通过项：当前草案可以作为后续影像策划的基础。',
-      '- 风险项：避免把描述性观察写成未经证实的科学结论。',
-      '- 待确认：实验条件、设备性能、合作单位名称和可公开数据范围。',
+      '- 核心科学问题：如何用海洋装备、绿色动力和智能制造体现实验室研究价值。',
+      '- 可视化机会：设备尺度、人员协作、数据界面、实验环境和深海应用场景。',
+      '- 表达边界：不把设备先进性写成未经验证的性能结论。',
       revisionNote,
     ].join('\n'),
-    VISUAL_PLANNER: [
+    VISUAL_STRATEGIST: [
       heading,
       '- 核心概念：用克制、清晰的影像语言把科研问题转化为可理解的视觉叙事。',
       '- 画面结构：环境建立、关键设备、操作过程、数据/结果、人物协作。',
       '- 风格建议：白底、冷蓝点缀、低噪声、高可信度。',
       revisionNote,
     ].join('\n'),
-    PHOTOGRAPHY_DIRECTOR: [
+    PRODUCTION_DIRECTOR: [
       heading,
       '- 执行目标：把视觉方案转成可拍摄、可制作、可审核的素材清单。',
       '- 清单：场地、设备、人员动作、屏幕替代画面、局部细节、备选素材。',
@@ -77,7 +77,7 @@ export function createMockAgentDraft(request: AgentDraftRequest): AgentDraftResp
   return {
     label: `${request.outputLabel} v${request.revision}`,
     body: bodyByRole[request.agentRole],
-    blockerCount: request.agentRole === 'SCIENCE_REVIEWER' ? 2 : 0,
+    blockerCount: request.agentRole === 'RESEARCH_CURATOR' ? 2 : 0,
     provider: 'mock',
   };
 }
@@ -98,7 +98,7 @@ export async function generateAgentDraft(
   return {
     label: `${request.outputLabel} v${request.revision}`,
     body,
-    blockerCount: request.agentRole === 'SCIENCE_REVIEWER' && body.includes('待确认') ? 1 : 0,
+    blockerCount: request.agentRole === 'RESEARCH_CURATOR' && body.includes('待确认') ? 1 : 0,
     provider: 'deepseek',
   };
 }

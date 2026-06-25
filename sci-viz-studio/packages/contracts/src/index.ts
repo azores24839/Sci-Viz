@@ -1,17 +1,18 @@
 import { z } from 'zod';
 
 export const AgentRoleSchema = z.enum([
-  'RESEARCH_ANALYST',
-  'SCIENCE_REVIEWER',
-  'VISUAL_PLANNER',
-  'PHOTOGRAPHY_DIRECTOR',
+  'PROJECT_PRODUCER',
+  'RESEARCH_CURATOR',
+  'VISUAL_STRATEGIST',
+  'PRODUCTION_DIRECTOR',
 ]);
 
 export const AgentTaskSchema = z.enum([
-  'ANALYZE_PROJECT',
-  'REVIEW_SCIENCE',
-  'GENERATE_VISUAL_PLAN',
-  'GENERATE_CAPTURE_LIST',
+  'CREATE_PROJECT_BRIEF',
+  'CURATE_RESEARCH_NARRATIVE',
+  'DESIGN_VISUAL_STRATEGY',
+  'PLAN_PRODUCTION',
+  'COMPILE_FINAL_PLAN',
 ]);
 
 export const ProjectSchema = z.object({

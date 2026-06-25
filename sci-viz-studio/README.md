@@ -1,6 +1,6 @@
 # 科研影像 AI Studio
 
-科研摄影多智能体工作台。当前阶段提供版本化固定流程、React Flow 节点画布、四个 Agent 插槽和长兴海洋实验室 Mock 数据；默认不会调用真实模型。
+科研摄影多智能体工作台。当前阶段提供版本化固定流程、React Flow 节点画布、四个 Agent 插槽和长兴海洋实验室演示数据；后端可通过 DeepSeek 生成阶段草案。
 
 ## 启动
 
@@ -17,10 +17,10 @@ npm run dev
 
 放入 `apps/web/public/agents/`：
 
-- `research-analyst.png`
-- `science-reviewer.png`
-- `visual-planner.png`
-- `photography-director.png`
+- `research-analyst.png`：项目制片人
+- `science-reviewer.png`：科研策展人
+- `visual-planner.png`：影像策划师
+- `photography-director.png`：拍摄导演
 
 建议正方形 PNG/WebP、至少 512×512、单张不超过 1 MB。缺失时自动显示角色首字。
 
@@ -45,7 +45,7 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-chat
 ```
 
-`.env` 已被 Git 忽略。不要把密钥放进 `apps/web/`、提示词文件或任何以 `VITE_` 开头的变量。当前 MVP 的 `DeepSeekGateway` 默认关闭真实请求，待提示词和输出 Schema 完成后再启用。
+`.env` 已被 Git 忽略。不要把密钥放进 `apps/web/`、提示词文件或任何以 `VITE_` 开头的变量。
 
 ## 架构边界
 

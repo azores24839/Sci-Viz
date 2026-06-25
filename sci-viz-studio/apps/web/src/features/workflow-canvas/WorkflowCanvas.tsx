@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Background,
   Controls,
-  MiniMap,
   ReactFlow,
   applyNodeChanges,
   type NodeChange,
@@ -63,7 +62,6 @@ export function WorkflowCanvas({ template, states, selectedNodeId, onSelectNode 
         proOptions={{ hideAttribution: true }}
       >
         <Background color="#dfe5ee" gap={26} size={1} />
-        <MiniMap nodeColor={(node) => node.id === selectedNodeId ? '#1769f3' : '#9fb4d1'} maskColor="rgb(248 250 252 / 70%)" />
         <Controls showInteractive={false} />
       </ReactFlow>
       <button className="canvas-lock" type="button" onClick={() => setLocked((value) => !value)} aria-pressed={locked}>

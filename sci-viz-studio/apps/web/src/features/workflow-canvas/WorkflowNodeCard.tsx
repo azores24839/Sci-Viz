@@ -20,13 +20,22 @@ const glyph: Record<string, string> = {
   OUTPUT: '▤',
 };
 
+const avatarByOwner: Record<string, string> = {
+  项目制片人: '/agents/research-analyst.png',
+  科研策展人: '/agents/science-reviewer.png',
+  影像策划师: '/agents/visual-planner.png',
+  拍摄导演: '/agents/photography-director.png',
+};
+
 export function WorkflowNodeCard({ data, selected }: NodeProps<StudioFlowNode>) {
   const { definition, state } = data;
   const compact = definition.kind === 'INPUT' || definition.kind === 'OUTPUT';
+  const waiting = state.status === 'LOCKED';
   const previewTone = getNodePreviewTone(state.status);
   const preview = state.status === 'RUNNING'
     ? `${definition.owner}正在生成${definition.outputLabel}，完成后会停在确认点。`
     : summarizeNodeContent(state.artifactBody, state.summary || definition.description);
+  const avatar = avatarByOwner[definition.owner];
 
   return (
     <article
@@ -34,30 +43,44 @@ export function WorkflowNodeCard({ data, selected }: NodeProps<StudioFlowNode>) 
       aria-label={`${definition.label}，${statusLabel[state.status]}`}
     >
       {definition.order > 1 && <Handle className="node-handle" type="target" position={Position.Left} isConnectable={false} />}
-      <span className="node-number">{String(definition.order).padStart(2, '0')}</span>
+      <div className="node-card-top">
+        <span className="node-number">{String(definition.order).padStart(2, '0')}</span>
+        {avatar
+          ? <img className="node-agent-avatar" src={avatar} alt="" />
+          : <div className="node-visual" aria-hidden="true"><span className="node-glyph">{glyph[definition.kind]}</span></div>}
+      </div>
       <h2 className="node-title">{definition.label}</h2>
       <div className="node-owner">{definition.owner}</div>
-      <div className="node-visual" aria-hidden="true"><span className="node-glyph">{glyph[definition.kind]}</span></div>
-      <div className={`node-preview ${previewTone}`}>
-        <div className="node-preview-kicker">
-          <span>{state.planLabel ?? 'Plan A'}</span>
-          <span>{state.artifactLabel ?? definition.outputLabel}</span>
-        </div>
-        <p>{preview}</p>
-      </div>
-      {state.lastUserInstruction && <div className="node-instruction">
-        <span>修改</span>
-        <p>{state.lastUserInstruction}</p>
+      {waiting
+        ? <div className="node-waiting">
+            <span className="status-dot locked" />
+            <p>{state.summary || '等待上一步确认'}</p>
+          </div>
+        : <>
+          <div className={`node-preview ${previewTone}`}>
+            <div className="node-preview-kicker">
+              <span>{state.planLabel ?? 'Plan A'}</span>
+              <span>{state.artifactLabel ?? definition.outputLabel}</span>
+            </div>
+            <p>{preview}</p>
+          </div>
+          {state.lastUserInstruction && <div className="node-instruction">
+            <span>修改</span>
+            <p>{state.lastUserInstruction}</p>
+          </div>}
+          <div className="node-section">
+            <div className="node-section-label"><span>□</span> 产出</div>
+            <div className="node-artifact">{state.artifactLabel ?? definition.outputLabel}</div>
+          </div>
+          <div className="node-section node-status">
+            <span className={`status-dot ${state.status.toLowerCase()}`} />
+            <span>{statusLabel[state.status]}{state.blockerCount > 0 ? ` · ${state.blockerCount} 项阻塞` : ''}</span>
+          </div>
+        </>}
+      {waiting && <div className="node-section node-status waiting-status">
+        <span>{statusLabel[state.status]}</span>
       </div>}
-      <div className="node-section">
-        <div className="node-section-label"><span>□</span> 产出</div>
-        <div className="node-artifact">{state.artifactLabel ?? definition.outputLabel}</div>
-      </div>
-      <div className="node-section node-status">
-        <span className={`status-dot ${state.status.toLowerCase()}`} />
-        <span>{statusLabel[state.status]}{state.blockerCount > 0 ? ` · ${state.blockerCount} 项阻塞` : ''}</span>
-      </div>
-      {definition.order < 7 && <Handle className="node-handle" type="source" position={Position.Right} isConnectable={false} />}
+      {definition.order < 5 && <Handle className="node-handle" type="source" position={Position.Right} isConnectable={false} />}
     </article>
   );
 }
