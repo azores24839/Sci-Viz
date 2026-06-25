@@ -55,5 +55,6 @@ describe('research photo workflow', () => {
     expect(research?.status).toBe('READY');
     expect(research?.revision).toBe(2);
     expect(research?.planLabel).toBe('Plan B');
+    expect(research?.lastUserInstruction).toBe('更强调样品制备');
   });
 });

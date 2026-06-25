@@ -165,6 +165,7 @@ export function reviseNodeDraft(
         ? `收到修改意见：${instruction.trim().slice(0, 34)}`
         : `准备重新生成${node?.label ?? '节点'}草案`,
       artifactLabel: `${node?.outputLabel ?? '草案'} v${revision}`,
+      ...(instruction.trim() ? { lastUserInstruction: instruction.trim() } : {}),
       updatedAt: nowIso(),
     };
   });

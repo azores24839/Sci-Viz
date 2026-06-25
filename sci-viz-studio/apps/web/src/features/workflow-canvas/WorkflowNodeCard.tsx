@@ -1,5 +1,6 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { StudioFlowNode } from './adapter';
+import { getNodePreviewTone, summarizeNodeContent } from './nodePreview';
 
 const statusLabel = {
   LOCKED: '等待上一步',
@@ -22,6 +23,11 @@ const glyph: Record<string, string> = {
 export function WorkflowNodeCard({ data, selected }: NodeProps<StudioFlowNode>) {
   const { definition, state } = data;
   const compact = definition.kind === 'INPUT' || definition.kind === 'OUTPUT';
+  const previewTone = getNodePreviewTone(state.status);
+  const preview = state.status === 'RUNNING'
+    ? `${definition.owner}正在生成${definition.outputLabel}，完成后会停在确认点。`
+    : summarizeNodeContent(state.artifactBody, state.summary || definition.description);
+
   return (
     <article
       className={`workflow-node${selected ? ' is-selected' : ''}${state.status === 'LOCKED' ? ' is-locked' : ''}${state.status === 'RUNNING' ? ' is-running' : ''}${compact ? ' compact' : ''}`}
@@ -32,14 +38,17 @@ export function WorkflowNodeCard({ data, selected }: NodeProps<StudioFlowNode>) 
       <h2 className="node-title">{definition.label}</h2>
       <div className="node-owner">{definition.owner}</div>
       <div className="node-visual" aria-hidden="true"><span className="node-glyph">{glyph[definition.kind]}</span></div>
-      <div className="node-section">
-        <div className="node-section-label"><span>◇</span> 输入</div>
-        <div className="node-section-value">{definition.inputLabel}</div>
+      <div className={`node-preview ${previewTone}`}>
+        <div className="node-preview-kicker">
+          <span>{state.planLabel ?? 'Plan A'}</span>
+          <span>{state.artifactLabel ?? definition.outputLabel}</span>
+        </div>
+        <p>{preview}</p>
       </div>
-      <div className="node-section">
-        <div className="node-section-label"><span>⌬</span> 处理内容</div>
-        <div className="node-section-value">{definition.description}</div>
-      </div>
+      {state.lastUserInstruction && <div className="node-instruction">
+        <span>修改</span>
+        <p>{state.lastUserInstruction}</p>
+      </div>}
       <div className="node-section">
         <div className="node-section-label"><span>□</span> 产出</div>
         <div className="node-artifact">{state.artifactLabel ?? definition.outputLabel}</div>

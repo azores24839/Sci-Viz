@@ -20,7 +20,7 @@ const node = (
   description,
   inputLabel,
   outputLabel,
-  defaultPosition: { x: (order - 1) * 292, y: order === 2 ? 56 : 128 },
+  defaultPosition: { x: (order - 1) * 348, y: order === 2 ? 56 : 128 },
 });
 
 export const researchPhotoWorkflowV1: WorkflowTemplate = {
