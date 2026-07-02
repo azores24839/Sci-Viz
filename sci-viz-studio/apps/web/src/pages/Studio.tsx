@@ -11,40 +11,46 @@ import {
   type WorkflowNodeDefinition,
   type WorkflowNodeState,
 } from '@studio/workflow-core';
-import type { AgentDraftRequest, AgentDraftResponse, AgentRole, AgentTask } from '@studio/contracts';
+import type { AgentDraftRequest, AgentDraftResponse, AgentRole, AgentTask, ProjectGoal, SourceDocument } from '@studio/contracts';
 import { WorkflowCanvas } from '../features/workflow-canvas/WorkflowCanvas';
 import { WorkflowFallbackList } from '../features/workflow-canvas/WorkflowFallbackList';
 import { AgentContextPanel } from '../features/workflow-canvas/AgentContextPanel';
+import { usableSelectedSources } from '../features/sources/sourceUtils';
+import { API_BASE_URL } from '../api/client';
 
 const nodeAgent: Record<string, AgentRole> = {
-  'project-brief': 'PROJECT_PRODUCER',
-  'research-curation': 'RESEARCH_CURATOR',
-  'visual-strategy': 'VISUAL_STRATEGIST',
-  'production-plan': 'PRODUCTION_DIRECTOR',
-  'plan-output': 'PROJECT_PRODUCER',
+  'source-intake': 'SOURCE_ANALYST',
+  'visual-diagnosis': 'SOURCE_ANALYST',
+  'goal-output-selection': 'SOURCE_ANALYST',
+  'case-benchmark': 'RESEARCH_CURATOR',
+  'curation-strategy': 'RESEARCH_CURATOR',
+  'photo-plan': 'PHOTO_PLANNER',
+  'ai-reference': 'PHOTO_PLANNER',
+  'plan-output': 'PHOTO_PLANNER',
 };
 
 const nodeTask: Record<string, AgentTask> = {
-  'project-brief': 'CREATE_PROJECT_BRIEF',
-  'research-curation': 'CURATE_RESEARCH_NARRATIVE',
-  'visual-strategy': 'DESIGN_VISUAL_STRATEGY',
-  'production-plan': 'PLAN_PRODUCTION',
+  'source-intake': 'DIAGNOSE_VISUAL_STATE',
+  'visual-diagnosis': 'DIAGNOSE_VISUAL_STATE',
+  'goal-output-selection': 'DIAGNOSE_VISUAL_STATE',
+  'case-benchmark': 'BENCHMARK_CASES',
+  'curation-strategy': 'GENERATE_CURATION_STRATEGY',
+  'photo-plan': 'GENERATE_PHOTO_PLAN',
+  'ai-reference': 'GENERATE_AI_REFERENCES',
   'plan-output': 'COMPILE_FINAL_PLAN',
 };
 
 export interface ShootingPurposeOption {
-  id: string;
+  id: ProjectGoal;
   label: string;
   description: string;
 }
 
 const shootingPurposeOptions: ShootingPurposeOption[] = [
-  { id: 'research-showcase', label: '科研展示', description: '突出科学问题、技术路线和证据链。' },
-  { id: 'commercial-promo', label: '商业宣传', description: '突出应用价值、成果转化和产业场景。' },
-  { id: 'government-report', label: '党政报告', description: '突出平台能力、战略意义和规范表达。' },
-  { id: 'public-science', label: '大众科普', description: '降低理解门槛，强调故事性和吸引力。' },
-  { id: 'project-defense', label: '项目答辩', description: '突出创新点、路线图、成果和风险控制。' },
-  { id: 'talent-recruiting', label: '招生/引才', description: '突出团队氛围、科研环境和成长机会。' },
+  { id: 'ACADEMIC_COMMUNICATION', label: '学术传播', description: '突出科研对象、方法、证据和仪器能力。' },
+  { id: 'PUBLIC_COMMUNICATION', label: '公众传播', description: '突出可理解的场景、人物、尺度和故事性。' },
+  { id: 'RECRUITING_BRAND', label: '招生/招聘/团队品牌', description: '突出团队氛围、空间气质和工作状态。' },
+  { id: 'INDUSTRY_COLLABORATION', label: '产业转化/合作', description: '突出设备平台、应用场景、可靠性和工程化能力。' },
 ];
 
 function createDemoArtifact(node: WorkflowNodeDefinition, state: WorkflowNodeState) {
@@ -53,41 +59,68 @@ function createDemoArtifact(node: WorkflowNodeDefinition, state: WorkflowNodeSta
   const label = `${node.outputLabel} ${suffix}`;
 
   const drafts: Record<string, string> = {
-    'project-brief': [
-      `### ${state.planLabel ?? 'Plan A'} · 项目简报`,
-      '- 主目的：科研展示；辅助目的：大众科普、项目答辩。',
-      '- 目标受众：科研合作方、项目评审与非专业公众。',
-      '- 约束：屏幕数据、设备运行状态和合作单位名称需要确认。',
+    'source-intake': [
+      '### 资料包',
+      '- 资料来源：Sci-Viz Case Hub mock 资料库，包含技术维度整体分布、高校实验室内容对象样本和对标案例缩略图。',
+      '- 使用范围：仅用于界面流程和诊断结构测试，后续替换为用户真实上传资料。',
     ].join('\n'),
-    'research-curation': [
-      `### ${state.planLabel ?? 'Plan A'} · 科研叙事草案`,
-      '- 科学问题：围绕海洋装备、绿色动力、智能制造和深海实验构建科研叙事。',
-      '- 可视化机会：设备尺度、人员协作、控制屏幕、实验环境和应用场景。',
-      '- 表达边界：不要把设备先进性写成未经验证的性能结论。',
+    'visual-diagnosis': [
+      '### 视觉现状诊断',
+      '- 素材总览：当前使用 Sci-Viz Case Hub mock 样本作为资料源；126 条静图样本可进入结构诊断，21% 涉及屏幕、铭牌、合作单位或人员肖像等待确认。',
+      '- 功能维度结构：记录型素材约 72%，解释型约 12%，展示型约 9%，传播型约 5%，数据型约 2%；现阶段只描述结构，不判断目标优先级。',
+      '- 技术维度结构：拍摄 50%，绘设 19.6%，渲染 16.1%，成像 9.7%，数据 3.9%，生成 0.7%；说明资料库中真实采集仍是主流。',
+      '- 内容对象结构：设备、实验过程、团队协作和人物肖像占比较高；应用场景、样品细节和脱敏数据界面相对不足。',
+      '- 画面质量诊断：设备远景较多，景别层次、操作过程、尺度参照和稳定色调需要后续补强。',
+      '- 风险标记：屏幕数据、设备铭牌、合作单位名称、人员面部和未公开实验细节需要进入待确认清单。',
     ].join('\n'),
-    'visual-strategy': [
-      `### ${state.planLabel ?? 'Plan A'} · 影像方案草案`,
-      '- 核心概念：把实验室表现为“海洋工程问题被看见、被验证、被转译”的空间。',
-      '- 画面结构：环境建立镜头、设备细节、人员操作、数据界面、成果输出。',
-      '- 风格：白底克制、冷蓝点缀、强调可信和清洁的科研质感。',
+    'goal-output-selection': [
+      '### 目标配置',
+      '- 主目标：产业转化/合作。',
+      '- 次目标：公众传播。',
+      '- 产物类型：拍摄静图；录影/影片暂不可选。',
+      '- 目标匹配度：现有结构能够支撑设备能力展示，但对应用场景、可靠性证据和公众可理解过程支持不足。',
+      '- 目标缺口：若主打产业合作，需要补足工程应用、团队协作、关键操作和安全合规画面。',
     ].join('\n'),
-    'production-plan': [
-      `### ${state.planLabel ?? 'Plan A'} · 执行清单`,
-      '- 拍摄清单：实验室外观、核心设备、操作手部、科研人员讨论、屏幕抽象化画面。',
-      '- 准备事项：确认安全边界、设备运行状态、脱敏素材、人员授权。',
-      '- 备选方案：若现场不可拍，使用局部细节、示意渲染和采访音轨补足。',
+    'case-benchmark': [
+      '### 案例对标',
+      '- 对标组：Sci-Viz Case Hub 中的高校平台实验室、企业工程案例、科研机构设备场景和期刊传播静图。',
+      '- 匹配依据：同为静图媒介，且包含设备尺度、实验过程、人物协作和工程应用语境。',
+      '- 结构差距：我方 mock 样本记录型较高；对标组在实验过程、应用展示和传播型画面上更完整。',
+      '- 借鉴方向：保留真实设备与空间秩序，同时补充人物尺度、关键操作、局部细节和外部应用语境。',
+      '- 降级逻辑：同科研方向不足时，退到同目标的工程可视化和大型设备场景案例。',
+    ].join('\n'),
+    'curation-strategy': [
+      '### 策展 brief',
+      '- 视觉路线：从“设备记录”走向“工程能力可见”，用尺度、过程、细节和协作关系补足可信证据。',
+      '- 叙事主线：平台能力 → 关键过程 → 团队协作 → 应用想象；不在此节点展开具体镜头参数。',
+      '- 必须强化的视觉证据：大型设备尺度、科研人员操作、样品或结构细节、脱敏数据界面、工程空间秩序。',
+      '- 科研审校员 · 贯穿风险层：持续检查事实、保密、安全和可拍条件；阻塞项未确认时，方案只能预览，不能标记为可执行。',
+      '- 不能照搬：不使用过度商业化口号，不把未确认指标视觉化为确定成果。',
+    ].join('\n'),
+    'photo-plan': [
+      `### ${state.planLabel ?? 'Plan A'} · 静图拍摄方案`,
+      '- 对外提案：围绕工程能力、应用想象和科研协作建立视觉路线。',
+      '- 画面卡：空间建立、人物与设备关系、操作过程、局部细节、脱敏屏幕。',
+      '- 执行清单：拍摄对象、景别、角度、光线、色调、优先级和禁拍提醒。',
+    ].join('\n'),
+    'ai-reference': [
+      `### ${state.planLabel ?? 'Plan A'} · AI 参考图`,
+      '- 参考图 1：大型海洋装备实验空间，冷白光，人物作为尺度参照。',
+      '- 参考图 2：科研人员操作控制台，屏幕内容抽象化处理。',
+      '- 说明：参考图只用于沟通画面方向，不替代真实拍摄。',
     ].join('\n'),
     'plan-output': [
       `### ${state.planLabel ?? 'Plan A'} · 最终方案摘要`,
-      '- 已形成从科研理解、科学审校、事实确认、视觉方案到执行清单的完整草案。',
-      '- 下一步可以导出为 Markdown/PDF/PPT，或继续对任一节点生成 Plan B。',
+      '- 对外沟通版：现状诊断、目标、案例对标、视觉路线、拍摄主题和风险。',
+      '- 摄影师执行版：拍摄对象、场景、景别、角度、光线、色调和优先级。',
+      '- 下一步可以继续生成 Plan B，或进入现场执行清单。',
     ].join('\n'),
   };
 
   return {
     label,
     body: drafts[node.id] ?? `${node.label}草案已生成。`,
-    blockerCount: node.id === 'research-curation' ? 2 : 0,
+    blockerCount: 0,
   };
 }
 
@@ -102,66 +135,100 @@ function collectUpstreamArtifacts(states: WorkflowNodeState[]) {
 }
 
 async function requestAgentDraft(
+  projectId: string,
   node: WorkflowNodeDefinition,
   state: WorkflowNodeState,
   states: WorkflowNodeState[],
+  sources: SourceDocument[],
 ): Promise<AgentDraftResponse> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 25000);
   const request: AgentDraftRequest = {
-    projectId: changxingProject.id,
+    projectId,
     projectName: changxingProject.name,
     nodeId: node.id,
     nodeLabel: node.label,
-    agentRole: nodeAgent[node.id] ?? 'PROJECT_PRODUCER',
-    task: nodeTask[node.id] ?? 'CREATE_PROJECT_BRIEF',
+    agentRole: nodeAgent[node.id] ?? 'SOURCE_ANALYST',
+    task: nodeTask[node.id] ?? 'DIAGNOSE_VISUAL_STATE',
     inputLabel: node.inputLabel,
     outputLabel: node.outputLabel,
     planLabel: state.planLabel ?? 'Plan A',
     revision: state.revision,
     ...(state.summary.startsWith('收到修改意见：') ? { revisionInstruction: state.summary.replace('收到修改意见：', '') } : {}),
-    upstreamArtifacts: collectUpstreamArtifacts(states),
+    upstreamArtifacts: [
+      ...collectUpstreamArtifacts(states),
+      ...usableSelectedSources(sources).map((source) => ({
+        nodeId: `source:${source.id}`,
+        label: `资料：${source.title}`,
+        body: [source.aiSummary, source.imageDescription, source.ocrText, source.extractedText, source.rawText].filter(Boolean).join('\n\n').slice(0, 16_000),
+      })),
+    ],
   };
 
-  const response = await fetch('http://127.0.0.1:3011/api/v1/agent-drafts', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  });
+  try {
+    const response = await fetch(`${API_BASE_URL}/agent-drafts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+      signal: controller.signal,
+    });
 
-  const payload = await response.json() as {
-    success: boolean;
-    data?: AgentDraftResponse;
-    error?: { code: string; message: string };
-  };
+    const payload = await response.json() as {
+      success: boolean;
+      data?: AgentDraftResponse;
+      error?: { code: string; message: string };
+    };
 
-  if (!response.ok || !payload.success || !payload.data) {
-    throw new Error(payload.error?.message ?? `AGENT_DRAFT_REQUEST_FAILED:${response.status}`);
+    if (!response.ok || !payload.success || !payload.data) {
+      throw new Error(payload.error?.message ?? `AGENT_DRAFT_REQUEST_FAILED:${response.status}`);
+    }
+
+    return payload.data;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('AI_DRAFT_TIMEOUT');
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
   }
-
-  return payload.data;
 }
 
 function createInitialStudioStates(): WorkflowNodeState[] {
   return createDirectorWorkflowStates(researchPhotoWorkflowV1).map((state) => {
-    if (state.nodeId !== 'project-brief') return state;
+    if (state.nodeId !== 'source-intake') return state;
     return {
       ...state,
       status: 'AWAITING_HUMAN' as const,
       progress: 50,
-      summary: '请选择拍摄目的',
-      artifactLabel: '项目简报',
-      artifactBody: '项目制片人需要先确认拍摄目的。请选择一个主目的，也可以选择多个辅助目的；后续 Agent 会围绕这个方向制定内容。',
+      summary: '请确认资料包',
+      artifactLabel: 'Sci-Viz Case Hub mock 资料源',
+      artifactBody: [
+        '### 资料输入',
+        '- 默认资料源：Sci-Viz Case Hub mock 资料库。',
+        '- 用途：用于测试视觉现状诊断、案例对标和拍摄方案流程。',
+        '- 下一步：确认资料源后进入视觉现状诊断。',
+      ].join('\n'),
     };
   });
 }
 
 export function Studio() {
+  const [projectId] = useState(() => {
+    const key = 'sci-ai-studio-test-project';
+    const existing = window.localStorage.getItem(key);
+    if (existing) return existing;
+    const created = `${changxingProject.id}-${window.crypto.randomUUID()}`;
+    window.localStorage.setItem(key, created);
+    return created;
+  });
   const [states, setStates] = useState<WorkflowNodeState[]>(createInitialStudioStates);
   const currentNodeId = getCurrentDirectorNodeId(researchPhotoWorkflowV1, states);
   const [selectedNodeId, setSelectedNodeId] = useState(currentNodeId);
   const [revisionText, setRevisionText] = useState('');
   const [aiProviderLabel, setAiProviderLabel] = useState('AI 检查中');
-  const [selectedPurposeIds, setSelectedPurposeIds] = useState<string[]>(['research-showcase']);
-  const [primaryPurposeId, setPrimaryPurposeId] = useState('research-showcase');
+  const [primaryPurposeId, setPrimaryPurposeId] = useState<ProjectGoal>('INDUSTRY_COLLABORATION');
+  const [secondaryPurposeId, setSecondaryPurposeId] = useState<ProjectGoal | ''>('PUBLIC_COMMUNICATION');
+  const [sources, setSources] = useState<SourceDocument[]>([]);
+  const usableSources = usableSelectedSources(sources);
 
   useEffect(() => {
     if (currentNodeId) setSelectedNodeId(currentNodeId);
@@ -171,7 +238,7 @@ export function Studio() {
     let cancelled = false;
     const loadProvider = async () => {
       try {
-        const response = await fetch('http://127.0.0.1:3011/api/v1/config/ai');
+        const response = await fetch(`${API_BASE_URL}/config/ai`);
         const payload = await response.json() as { success: boolean; data?: { provider: 'mock' | 'deepseek'; configured: boolean } };
         if (cancelled) return;
         setAiProviderLabel(payload.data?.provider === 'deepseek' ? 'DeepSeek AI' : 'Mock AI');
@@ -186,27 +253,28 @@ export function Studio() {
   }, []);
 
   useEffect(() => {
-    const selectedPurposes = shootingPurposeOptions.filter((option) => selectedPurposeIds.includes(option.id));
-    const primaryPurpose = shootingPurposeOptions.find((option) => option.id === primaryPurposeId) ?? selectedPurposes[0];
-    const supportPurposes = selectedPurposes.filter((option) => option.id !== primaryPurpose?.id);
+    const primaryPurpose = shootingPurposeOptions.find((option) => option.id === primaryPurposeId) ?? shootingPurposeOptions[0];
+    const secondaryPurpose = shootingPurposeOptions.find((option) => option.id === secondaryPurposeId);
     const body = [
-      '### Plan A · 项目简报',
-      `- 主目的：${primaryPurpose?.label ?? '待选择'}`,
-      `- 辅助目的：${supportPurposes.length > 0 ? supportPurposes.map((option) => option.label).join('、') : '暂无'}`,
-      '- 项目背景：长兴海洋实验室希望围绕海洋装备、绿色动力、智能制造和深海实验场景形成科研影像方案。',
-      '- 可用素材：实验室空间、科研设备、团队协作、控制屏幕、设备局部、访谈内容和部分可公开项目资料。',
-      '- 限制条件：设备运行状态、屏幕数据、合作单位名称和部分实验细节需要科研人员确认后才能公开。',
+      '### 目标与产物选择',
+      `- 主目标：${primaryPurpose?.label ?? '待选择'}`,
+      `- 次目标：${secondaryPurpose?.label ?? '暂无'}`,
+      '- 产物类型：拍摄静图。',
+      '- 暂不可选：录影/影片。',
+      '- 目标匹配度：基于 02 的结构诊断，现有资料更擅长支撑“设备能力”和“空间秩序”，对“应用场景”和“公众可理解过程”支撑偏弱。',
+      '- 目标缺口：若主目标是产业转化/合作，需要补充工程应用、可靠性证据、人物尺度和脱敏数据界面；若次目标是公众传播，需要补充可理解的过程画面。',
+      '- 限制条件：设备运行状态、屏幕数据、合作单位名称和部分实验细节需要确认后才能进入可执行方案。',
     ].join('\n');
 
-    setStates((current) => current.map((state) => state.nodeId === 'project-brief' && state.status !== 'COMPLETED'
+    setStates((current) => current.map((state) => state.nodeId === 'goal-output-selection' && state.status !== 'COMPLETED'
       ? {
           ...state,
           artifactBody: body,
-          artifactLabel: '项目简报 v1',
-          summary: primaryPurpose ? `主目的：${primaryPurpose.label}` : '请选择拍摄目的',
+          artifactLabel: '目标配置 v1',
+          summary: primaryPurpose ? `主目标：${primaryPurpose.label}` : '请选择主目标',
         }
       : state));
-  }, [primaryPurposeId, selectedPurposeIds]);
+  }, [primaryPurposeId, secondaryPurposeId]);
 
   const currentNode = researchPhotoWorkflowV1.nodes.find((node) => node.id === currentNodeId);
   const currentState = states.find((state) => state.nodeId === currentNodeId);
@@ -215,6 +283,19 @@ export function Studio() {
 
   useEffect(() => {
     if (!currentNode || currentStatus !== 'READY') return;
+
+    if (currentNode.kind === 'HUMAN_GATE') {
+      setStates((value) => value.map((state) => state.nodeId === currentNode.id
+        ? {
+            ...state,
+            status: 'AWAITING_HUMAN',
+            progress: 80,
+            summary: state.summary || '等待人工确认',
+            artifactLabel: state.artifactLabel ?? `${currentNode.outputLabel} v${state.revision}`,
+          }
+        : state));
+      return;
+    }
 
     setStates((value) => markNodeRunning(value, currentNode.id));
   }, [currentNode, currentStatus]);
@@ -226,7 +307,7 @@ export function Studio() {
 
     const generate = async () => {
       try {
-        const draft = await requestAgentDraft(currentNode, currentState!, states);
+        const draft = await requestAgentDraft(projectId, currentNode, currentState!, states, sources);
         if (cancelled) return;
         setStates((value) => {
           const latest = value.find((state) => state.nodeId === currentNode.id);
@@ -237,21 +318,16 @@ export function Studio() {
             blockerCount: draft.blockerCount,
           });
         });
-      } catch (error) {
+      } catch {
         if (cancelled) return;
         setStates((value) => {
           const latest = value.find((state) => state.nodeId === currentNode.id);
           if (!latest || latest.status !== 'RUNNING') return value;
           const fallback = createDemoArtifact(currentNode, latest);
-          const message = error instanceof Error ? error.message : '未知错误';
           return completeNodeDraft(value, currentNode.id, {
             ...fallback,
-            body: [
-              `> DeepSeek 暂时没有返回可用结果，已切换为本地测试草案。错误：${message}`,
-              '',
-              fallback.body,
-            ].join('\n'),
-            blockerCount: Math.max(fallback.blockerCount, 1),
+            body: fallback.body,
+            blockerCount: fallback.blockerCount,
           });
         });
       }
@@ -263,26 +339,26 @@ export function Studio() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [currentNode, currentState, currentStatus, currentRevision, states]);
+  }, [currentNode, currentState, currentStatus, currentRevision, states, sources, projectId]);
 
   const selectedNode = researchPhotoWorkflowV1.nodes.find((node) => node.id === selectedNodeId) ?? researchPhotoWorkflowV1.nodes[0]!;
   const selectedState = states.find((state) => state.nodeId === selectedNode.id) ?? states[0]!;
   const agent = useMemo(() => {
-    const role = nodeAgent[selectedNode.id] ?? 'PROJECT_PRODUCER';
+    const role = nodeAgent[selectedNode.id] ?? 'SOURCE_ANALYST';
     return agentProfiles.find((profile) => profile.role === role) ?? agentProfiles[0]!;
   }, [selectedNode.id]);
 
-  const togglePurpose = (purposeId: string) => {
-    setSelectedPurposeIds((current) => {
-      const exists = current.includes(purposeId);
-      const next = exists ? current.filter((id) => id !== purposeId) : [...current, purposeId];
-      if (next.length === 0) return current;
-      if (!next.includes(primaryPurposeId)) setPrimaryPurposeId(next[0]!);
-      return next;
-    });
+  const setPrimaryPurpose = (purposeId: ProjectGoal) => {
+    setPrimaryPurposeId(purposeId);
+    setSecondaryPurposeId((current) => current === purposeId ? '' : current);
+  };
+
+  const setSecondaryPurpose = (purposeId: ProjectGoal | '') => {
+    setSecondaryPurposeId(purposeId === primaryPurposeId ? '' : purposeId);
   };
 
   const confirmSelectedNode = () => {
+    if (selectedNode.id === 'source-intake' && usableSources.length === 0) return;
     setStates((value) => confirmNodeAndQueueNext(researchPhotoWorkflowV1, value, selectedNode.id));
     setRevisionText('');
   };
@@ -294,21 +370,34 @@ export function Studio() {
 
   return <div className="studio-shell">
     <header className="studio-header">
-      <button type="button" className="menu-button" aria-label="打开项目菜单">☷</button>
       <div className="brand">
         <img className="brand-logo" src="/logo.png" alt="研影" />
-        <span>AI Studio</span>
+        <span>{changxingProject.name}</span>
       </div>
-      <span className="header-divider" />
-      <span className="project-name">{changxingProject.name}</span>
-      <span className="mock-badge">{aiProviderLabel}</span>
-      <span className="header-spacer" />
-      <button type="button" className="icon-button" aria-label="通知">♧</button>
-      <span className="avatar-chip" aria-label="当前用户 ZH">ZH</span>
     </header>
     <main className="studio-body">
       <section className="canvas-panel" aria-label="项目工作流">
-        <WorkflowCanvas template={researchPhotoWorkflowV1} states={states} selectedNodeId={selectedNodeId} onSelectNode={setSelectedNodeId} />
+        <WorkflowCanvas
+          template={researchPhotoWorkflowV1}
+          states={states}
+          selectedNodeId={selectedNodeId}
+          onSelectNode={setSelectedNodeId}
+          onConfirmNode={(nodeId) => {
+            setSelectedNodeId(nodeId);
+            setStates((value) => confirmNodeAndQueueNext(researchPhotoWorkflowV1, value, nodeId));
+            setRevisionText('');
+          }}
+          onReviseNode={(nodeId, instruction) => {
+            setSelectedNodeId(nodeId);
+            setStates((value) => reviseNodeDraft(researchPhotoWorkflowV1, value, nodeId, instruction));
+            setRevisionText('');
+          }}
+          primaryPurposeId={primaryPurposeId}
+          secondaryPurposeId={secondaryPurposeId}
+          purposeOptions={shootingPurposeOptions}
+          onSetPrimaryPurpose={setPrimaryPurpose}
+          onSetSecondaryPurpose={setSecondaryPurpose}
+        />
         <WorkflowFallbackList template={researchPhotoWorkflowV1} states={states} selectedNodeId={selectedNodeId} onSelectNode={setSelectedNodeId} />
       </section>
       <AgentContextPanel
@@ -318,13 +407,27 @@ export function Studio() {
         messages={agentMessages}
         revisionText={revisionText}
         onRevisionTextChange={setRevisionText}
+        aiProviderLabel={aiProviderLabel}
         onConfirm={confirmSelectedNode}
         onRevise={reviseSelectedNode}
         purposeOptions={shootingPurposeOptions}
-        selectedPurposeIds={selectedPurposeIds}
         primaryPurposeId={primaryPurposeId}
-        onTogglePurpose={togglePurpose}
-        onSetPrimaryPurpose={setPrimaryPurposeId}
+        secondaryPurposeId={secondaryPurposeId}
+        onSetPrimaryPurpose={setPrimaryPurpose}
+        onSetSecondaryPurpose={setSecondaryPurpose}
+        projectId={projectId}
+        sourceCanProceed={usableSources.length > 0}
+        onSourcesChange={(nextSources) => {
+          setSources(nextSources);
+          const selected = usableSelectedSources(nextSources);
+          const failed = nextSources.filter((source) => source.status === 'FAILED').length;
+          setStates((current) => current.map((state) => state.nodeId === 'source-intake' && state.status !== 'COMPLETED' ? {
+            ...state,
+            summary: selected.length > 0 ? `已选择 ${selected.length} 份可用资料` : '请添加并选择至少一份已解析资料',
+            artifactLabel: '项目资料包',
+            artifactBody: `### 资料状态\n- 共 ${nextSources.length} 份资料\n- 已选择 ${selected.length} 份可用资料\n- 失败 ${failed} 份`,
+          } : state));
+        }}
       />
     </main>
   </div>;

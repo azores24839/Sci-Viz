@@ -1,1096 +1,1168 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { Card } from '../components';
-import { CATEGORY_LABELS, REVIEW_STATUS_LABELS, type CrawlSource, type InsightDistributionItem, type InsightFilters, type InsightSummary, type CrossMatrix, type DimensionOption, type ThreeAxisSpectrum, type SpectrumCell } from '../types';
+import type { ComparisonData, ComparisonDistributionItem, ComparisonGroup, ComparisonGroupId, ComparisonSample } from '../types';
 import { theme } from '../theme';
 
-const DEFAULT_FILTERS: InsightFilters = {
-  sourceDomain: '',
-  sourceName: '',
-  mediaType: '',
-  contentType: '',
-  discipline: '',
-  technicalMethod: '',
-  composition: '',
-  colorTone: '',
-  functionalPurpose: '',
-  distributionMedium: '',
-  reviewStatus: 'approved',
-};
+type AxisKey = 'functionalPurpose' | 'technicalMethod' | 'distributionMedium';
+type DrilldownKey = 'contentSubType' | 'mediaSubType' | 'contentType';
+type DrilldownView = 'structure' | 'difference' | 'detail';
+type PurposeKey = 'all' | 'academic' | 'public' | 'industry';
+type AnalysisMode = 'live' | 'balanced';
 
-const chartPalette = [
-  theme.colors.accent,
-  theme.colors.green,
-  theme.colors.orange,
-  theme.colors.purple,
-  theme.colors.red,
-  '#2f7d8c',
-  '#7a6a3a',
-  '#4f6f9f',
+const AXES: Array<{ key: AxisKey; label: string; question: string }> = [
+  { key: 'functionalPurpose', label: '功能维度', question: '图像主要用来做什么？' },
+  { key: 'technicalMethod', label: '技术维度', question: '图像主要如何生产？' },
+  { key: 'distributionMedium', label: '媒介维度', question: '图像以什么形式呈现？' },
 ];
 
-const SOURCE_PRESETS = [
-  { label: '高校', categories: ['A', 'H'] },
-  { label: '期刊', categories: ['D', 'J'] },
-  { label: '企业', categories: ['ENT'] },
+const PURPOSES: Array<{ key: PurposeKey; label: string; helper: string; categories: string[] }> = [
+  { key: 'all', label: '全部目的', helper: '查看完整功能、媒介、技术结构', categories: [] },
+  { key: 'academic', label: '学术交流', helper: '重证据：解释机制、呈现数据', categories: ['解释', '数据'] },
+  { key: 'public', label: '公众传播', helper: '重理解：降低理解门槛', categories: ['传播'] },
+  { key: 'industry', label: '产业转化', helper: '重应用：展示成果与场景价值', categories: ['展示'] },
 ];
 
-const RATING_LABELS: Record<string, string> = {
-  '0': '未评分',
-  '1': '1分',
-  '2': '2分',
-  '3': '3分',
-  '4': '4分',
-  '5': '5分',
+const GROUP_COLORS: Record<string, string> = {
+  ime: '#0891b2',
+  sjtu: '#4f7cac',
+  domestic: '#53a653',
+  overseasUniversity: '#7c5ccf',
+  international: '#6b7280',
+  enterprise: '#f28c28',
 };
 
-const selectStyle: CSSProperties = {
-  width: '100%',
-  height: 36,
-  padding: '0 30px 0 10px',
-  borderRadius: theme.radius.md,
-  border: `1px solid ${theme.colors.border}`,
-  color: theme.colors.text.primary,
-  background: theme.colors.bgCard,
-  fontSize: theme.typography.size.sm,
-  appearance: 'none',
-  backgroundImage: `url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%236f6f7b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
-  backgroundRepeat: 'no-repeat',
-  backgroundPosition: 'right 10px center',
+const AXIS_DESCRIPTIONS: Record<AxisKey, Record<string, string>> = {
+  functionalPurpose: {
+    记录: '保存对象、现场、人物或实验过程',
+    解释: '说明结构、流程、机制和原理',
+    数据: '呈现结果、模型、趋势和分析',
+    展示: '呈现成果、产品、空间或项目形象',
+    传播: '面向公众、品牌、科普或宣传',
+    交互: '支持操作、浏览、筛选和决策',
+  },
+  technicalMethod: {
+    拍摄: '相机、摄像机、无人机等现实采集',
+    成像: '显微、医学、遥感、热成像等专业成像',
+    绘设: '插画、图标、信息设计和排版',
+    数据: '图表、地图、网络和数据可视化',
+    渲染: '3D、仿真、建模和工程可视化',
+    生成: 'AI、算法增强和风格迁移',
+  },
+  distributionMedium: {
+    静图: '单张静态图像',
+    图组: '多图、组图、长图和步骤图',
+    视频: '连续影像、动画和讲解视频',
+    动图: 'GIF、循环动效和短动画',
+    交互: '地图、仪表盘、可缩放可视化',
+    实体: '印刷、海报、展板和包装',
+  },
+};
+
+const DRILLDOWN_CONFIG: Record<AxisKey, { dimension: DrilldownKey; label: string; note: string }> = {
+  functionalPurpose: {
+    dimension: 'contentSubType',
+    label: '功能细分',
+    note: '用于解释同一功能主类内部的任务差异；空值会回退到首页的内容主题。',
+  },
+  technicalMethod: {
+    dimension: 'mediaSubType',
+    label: '技术细分',
+    note: '用于解释同一技术主类内部的生产方式差异；旧图像大类不会直接作为细分展示，无法可靠判断时标为“未细分”。',
+  },
+  distributionMedium: {
+    dimension: 'contentType',
+    label: '内容主题',
+    note: '媒介本身已经是呈现形式，因此下钻后查看该媒介承载了哪些画面内容。',
+  },
 };
 
 function compactNumber(value: number): string {
   return new Intl.NumberFormat('zh-CN').format(value);
 }
 
-function optionLabel(key: keyof InsightFilters, label: string): string {
-  if (key === 'reviewStatus') {
-    return REVIEW_STATUS_LABELS[label as keyof typeof REVIEW_STATUS_LABELS] || label;
+function byCount(a: ComparisonDistributionItem, b: ComparisonDistributionItem): number {
+  return b.count - a.count || a.label.localeCompare(b.label, 'zh-CN');
+}
+
+function groupById(data: ComparisonData | null, groupId: string): ComparisonGroup | undefined {
+  return data?.groups.find(group => group.id === groupId);
+}
+
+function topLabel(group: ComparisonGroup | undefined): string {
+  return group?.distribution.filter(item => item.label !== '未标注' && item.label !== '不确定')[0]?.label || '-';
+}
+
+function distributionMap(group: ComparisonGroup | undefined): Map<string, ComparisonDistributionItem> {
+  return new Map((group?.distribution || []).map(item => [item.label, item]));
+}
+
+function categoryValue(group: ComparisonGroup | undefined, label: string): ComparisonDistributionItem {
+  return distributionMap(group).get(label) || { label, count: 0, percentage: 0 };
+}
+
+function getAllLabels(a: ComparisonGroup | undefined, b: ComparisonGroup | undefined): string[] {
+  const labels = new Set<string>();
+  a?.distribution.forEach(item => labels.add(item.label));
+  b?.distribution.forEach(item => labels.add(item.label));
+  return [...labels].filter(label => label !== '未标注').sort((x, y) => {
+    const maxX = Math.max(categoryValue(a, x).percentage, categoryValue(b, x).percentage);
+    const maxY = Math.max(categoryValue(a, y).percentage, categoryValue(b, y).percentage);
+    return maxY - maxX || x.localeCompare(y, 'zh-CN');
+  });
+}
+
+function aggregateDistribution(data: ComparisonData | null): ComparisonDistributionItem[] {
+  const counts = new Map<string, number>();
+  let total = 0;
+  for (const group of data?.groups || []) {
+    for (const item of group.distribution) {
+      if (item.label === '未标注' || item.label === '不确定') continue;
+      counts.set(item.label, (counts.get(item.label) || 0) + item.count);
+      total += item.count;
+    }
   }
-  return label;
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count, percentage: total > 0 ? Math.round((count / total) * 1000) / 10 : 0 }))
+    .sort(byCount);
 }
 
-function makeParams(filters: InsightFilters, extra?: Record<string, string>): Record<string, string> {
-  const params: Record<string, string> = {};
-  Object.entries(filters).forEach(([key, value]) => {
-    if (value) params[key] = value;
-  });
-  if (extra) Object.entries(extra).forEach(([key, value]) => { if (value) params[key] = value; });
-  return params;
+function makeInsight(a: ComparisonGroup | undefined, b: ComparisonGroup | undefined, dataByAxis: Record<AxisKey, ComparisonData | null>): string[] {
+  if (!a || !b) return [];
+  const lines: string[] = [];
+  const aFunction = groupById(dataByAxis.functionalPurpose, a.id);
+  const bFunction = groupById(dataByAxis.functionalPurpose, b.id);
+  const aTech = groupById(dataByAxis.technicalMethod, a.id);
+  const bTech = groupById(dataByAxis.technicalMethod, b.id);
+
+  const aTopFn = topLabel(aFunction);
+  const bTopFn = topLabel(bFunction);
+  if (aTopFn !== '-' && bTopFn !== '-') {
+    lines.push(`${a.label}的功能主轴是「${aTopFn}」，${b.label}的功能主轴是「${bTopFn}」，说明两者的影像任务并不相同。`);
+  }
+
+  const aTopTech = topLabel(aTech);
+  const bTopTech = topLabel(bTech);
+  if (aTopTech !== '-' && bTopTech !== '-') {
+    lines.push(`${a.label}技术上以「${aTopTech}」为主，${b.label}以「${bTopTech}」为主，可用于判断影像生产能力的差异。`);
+  }
+
+  const diffs = buildDiffRows(a.id, b.id, dataByAxis).slice(0, 2);
+  if (diffs.length > 0) {
+    lines.push(`差异最大的指标是「${diffs[0].label}」，${a.label}相对${b.label}${diffs[0].diff >= 0 ? '高' : '低'} ${Math.abs(diffs[0].diff).toFixed(1)} 个百分点。`);
+  }
+  return lines;
 }
 
-function sourceNamesFromValue(value: string): string[] {
-  return value.split(',').map(item => item.trim()).filter(Boolean);
+function buildDiffRows(aId: string, bId: string, dataByAxis: Record<AxisKey, ComparisonData | null>) {
+  const rows: Array<{ axis: AxisKey; axisLabel: string; label: string; aPct: number; bPct: number; diff: number }> = [];
+  for (const axis of AXES) {
+    const aGroup = groupById(dataByAxis[axis.key], aId);
+    const bGroup = groupById(dataByAxis[axis.key], bId);
+    const labels = getAllLabels(aGroup, bGroup);
+    for (const label of labels) {
+      const aPct = categoryValue(aGroup, label).percentage;
+      const bPct = categoryValue(bGroup, label).percentage;
+      rows.push({ axis: axis.key, axisLabel: axis.label, label, aPct, bPct, diff: Math.round((aPct - bPct) * 10) / 10 });
+    }
+  }
+  return rows.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
 }
 
-function sourceButtonText(selectedNames: string[]): string {
-  if (selectedNames.length === 0) return '全部来源';
-  if (selectedNames.length === 1) return selectedNames[0];
-  return `已选择 ${selectedNames.length} 个来源`;
+function SegmentedButton<T extends string>({
+  items,
+  value,
+  onChange,
+}: {
+  items: Array<{ key: T; label: string; disabled?: boolean }>;
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div style={{ display: 'inline-flex', padding: 3, borderRadius: 8, background: theme.colors.bgSubtle, border: `1px solid ${theme.colors.border}` }}>
+      {items.map(item => {
+        const active = item.key === value;
+        return (
+          <button
+            key={item.key}
+            disabled={item.disabled}
+            onClick={() => !item.disabled && onChange(item.key)}
+            style={{
+              height: 30,
+              padding: '0 12px',
+              border: 'none',
+              borderRadius: 6,
+              background: active ? theme.colors.bgCard : 'transparent',
+              color: item.disabled ? theme.colors.text.tertiary : active ? theme.colors.text.primary : theme.colors.text.secondary,
+              boxShadow: active ? theme.shadow.card : 'none',
+              cursor: item.disabled ? 'not-allowed' : 'pointer',
+              fontSize: theme.typography.size.sm,
+              fontWeight: active ? 700 : 600,
+            }}
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
-function updateSelectedNames(current: string[], names: string[], selectAll: boolean): string[] {
-  const next = new Set(current);
-  names.forEach(name => {
-    if (selectAll) next.add(name);
-    else next.delete(name);
-  });
-  return [...next];
-}
-
-function FieldSelect({
+function SelectField({
   label,
   value,
-  emptyLabel,
   options,
-  filterKey,
   onChange,
 }: {
   label: string;
   value: string;
-  emptyLabel: string;
-  options: InsightDistributionItem[];
-  filterKey: keyof InsightFilters;
+  options: Array<{ value: string; label: string }>;
   onChange: (value: string) => void;
 }) {
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-      <span style={{ color: theme.colors.text.secondary, fontSize: theme.typography.size.xs, fontWeight: 600 }}>
-        {label}
-      </span>
-      <select value={value} onChange={(event) => onChange(event.target.value)} style={selectStyle}>
-        <option value="">{emptyLabel}</option>
-        {options.map(item => (
-          <option key={item.label} value={item.label}>
-            {optionLabel(filterKey, item.label)}（{compactNumber(item.count)}）
-          </option>
-        ))}
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 180 }}>
+      <span style={{ color: theme.colors.text.secondary, fontSize: theme.typography.size.xs, fontWeight: 700 }}>{label}</span>
+      <select
+        value={value}
+        onChange={event => onChange(event.target.value)}
+        style={{
+          height: 38,
+          borderRadius: 8,
+          border: `1px solid ${theme.colors.border}`,
+          background: theme.colors.bgCard,
+          color: theme.colors.text.primary,
+          padding: '0 10px',
+          fontSize: theme.typography.size.sm,
+        }}
+      >
+        {options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>
     </label>
   );
 }
 
-function SourceMultiSelect({
-  sources,
-  selectedNames,
-  open,
-  onOpenChange,
-  onSetSelected,
+function StepBadge({ children }: { children: string }) {
+  return (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: 24,
+      padding: '0 9px',
+      borderRadius: 999,
+      background: theme.colors.text.primary,
+      color: theme.colors.bgCard,
+      fontSize: theme.typography.size.xs,
+      fontWeight: 750,
+      whiteSpace: 'nowrap',
+    }}>
+      {children}
+    </span>
+  );
+}
+
+function UsageGuide({ aLabel, bLabel }: { aLabel: string; bLabel: string }) {
+  const steps = [
+    { title: '先选对比对象', body: `当前比较 ${aLabel || 'A'} 和 ${bLabel || 'B'}，看两类来源的结构差异。` },
+    { title: '再看三轴分布', body: '功能看用途，技术看生产方式，媒介看呈现形式。' },
+    { title: '点击一级分类', body: '点“记录”“拍摄”“静图”等条目，下方会显示它内部的细分组成。' },
+  ];
+  return (
+    <Card padding={16} style={{ marginBottom: 18, background: theme.colors.bgSubtle }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+        {steps.map((step, index) => (
+          <div key={step.title} style={{ display: 'grid', gridTemplateColumns: '32px 1fr', gap: 10, alignItems: 'start' }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 28,
+              height: 28,
+              borderRadius: 999,
+              background: theme.colors.bgCard,
+              border: `1px solid ${theme.colors.border}`,
+              color: theme.colors.text.primary,
+              fontSize: theme.typography.size.sm,
+              fontWeight: 800,
+            }}>
+              {index + 1}
+            </span>
+            <span>
+              <strong style={{ display: 'block', color: theme.colors.text.primary, fontSize: theme.typography.size.sm }}>{step.title}</strong>
+              <span style={{ display: 'block', marginTop: 3, color: theme.colors.text.secondary, fontSize: theme.typography.size.sm, lineHeight: 1.5 }}>{step.body}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function SourceOverview({ dataByAxis }: { dataByAxis: Record<AxisKey, ComparisonData | null> }) {
+  const groups = dataByAxis.functionalPurpose?.groups || [];
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14 }}>
+      {groups.map(group => {
+        const tech = groupById(dataByAxis.technicalMethod, group.id);
+        const medium = groupById(dataByAxis.distributionMedium, group.id);
+        return (
+          <Card key={group.id} padding={16} style={{ borderTop: `4px solid ${GROUP_COLORS[group.id] || theme.colors.border}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
+              <h3 style={{ margin: 0, color: theme.colors.text.primary, fontSize: theme.typography.size.lg, fontWeight: 750 }}>{group.label}</h3>
+              <span style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.size.xs }}>{compactNumber(group.total)} 条</span>
+            </div>
+            <div style={{ marginTop: 14, display: 'grid', gap: 8, color: theme.colors.text.secondary, fontSize: theme.typography.size.sm }}>
+              <span>功能主轴：<strong style={{ color: theme.colors.text.primary }}>{topLabel(group)}</strong></span>
+              <span>技术主轴：<strong style={{ color: theme.colors.text.primary }}>{topLabel(tech)}</strong></span>
+              <span>媒介主轴：<strong style={{ color: theme.colors.text.primary }}>{topLabel(medium)}</strong></span>
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+function OverallDistribution({
+  axis,
+  data,
+  selectedLabel,
+  onSelect,
 }: {
-  sources: CrawlSource[];
-  selectedNames: string[];
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSetSelected: (names: string[]) => void;
+  axis: AxisKey;
+  data: ComparisonData | null;
+  selectedLabel?: string;
+  onSelect?: (axis: AxisKey, label: string) => void;
 }) {
-  const selected = useMemo(() => new Set(selectedNames), [selectedNames]);
-  const sourceGroups = useMemo(() => {
-    const groups: Record<string, CrawlSource[]> = {};
-    sources.forEach(source => {
-      if (!source.name) return;
-      if (!groups[source.category]) groups[source.category] = [];
-      groups[source.category].push(source);
-    });
-    Object.values(groups).forEach(group => {
-      group.sort((a, b) => (b.existingCases || 0) - (a.existingCases || 0) || a.name.localeCompare(b.name, 'zh-CN'));
-    });
-    return groups;
-  }, [sources]);
-  const categoryOrder = Object.keys(sourceGroups).sort();
+  const rows = aggregateDistribution(data);
+  const max = Math.max(1, ...rows.map(row => row.count));
+  return (
+    <Card padding={18}>
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <StepBadge>第 1 步</StepBadge>
+          <h2 style={{ margin: 0, color: theme.colors.text.primary, fontSize: theme.typography.size.xl, fontWeight: 750 }}>
+            看整体结构 · {AXES.find(item => item.key === axis)?.label}
+          </h2>
+        </div>
+        <p style={{ margin: '8px 0 0', color: theme.colors.text.tertiary, fontSize: theme.typography.size.sm, lineHeight: 1.6 }}>
+          这里是所有来源组汇总后的真实分布。点击任一条目，比如“记录”或“拍摄”，下方会展开内部细分。
+        </p>
+      </div>
+      <div style={{ display: 'grid', gap: 11 }}>
+        {rows.map((row, index) => {
+          const selected = selectedLabel === row.label;
+          return (
+          <button
+            key={row.label}
+            onClick={() => onSelect?.(axis, row.label)}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '96px minmax(220px, 1fr) 86px minmax(160px, 260px)',
+              alignItems: 'center',
+              gap: 12,
+              border: selected ? `1px solid ${theme.colors.accent}` : '1px solid transparent',
+              borderRadius: 8,
+              background: selected ? theme.colors.accentBg : 'transparent',
+              padding: 4,
+              cursor: onSelect ? 'pointer' : 'default',
+              textAlign: 'left',
+              boxShadow: selected ? `0 0 0 1px ${theme.colors.accentBorder}` : 'none',
+            }}
+          >
+            <div style={{ color: theme.colors.text.primary, fontWeight: 650, textAlign: 'right' }}>{row.label}</div>
+            <div style={{ height: 30, borderRadius: 6, background: theme.colors.bgSubtle, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%',
+                width: `${Math.max(2, row.count / max * 100)}%`,
+                background: chartColor(index),
+                borderRadius: 6,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'flex-end',
+                paddingRight: 8,
+                color: '#fff',
+                fontWeight: 700,
+                fontSize: theme.typography.size.sm,
+              }}>
+                {compactNumber(row.count)}
+              </div>
+            </div>
+            <div style={{ color: theme.colors.text.secondary, fontSize: theme.typography.size.sm }}>
+              {row.percentage.toFixed(1)}%
+            </div>
+            <div style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.size.xs, lineHeight: 1.4 }}>
+              {AXIS_DESCRIPTIONS[axis][row.label] || ''}
+              <span style={{ display: 'block', marginTop: 2, color: selected ? theme.colors.accent : theme.colors.text.tertiary, fontWeight: selected ? 700 : 500 }}>
+                {selected ? '正在查看细分' : '点击看细分'}
+              </span>
+            </div>
+          </button>
+        );})}
+      </div>
+    </Card>
+  );
+}
 
-  const toggleSource = (name: string) => {
-    const next = selected.has(name)
-      ? selectedNames.filter(item => item !== name)
-      : [...selectedNames, name];
-    onSetSelected(next);
-  };
+function AxisComparisonChart({
+  axis,
+  a,
+  b,
+  selectedLabel,
+  onSelect,
+}: {
+  axis: AxisKey;
+  a: ComparisonGroup | undefined;
+  b: ComparisonGroup | undefined;
+  selectedLabel?: string;
+  onSelect?: (axis: AxisKey, label: string) => void;
+}) {
+  const labels = getAllLabels(a, b).slice(0, 8);
+  return (
+    <Card padding={18}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+        <StepBadge>第 2 步</StepBadge>
+        <h2 style={{ margin: 0, color: theme.colors.text.primary, fontSize: theme.typography.size.xl, fontWeight: 750 }}>
+          {AXES.find(item => item.key === axis)?.label}对比
+        </h2>
+      </div>
+      <p style={{ margin: '0 0 14px', color: theme.colors.text.tertiary, fontSize: theme.typography.size.sm, lineHeight: 1.6 }}>
+        {AXES.find(item => item.key === axis)?.question} 点击某个一级分类后，下方会显示该分类内部由什么组成。
+      </p>
+      <div style={{ display: 'grid', gap: 12 }}>
+        {labels.map(label => {
+          const av = categoryValue(a, label);
+          const bv = categoryValue(b, label);
+          const selected = selectedLabel === label;
+          return (
+            <button
+              key={label}
+              onClick={() => onSelect?.(axis, label)}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '74px 1fr 1fr',
+                gap: 10,
+                alignItems: 'center',
+                border: selected ? `1px solid ${theme.colors.accent}` : '1px solid transparent',
+                borderRadius: 8,
+                background: selected ? theme.colors.accentBg : 'transparent',
+                padding: 4,
+                cursor: onSelect ? 'pointer' : 'default',
+                textAlign: 'left',
+                boxShadow: selected ? `0 0 0 1px ${theme.colors.accentBorder}` : 'none',
+              }}
+            >
+              <div>
+                <div style={{ color: theme.colors.text.secondary, fontSize: theme.typography.size.sm, fontWeight: 650 }}>{label}</div>
+                <div style={{ color: selected ? theme.colors.accent : theme.colors.text.tertiary, fontSize: 11, marginTop: 2, fontWeight: selected ? 700 : 500 }}>
+                  {selected ? '已下钻' : '可点击'}
+                </div>
+              </div>
+              <MiniBar value={av.percentage} color={GROUP_COLORS[a?.id || ''] || theme.colors.accent} label={`${av.percentage.toFixed(1)}%`} />
+              <MiniBar value={bv.percentage} color={GROUP_COLORS[b?.id || ''] || theme.colors.orange} label={`${bv.percentage.toFixed(1)}%`} />
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: 14, marginTop: 14, fontSize: theme.typography.size.xs, color: theme.colors.text.tertiary }}>
+        <Legend color={GROUP_COLORS[a?.id || ''] || theme.colors.accent} label={a?.label || '-'} />
+        <Legend color={GROUP_COLORS[b?.id || ''] || theme.colors.orange} label={b?.label || '-'} />
+      </div>
+    </Card>
+  );
+}
 
-  const toggleGroup = (names: string[], selectAll: boolean) => {
-    onSetSelected(updateSelectedNames(selectedNames, names, selectAll));
-  };
+function MiniBar({ value, color, label }: { value: number; color: string; label: string }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 54px', gap: 8, alignItems: 'center' }}>
+      <div style={{ height: 10, background: theme.colors.bgSubtle, borderRadius: 999, overflow: 'hidden' }}>
+        <div style={{ width: `${Math.max(1, value)}%`, height: '100%', background: color, borderRadius: 999 }} />
+      </div>
+      <span style={{ color: theme.colors.text.primary, fontSize: theme.typography.size.xs, fontWeight: 700, textAlign: 'right' }}>{label}</span>
+    </div>
+  );
+}
 
-  const applyPreset = (categories: string[]) => {
-    const names = categories.flatMap(category => sourceGroups[category]?.map(source => source.name).filter(Boolean) || []);
-    onSetSelected(updateSelectedNames(selectedNames, names, true));
-  };
+function DrilldownStackBar({
+  group,
+  labels,
+  colorByLabel,
+  size = 'compact',
+}: {
+  group: ComparisonGroup | undefined;
+  labels: string[];
+  colorByLabel: Map<string, string>;
+  size?: 'compact' | 'large';
+}) {
+  const large = size === 'large';
+  const visibleLabels = labels.slice(0, 7);
+  const visibleTotal = visibleLabels.reduce((sum, label) => sum + categoryValue(group, label).percentage, 0);
+  const otherPct = Math.max(0, Math.round((100 - visibleTotal) * 10) / 10);
+  const segments = [
+    ...visibleLabels.map(label => ({ label, percentage: categoryValue(group, label).percentage, color: colorByLabel.get(label) || theme.colors.text.tertiary })),
+    ...(otherPct >= 1 ? [{ label: '其他', percentage: otherPct, color: '#d8dae2' }] : []),
+  ].filter(segment => segment.percentage > 0);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-        <span style={{ color: theme.colors.text.secondary, fontSize: theme.typography.size.xs, fontWeight: 600 }}>
-          来源
-        </span>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          {SOURCE_PRESETS.map(preset => (
-            <button
-              key={preset.label}
-              type="button"
-              onClick={() => applyPreset(preset.categories)}
-              style={{
-                height: 24, padding: '0 9px', borderRadius: 999,
-                border: `1px solid ${theme.colors.border}`, background: theme.colors.bgSubtle,
-                color: theme.colors.text.secondary, cursor: 'pointer', fontSize: theme.typography.size.xs, fontWeight: 600,
-              }}
-            >
-              选{preset.label}
-            </button>
-          ))}
-          {selectedNames.length > 0 && (
-            <button
-              type="button"
-              onClick={() => onSetSelected([])}
-              style={{
-                height: 24, padding: '0 9px', borderRadius: 999,
-                border: `1px solid ${theme.colors.border}`, background: theme.colors.bgCard,
-                color: theme.colors.text.tertiary, cursor: 'pointer', fontSize: theme.typography.size.xs, fontWeight: 600,
-              }}
-            >
-              清空
-            </button>
-          )}
-        </div>
+    <div style={{ display: 'grid', gap: large ? 10 : 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
+        <strong style={{ color: theme.colors.text.primary, fontSize: large ? theme.typography.size.base : theme.typography.size.sm }}>{group?.label || '-'}</strong>
+        <span style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.size.xs }}>{compactNumber(group?.total || 0)} 条</span>
       </div>
-      <div style={{ position: 'relative' }}>
-        <button
-          type="button"
-          onClick={() => onOpenChange(!open)}
-          style={{ ...selectStyle, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}
-        >
-          {sourceButtonText(selectedNames)}
-        </button>
-        {open && (
-          <div style={{
-            position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 120,
-            width: 'min(420px, 92vw)', maxHeight: 420, overflowY: 'auto',
-            background: theme.colors.bgCard, border: `1px solid ${theme.colors.border}`,
-            borderRadius: theme.radius.lg, boxShadow: theme.shadow.popover, padding: '8px 0',
-          }}>
-            {categoryOrder.map(category => {
-              const groupSources = sourceGroups[category];
-              const groupNames = groupSources.map(source => source.name).filter(Boolean);
-              const allSelected = groupNames.length > 0 && groupNames.every(name => selected.has(name));
-              const someSelected = groupNames.some(name => selected.has(name));
-              const groupCaseCount = groupSources.reduce((sum, source) => sum + (source.existingCases || 0), 0);
-              return (
-                <div key={category}>
-                  <label style={{
-                    display: 'flex', alignItems: 'center', gap: 7, padding: '6px 14px', cursor: 'pointer',
-                    color: theme.colors.text.primary, fontSize: theme.typography.size.sm, fontWeight: 700,
-                  }}>
-                    <input type="checkbox" checked={allSelected}
-                      ref={el => { if (el) el.indeterminate = !allSelected && someSelected; }}
-                      onChange={() => toggleGroup(groupNames, !allSelected)}
-                      style={{ margin: 0, accentColor: theme.colors.text.primary }}
-                    />
-                    <span>{CATEGORY_LABELS[category] || category}</span>
-                    <span style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.size.xs, fontWeight: 500 }}>
-                      {groupSources.length} 个来源 · {compactNumber(groupCaseCount)} 条
-                    </span>
-                  </label>
-                  {groupSources.map(source => {
-                    const checked = selected.has(source.name);
-                    return (
-                      <label key={source.id} style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-                        padding: '4px 14px 4px 34px', cursor: 'pointer', color: theme.colors.text.secondary, fontSize: theme.typography.size.sm,
-                      }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
-                          <input type="checkbox" checked={checked} onChange={() => toggleSource(source.name)}
-                            style={{ margin: 0, accentColor: theme.colors.text.primary, flex: '0 0 auto' }}
-                          />
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{source.name}</span>
-                        </span>
-                        <span style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.size.xs, flex: '0 0 auto' }}>
-                          {compactNumber(source.existingCases || 0)}
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-              );
-            })}
+      <div style={{ display: 'flex', height: large ? 52 : 34, width: '100%', overflow: 'hidden', borderRadius: 8, background: theme.colors.bgSubtle, border: `1px solid ${theme.colors.borderLight}` }}>
+        {segments.map(segment => (
+          <div
+            key={segment.label}
+            title={`${segment.label} ${segment.percentage.toFixed(1)}%`}
+            style={{
+              flex: `${Math.max(0.6, segment.percentage)} 0 0`,
+              minWidth: segment.percentage >= 3 ? 18 : 3,
+              background: segment.color,
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '0 5px',
+              fontSize: large ? 12 : 11,
+              fontWeight: 800,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              borderRight: '1px solid rgba(255,255,255,0.65)',
+            }}
+          >
+            {segment.percentage >= (large ? 6 : 9) ? `${segment.label} ${segment.percentage.toFixed(large ? 1 : 0)}%` : ''}
           </div>
-        )}
+        ))}
       </div>
-      {selectedNames.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {selectedNames.slice(0, 5).map(name => (
-            <span key={name} style={{
-              maxWidth: 180, padding: '3px 8px', borderRadius: 999,
-              background: theme.colors.accentBg, border: `1px solid ${theme.colors.accentBorder}`,
-              color: theme.colors.text.secondary, fontSize: theme.typography.size.xs,
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>
-              {name}
-            </span>
-          ))}
-          {selectedNames.length > 5 && (
-            <span style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.size.xs, padding: '3px 0' }}>
-              +{selectedNames.length - 5}
-            </span>
-          )}
-        </div>
+    </div>
+  );
+}
+
+function DrilldownLegend({ labels, colorByLabel }: { labels: string[]; colorByLabel: Map<string, string> }) {
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+      {labels.slice(0, 7).map(label => (
+        <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: theme.colors.text.secondary, fontSize: 11 }}>
+          <span style={{ width: 9, height: 9, borderRadius: 2, background: colorByLabel.get(label) || theme.colors.text.tertiary }} />
+          {label}
+        </span>
+      ))}
+      {labels.length > 7 && (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: theme.colors.text.secondary, fontSize: 11 }}>
+          <span style={{ width: 9, height: 9, borderRadius: 2, background: '#d8dae2' }} />
+          其他
+        </span>
       )}
     </div>
   );
 }
 
-function MetricCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function DrilldownDifferenceRows({
+  a,
+  b,
+  labels,
+}: {
+  a: ComparisonGroup | undefined;
+  b: ComparisonGroup | undefined;
+  labels: string[];
+}) {
+  const rows = labels
+    .map(label => {
+      const av = categoryValue(a, label);
+      const bv = categoryValue(b, label);
+      const diff = Math.round((av.percentage - bv.percentage) * 10) / 10;
+      return { label, av, bv, diff };
+    })
+    .sort((x, y) => Math.abs(y.diff) - Math.abs(x.diff))
+    .slice(0, 6);
+  const max = Math.max(1, ...rows.map(row => Math.abs(row.diff)));
+
   return (
-    <Card padding={16} style={{ minHeight: 92 }}>
-      <div style={{ color: theme.colors.text.secondary, fontSize: theme.typography.size.xs, fontWeight: 600, marginBottom: 10 }}>
-        {label}
-      </div>
-      <div style={{ color: theme.colors.text.primary, fontSize: theme.typography.size['4xl'], fontWeight: 700, lineHeight: 1.1 }}>
-        {value || '-'}
-      </div>
-      {hint && (
-        <div style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.size.xs, marginTop: 8 }}>
-          {hint}
+    <div style={{ display: 'grid', gap: 9 }}>
+      {rows.map(row => {
+        const positive = row.diff >= 0;
+        const stronger = positive ? a?.label || 'A' : b?.label || 'B';
+        return (
+          <div key={row.label} style={{ display: 'grid', gridTemplateColumns: '82px 1fr 72px', gap: 8, alignItems: 'center' }}>
+            <div>
+              <div style={{ color: theme.colors.text.primary, fontSize: theme.typography.size.xs, fontWeight: 800 }}>{row.label}</div>
+              <div style={{ color: theme.colors.text.tertiary, fontSize: 10 }}>{stronger}更高</div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', alignItems: 'center' }}>
+              <div style={{ height: 11, display: 'flex', justifyContent: 'flex-end', background: theme.colors.bgSubtle, borderRadius: '999px 0 0 999px', overflow: 'hidden' }}>
+                {!positive && <div style={{ width: `${Math.abs(row.diff) / max * 100}%`, background: GROUP_COLORS[b?.id || ''] || theme.colors.orange }} />}
+              </div>
+              <div style={{ height: 11, background: theme.colors.bgSubtle, borderRadius: '0 999px 999px 0', overflow: 'hidden' }}>
+                {positive && <div style={{ width: `${Math.abs(row.diff) / max * 100}%`, height: '100%', background: GROUP_COLORS[a?.id || ''] || theme.colors.accent }} />}
+              </div>
+            </div>
+            <div style={{ color: positive ? GROUP_COLORS[a?.id || ''] || theme.colors.accent : GROUP_COLORS[b?.id || ''] || theme.colors.orange, fontSize: theme.typography.size.xs, fontWeight: 900, textAlign: 'right' }}>
+              {positive ? '+' : ''}{row.diff.toFixed(1)}pp
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DrilldownDetailRows({
+  a,
+  b,
+  labels,
+}: {
+  a: ComparisonGroup | undefined;
+  b: ComparisonGroup | undefined;
+  labels: string[];
+}) {
+  return (
+    <div style={{ display: 'grid', gap: 9 }}>
+      {labels.slice(0, 7).map(label => {
+        const av = categoryValue(a, label);
+        const bv = categoryValue(b, label);
+        return (
+          <div key={label} style={{ display: 'grid', gridTemplateColumns: '86px 1fr 1fr', gap: 8, alignItems: 'center' }}>
+            <div style={{ color: theme.colors.text.secondary, fontSize: theme.typography.size.xs, fontWeight: 700 }}>{label}</div>
+            <MiniBar value={av.percentage} color={GROUP_COLORS[a?.id || ''] || theme.colors.accent} label={`${av.percentage.toFixed(1)}%`} />
+            <MiniBar value={bv.percentage} color={GROUP_COLORS[b?.id || ''] || theme.colors.orange} label={`${bv.percentage.toFixed(1)}%`} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DrilldownTakeaway({ a, b, labels }: { a: ComparisonGroup | undefined; b: ComparisonGroup | undefined; labels: string[] }) {
+  const aTop = labels.map(label => categoryValue(a, label)).sort((x, y) => y.percentage - x.percentage)[0];
+  const bTop = labels.map(label => categoryValue(b, label)).sort((x, y) => y.percentage - x.percentage)[0];
+  if (!aTop || !bTop) return null;
+  const sameTop = aTop.label === bTop.label;
+  const aColor = GROUP_COLORS[a?.id || ''] || theme.colors.accent;
+  const bColor = GROUP_COLORS[b?.id || ''] || theme.colors.orange;
+  const highlightStyle = (color: string) => ({
+    color,
+    fontWeight: 900,
+  });
+  return (
+    <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 8, background: theme.colors.bgSubtle, color: theme.colors.text.secondary, fontSize: theme.typography.size.sm, lineHeight: 1.7 }}>
+      {sameTop ? (
+        <>
+          <div>
+            {a?.label || 'A'}和{b?.label || 'B'}都以
+            <strong style={highlightStyle(aColor)}>「{aTop.label}」</strong>
+            为主。
+          </div>
+          <div>
+            集中程度分别为
+            <strong style={highlightStyle(aColor)}> {aTop.percentage.toFixed(1)}%</strong>
+            和
+            <strong style={highlightStyle(bColor)}> {bTop.percentage.toFixed(1)}%</strong>
+            。
+          </div>
+        </>
+      ) : (
+        <>
+          <div>
+            {a?.label || 'A'}最集中在
+            <strong style={highlightStyle(aColor)}>「{aTop.label}」</strong>
+            。
+          </div>
+          <div>
+            {b?.label || 'B'}最集中在
+            <strong style={highlightStyle(bColor)}>「{bTop.label}」</strong>
+            。
+          </div>
+          <div style={{ marginTop: 2, color: theme.colors.text.tertiary }}>
+            说明两组在这个一级类别内部的表达重心不同。
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function DrilldownFocusCard({
+  selection,
+  data,
+  loading,
+  aId,
+  bId,
+}: {
+  selection: { axis: AxisKey; label: string };
+  data: ComparisonData | null;
+  loading: boolean;
+  aId: string;
+  bId: string;
+}) {
+  const [view, setView] = useState<DrilldownView>('structure');
+  const config = DRILLDOWN_CONFIG[selection.axis];
+  const a = groupById(data, aId);
+  const b = groupById(data, bId);
+  const labels = getAllLabels(a, b);
+  const colorByLabel = new Map(labels.map((label, index) => [label, subtypeColor(index)]));
+
+  return (
+    <Card padding={20} style={{ gridColumn: '1 / -1', borderColor: theme.colors.accentBorder, background: '#fff' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
+        <div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
+            <StepBadge>细分展开</StepBadge>
+            <h3 style={{ margin: 0, color: theme.colors.text.primary, fontSize: theme.typography.size.xl, fontWeight: 850 }}>
+              {selection.label}内部细分
+            </h3>
+          </div>
+          <p style={{ margin: 0, color: theme.colors.text.tertiary, fontSize: theme.typography.size.sm, lineHeight: 1.6 }}>
+            当前路径：{AXES.find(item => item.key === selection.axis)?.label} &gt; {selection.label} &gt; {config.label}
+          </p>
+          <p style={{ margin: '4px 0 0', color: theme.colors.text.tertiary, fontSize: theme.typography.size.xs, lineHeight: 1.6 }}>
+            {config.note}
+          </p>
         </div>
+        <SegmentedButton
+          value={view}
+          onChange={setView}
+          items={[
+            { key: 'structure', label: '结构' },
+            { key: 'difference', label: '差异' },
+            { key: 'detail', label: '明细' },
+          ]}
+        />
+      </div>
+
+      {loading ? (
+        <div style={{ color: theme.colors.text.secondary, fontSize: theme.typography.size.sm, padding: 18, background: theme.colors.bgSubtle, borderRadius: 8 }}>
+          加载细分数据...
+        </div>
+      ) : labels.length === 0 ? (
+        <div style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.size.sm, padding: 18, background: theme.colors.bgSubtle, borderRadius: 8 }}>
+          暂无足够细分标签。
+        </div>
+      ) : view === 'structure' ? (
+        <div>
+          <div style={{ display: 'grid', gap: 18 }}>
+            <DrilldownStackBar group={a} labels={labels} colorByLabel={colorByLabel} size="large" />
+            <DrilldownStackBar group={b} labels={labels} colorByLabel={colorByLabel} size="large" />
+          </div>
+          <DrilldownLegend labels={labels} colorByLabel={colorByLabel} />
+          <DrilldownTakeaway a={a} b={b} labels={labels} />
+        </div>
+      ) : view === 'difference' ? (
+        <DrilldownDifferenceRows a={a} b={b} labels={labels} />
+      ) : (
+        <DrilldownDetailRows a={a} b={b} labels={labels} />
       )}
     </Card>
   );
 }
 
-function DistributionChart({
-  title,
-  data,
-  emptyText,
-  onBarClick,
-}: {
-  title: string;
-  data: InsightDistributionItem[];
-  emptyText: string;
-  onBarClick?: (label: string) => void;
-}) {
-  const visible = data.slice(0, 8);
-  const maxCount = Math.max(1, ...visible.map(item => item.count));
+function Legend({ color, label }: { color: string; label: string }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ width: 10, height: 10, borderRadius: 2, background: color }} />
+      {label}
+    </span>
+  );
+}
+
+function DifferenceChart({ rows, aLabel, bLabel }: { rows: ReturnType<typeof buildDiffRows>; aLabel: string; bLabel: string }) {
+  const visible = rows.slice(0, 8);
+  const max = Math.max(1, ...visible.map(row => Math.abs(row.diff)));
+  return (
+    <Card padding={18}>
+      <h2 style={{ margin: '0 0 4px', color: theme.colors.text.primary, fontSize: theme.typography.size.xl, fontWeight: 750 }}>
+        关键差异
+      </h2>
+      <p style={{ margin: '0 0 16px', color: theme.colors.text.tertiary, fontSize: theme.typography.size.sm }}>
+        正值表示 {aLabel} 更高，负值表示 {bLabel} 更高。
+      </p>
+      <div style={{ display: 'grid', gap: 10 }}>
+        {visible.map(row => {
+          const isPositive = row.diff >= 0;
+          return (
+            <div key={`${row.axis}-${row.label}`} style={{ display: 'grid', gridTemplateColumns: '126px 1fr 66px', gap: 10, alignItems: 'center' }}>
+              <div>
+                <div style={{ color: theme.colors.text.primary, fontSize: theme.typography.size.sm, fontWeight: 700 }}>{row.label}</div>
+                <div style={{ color: theme.colors.text.tertiary, fontSize: 11 }}>{row.axisLabel}</div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, alignItems: 'center' }}>
+                <div style={{ height: 12, display: 'flex', justifyContent: 'flex-end', background: theme.colors.bgSubtle, borderRadius: '999px 0 0 999px', overflow: 'hidden' }}>
+                  {!isPositive && <div style={{ width: `${Math.abs(row.diff) / max * 100}%`, background: theme.colors.orange, borderRadius: '999px 0 0 999px' }} />}
+                </div>
+                <div style={{ height: 12, background: theme.colors.bgSubtle, borderRadius: '0 999px 999px 0', overflow: 'hidden' }}>
+                  {isPositive && <div style={{ width: `${Math.abs(row.diff) / max * 100}%`, height: '100%', background: theme.colors.accent, borderRadius: '0 999px 999px 0' }} />}
+                </div>
+              </div>
+              <div style={{ textAlign: 'right', color: isPositive ? theme.colors.accent : theme.colors.orange, fontWeight: 800, fontSize: theme.typography.size.sm }}>
+                {isPositive ? '+' : ''}{row.diff.toFixed(1)}pp
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+function InsightPanel({ insights }: { insights: string[] }) {
+  return (
+    <Card padding={18}>
+      <h2 style={{ margin: '0 0 12px', color: theme.colors.text.primary, fontSize: theme.typography.size.xl, fontWeight: 750 }}>
+        自动解释
+      </h2>
+      <ol style={{ margin: 0, paddingLeft: 20, color: theme.colors.text.primary, fontSize: theme.typography.size.sm, lineHeight: 1.8 }}>
+        {insights.map(item => <li key={item}>{item}</li>)}
+      </ol>
+    </Card>
+  );
+}
+
+function SampleLinks({ a, b, axisData }: { a: ComparisonGroup | undefined; b: ComparisonGroup | undefined; axisData: ComparisonData | null }) {
+  const navigate = useNavigate();
+  const samples = useMemo(() => {
+    const aSamples = groupById(axisData, a?.id || '')?.samples || [];
+    const bSamples = groupById(axisData, b?.id || '')?.samples || [];
+    return [
+      ...aSamples.slice(0, 3).map(sample => ({ ...sample, groupLabel: a?.label || '' })),
+      ...bSamples.slice(0, 3).map(sample => ({ ...sample, groupLabel: b?.label || '' })),
+    ];
+  }, [a, b, axisData]);
 
   return (
     <Card padding={18}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 16, marginBottom: 16 }}>
-        <h2 style={{ margin: 0, color: theme.colors.text.primary, fontSize: theme.typography.size.xl, fontWeight: 650 }}>
-          {title}
-        </h2>
-        <span style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.size.xs }}>
-          Top {visible.length || 0}
-        </span>
-      </div>
-      {visible.length === 0 ? (
-        <div style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.size.sm, padding: '20px 0' }}>
-          {emptyText}
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {visible.map((item, index) => (
-            <div key={item.label} style={{ display: 'grid', gridTemplateColumns: '92px minmax(120px, 1fr) 74px', gap: 10, alignItems: 'center', cursor: onBarClick ? 'pointer' : 'default' }}
-              onClick={() => onBarClick?.(item.label)}
-            >
-              <div style={{
-                color: theme.colors.text.secondary, fontSize: theme.typography.size.sm,
-                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-              }}>
-                {item.label}
-              </div>
-              <div style={{ height: 10, background: theme.colors.bgSubtle, borderRadius: 999, overflow: 'hidden' }}>
-                <div style={{
-                  height: '100%',
-                  width: `${Math.max(3, (item.count / maxCount) * 100)}%`,
-                  background: chartPalette[index % chartPalette.length],
-                  borderRadius: 999,
-                  transition: 'width 0.3s ease',
-                }} />
-              </div>
-              <div style={{ textAlign: 'right', color: theme.colors.text.primary, fontSize: theme.typography.size.sm, fontWeight: 600 }}>
-                {item.percentage.toFixed(1)}%
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function CrossMatrixView({ matrix, onCellClick }: { matrix: CrossMatrix; onCellClick?: (rowVal: string, colVal: string) => void }) {
-  const visibleRows = matrix.rows.slice(0, 15);
-
-  return (
-    <Card padding={18} style={{ gridColumn: '1 / -1' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 16, marginBottom: 16 }}>
-        <h2 style={{ margin: 0, color: theme.colors.text.primary, fontSize: theme.typography.size.xl, fontWeight: 650 }}>
-          {matrix.rowLabel} × {matrix.columnLabel} 交叉矩阵
-        </h2>
-        <span style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.size.xs }}>
-          单元格为该行内部占比
-        </span>
-      </div>
-      {matrix.columns.length === 0 || visibleRows.length === 0 ? (
-        <div style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.size.sm, padding: '20px 0' }}>
-          当前筛选下缺少可用于交叉统计的数据。
-        </div>
-      ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', minWidth: 760, borderCollapse: 'separate', borderSpacing: 0, fontSize: theme.typography.size.sm }}>
-            <thead>
-              <tr>
-                <th style={matrixHeaderStyle}>{matrix.rowLabel}</th>
-                <th style={matrixHeaderStyle}>样本数</th>
-                {matrix.columns.map(column => (
-                  <th key={column} style={matrixHeaderStyle}>{column}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {visibleRows.map(row => (
-                <tr key={row.rowLabel}>
-                  <td style={{ ...matrixCellStyle, color: theme.colors.text.primary, fontWeight: 600 }}>{row.rowLabel}</td>
-                  <td style={{ ...matrixCellStyle, color: theme.colors.text.secondary }}>{row.total}</td>
-                  {row.cells.map(cell => {
-                    const intensity = Math.min(1, cell.percentage / 70);
-                    return (
-                      <td key={cell.columnLabel} style={{
-                        ...matrixCellStyle,
-                        background: `rgba(91, 91, 215, ${0.06 + intensity * 0.26})`,
-                        color: intensity > 0.55 ? theme.colors.text.primary : theme.colors.text.secondary,
-                        fontWeight: cell.count > 0 ? 600 : 400,
-                        cursor: cell.count > 0 ? 'pointer' : 'default',
-                      }}
-                        onClick={() => cell.count > 0 && onCellClick?.(row.rowLabel, cell.columnLabel)}
-                      >
-                        {cell.count > 0 ? `${cell.percentage.toFixed(1)}%` : '-'}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Card>
-  );
-}
-
-const matrixHeaderStyle: CSSProperties = {
-  textAlign: 'left',
-  padding: '10px 12px',
-  color: theme.colors.text.secondary,
-  fontSize: theme.typography.size.xs,
-  fontWeight: 700,
-  borderBottom: `1px solid ${theme.colors.border}`,
-  whiteSpace: 'nowrap',
-};
-
-const matrixCellStyle: CSSProperties = {
-  padding: '10px 12px',
-  borderBottom: `1px solid ${theme.colors.borderLight}`,
-  textAlign: 'left',
-  whiteSpace: 'nowrap',
-};
-
-const DIMENSION_FILTER_MAP: Record<string, keyof InsightFilters> = {
-  mediaType: 'mediaType',
-  contentType: 'contentType',
-  discipline: 'discipline',
-  technicalMethod: 'technicalMethod',
-  composition: 'composition',
-  colorTone: 'colorTone',
-  functionalPurpose: 'functionalPurpose',
-  distributionMedium: 'distributionMedium',
-};
-
-function SpectrumView({
-  spectrum,
-  loading,
-  specX, specY, specZ,
-  specSliceZ,
-  dimChoices,
-  onSpecXChange, onSpecYChange, onSpecZChange, onSpecSliceZChange,
-  onNavigate,
-}: {
-  spectrum: ThreeAxisSpectrum | null;
-  loading: boolean;
-  specX: string; specY: string; specZ: string; specSliceZ: string;
-  dimChoices: { key: string; label: string }[];
-  onSpecXChange: (v: string) => void;
-  onSpecYChange: (v: string) => void;
-  onSpecZChange: (v: string) => void;
-  onSpecSliceZChange: (v: string) => void;
-  onNavigate: (discipline: string, mediaType: string, fp: string) => void;
-}) {
-  const dimSelectStyle = { ...selectStyle, width: 130 };
-
-  const filteredCells = useMemo(() => {
-    if (!spectrum) return [];
-    if (!specSliceZ) return spectrum.cells;
-    return spectrum.cells.filter(c => c.z === specSliceZ);
-  }, [spectrum, specSliceZ]);
-
-  const xVals = useMemo(() => spectrum?.dimensions[0].values || [], [spectrum]);
-  const yVals = useMemo(() => spectrum?.dimensions[1].values || [], [spectrum]);
-  const zVals = useMemo(() => spectrum?.dimensions[2].values || [], [spectrum]);
-
-  const xTotals = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const c of filteredCells) m.set(c.x, (m.get(c.x) || 0) + c.count);
-    return m;
-  }, [filteredCells]);
-
-  const yTotals = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const c of filteredCells) m.set(c.y, (m.get(c.y) || 0) + c.count);
-    return m;
-  }, [filteredCells]);
-
-  const cellMap = useMemo(() => {
-    const m = new Map<string, SpectrumCell>();
-    for (const c of filteredCells) m.set(`${c.x}||${c.y}`, c);
-    return m;
-  }, [filteredCells]);
-
-  const maxCount = useMemo(() => {
-    let max = 1;
-    for (const c of filteredCells) if (c.count > max) max = c.count;
-    return max;
-  }, [filteredCells]);
-
-  if (loading) {
-    return <Card padding={24}><div style={{ color: theme.colors.text.secondary, textAlign: 'center', padding: 40, fontSize: theme.typography.size.sm }}>加载三轴频谱数据...</div></Card>;
-  }
-
-  if (!spectrum) return null;
-
-  const total = spectrum.total;
-  const slicedTotal = specSliceZ ? filteredCells.reduce((s, c) => s + c.count, 0) : total;
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      {spectrum.note && (
-        <div style={{
-          background: theme.colors.orangeBg, border: `1px solid ${theme.colors.orangeBorder}`,
-          color: theme.colors.orange, borderRadius: theme.radius.md, padding: 12,
-          fontSize: theme.typography.size.sm, fontWeight: 500, lineHeight: 1.6,
-        }}>
-          {spectrum.note}
-        </div>
-      )}
-
-      <Card padding={18}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, marginBottom: 14 }}>
-          <h2 style={{ margin: 0, color: theme.colors.text.primary, fontSize: theme.typography.size.xl, fontWeight: 650 }}>
-            三轴频谱 · 交叉热力图
-          </h2>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: theme.typography.size.sm }}>
-              <span style={{ color: theme.colors.text.secondary }}>X</span>
-              <select value={specX} onChange={e => onSpecXChange(e.target.value)} style={dimSelectStyle}>
-                {dimChoices.map(d => <option key={d.key} value={d.key}>{d.label}</option>)}
-              </select>
-            </label>
-            <span style={{ color: theme.colors.text.tertiary }}>×</span>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: theme.typography.size.sm }}>
-              <span style={{ color: theme.colors.text.secondary }}>Y</span>
-              <select value={specY} onChange={e => onSpecYChange(e.target.value)} style={dimSelectStyle}>
-                {dimChoices.map(d => <option key={d.key} value={d.key}>{d.label}</option>)}
-              </select>
-            </label>
-            <span style={{ color: theme.colors.text.tertiary }}>×</span>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: theme.typography.size.sm }}>
-              <span style={{ color: theme.colors.text.secondary }}>Z（切片）</span>
-              <select value={specZ} onChange={e => onSpecZChange(e.target.value)} style={dimSelectStyle}>
-                {dimChoices.map(d => <option key={d.key} value={d.key}>{d.label}</option>)}
-              </select>
-            </label>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-          <span style={{ color: theme.colors.text.secondary, fontSize: theme.typography.size.sm }}>Z轴切片：</span>
+      <h2 style={{ margin: '0 0 12px', color: theme.colors.text.primary, fontSize: theme.typography.size.xl, fontWeight: 750 }}>
+        代表案例入口
+      </h2>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+        {samples.map(sample => (
           <button
-            onClick={() => onSpecSliceZChange('')}
+            key={sample.id}
+            onClick={() => navigate(`/cases/${sample.id}`)}
             style={{
-              padding: '4px 12px', borderRadius: 999, fontSize: theme.typography.size.xs, fontWeight: specSliceZ === '' ? 650 : 500,
-              border: `1px solid ${specSliceZ === '' ? theme.colors.text.primary : theme.colors.border}`,
-              background: specSliceZ === '' ? theme.colors.text.primary : theme.colors.bgCard,
-              color: specSliceZ === '' ? '#fff' : theme.colors.text.secondary,
+              display: 'grid',
+              gridTemplateColumns: '54px 1fr',
+              gap: 10,
+              alignItems: 'center',
+              minHeight: 70,
+              padding: 8,
+              textAlign: 'left',
+              border: `1px solid ${theme.colors.border}`,
+              borderRadius: 8,
+              background: theme.colors.bgCard,
               cursor: 'pointer',
             }}
           >
-            全部（{total}）
+            <CaseThumb sample={sample} />
+            <span style={{ minWidth: 0 }}>
+              <span style={{ display: 'block', color: theme.colors.text.primary, fontSize: theme.typography.size.sm, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sample.title || '未命名案例'}</span>
+              <span style={{ display: 'block', color: theme.colors.text.tertiary, fontSize: theme.typography.size.xs, marginTop: 4 }}>{sample.groupLabel} · {sample.functionalPurpose || '-'} · {sample.technicalMethod || '-'}</span>
+            </span>
           </button>
-          {zVals.slice(0, 12).map(z => (
-            <button
-              key={z}
-              onClick={() => onSpecSliceZChange(specSliceZ === z ? '' : z)}
-              style={{
-                padding: '4px 12px', borderRadius: 999, fontSize: theme.typography.size.xs, fontWeight: specSliceZ === z ? 650 : 500,
-                border: `1px solid ${specSliceZ === z ? theme.colors.text.primary : theme.colors.border}`,
-                background: specSliceZ === z ? theme.colors.text.primary : theme.colors.bgCard,
-                color: specSliceZ === z ? '#fff' : theme.colors.text.secondary,
-                cursor: 'pointer',
-                maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}
-            >
-              {z}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ borderCollapse: 'collapse', fontSize: theme.typography.size.xs, width: '100%', minWidth: 600 }}>
-            <thead>
-              <tr>
-                <th style={{ padding: '6px 10px', borderBottom: `1px solid ${theme.colors.border}`, textAlign: 'left', color: theme.colors.text.secondary, fontWeight: 600 }}>
-                  {spectrum.dimensions[0].label} \ {spectrum.dimensions[1].label}
-                </th>
-                {yVals.map(y => (
-                  <th key={y} style={{ padding: '6px 10px', borderBottom: `1px solid ${theme.colors.border}`, textAlign: 'center', color: theme.colors.text.secondary, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                    {y}
-                    <div style={{ fontSize: 10, fontWeight: 400, color: theme.colors.text.tertiary }}>
-                      {compactNumber(yTotals.get(y) || 0)}
-                    </div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {xVals.map(x => (
-                <tr key={x}>
-                  <td style={{ padding: '6px 10px', borderBottom: `1px solid ${theme.colors.border}`, color: theme.colors.text.secondary, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                    {x}
-                    <div style={{ fontSize: 10, fontWeight: 400, color: theme.colors.text.tertiary }}>
-                      {compactNumber(xTotals.get(x) || 0)}
-                    </div>
-                  </td>
-                  {yVals.map(y => {
-                    const cell = cellMap.get(`${x}||${y}`);
-                    const alpha = cell ? Math.max(0.08, cell.count / maxCount) : 0;
-                    return (
-                      <td
-                        key={y}
-                        onClick={() => cell && cell.count > 0 && onNavigate(
-                          specZ === 'discipline' ? (specSliceZ || cell.z) : '',
-                          specY === 'mediaType' ? y : (specX === 'mediaType' ? x : ''),
-                          specZ === 'functionalPurpose' ? (specSliceZ || cell.z) : (specX === 'functionalPurpose' ? x : (specY === 'functionalPurpose' ? y : '')),
-                        )}
-                        style={{
-                          padding: '6px 10px',
-                          borderBottom: `1px solid ${theme.colors.border}`,
-                          textAlign: 'center',
-                          background: cell ? `rgba(0,120,212,${alpha.toFixed(2)})` : 'transparent',
-                          color: cell && cell.count > 0 ? (alpha > 0.35 ? '#fff' : theme.colors.text.primary) : theme.colors.text.tertiary,
-                          cursor: cell && cell.count > 0 ? 'pointer' : 'default',
-                          fontWeight: cell && cell.count > 0 ? 600 : 400,
-                          fontSize: theme.typography.size.xs,
-                          minWidth: 70,
-                          transition: 'background 0.15s',
-                        }}
-                      >
-                        {cell ? (
-                          <>
-                            <div>{compactNumber(cell.count)}</div>
-                            <div style={{ fontSize: 10, opacity: 0.7 }}>{cell.percentage.toFixed(1)}%</div>
-                          </>
-                        ) : (
-                          <div style={{ color: theme.colors.text.tertiary }}>-</div>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, fontSize: theme.typography.size.xs, color: theme.colors.text.tertiary }}>
-          <span>点击单元格查看对应案例</span>
-          <span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: 2, background: 'rgba(0,120,212,0.08)' }} />
-          <span>少</span>
-          <span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: 2, background: 'rgba(0,120,212,0.5)' }} />
-          <span>多</span>
-        </div>
-      </Card>
-    </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 
-export default function InsightsPage() {
-  const navigate = useNavigate();
-  const [filters, setFilters] = useState<InsightFilters>(DEFAULT_FILTERS);
-  const [summary, setSummary] = useState<InsightSummary | null>(null);
-  const [poolSources, setPoolSources] = useState<CrawlSource[]>([]);
-  const [sourceDropdownOpen, setSourceDropdownOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [copied, setCopied] = useState(false);
-  const [rowDim, setRowDim] = useState('functionalPurpose');
-  const [colDim, setColDim] = useState('technicalMethod');
-  const [exported, setExported] = useState(false);
-  const [viewMode, setViewMode] = useState<'overview' | 'spectrum'>('overview');
-  const [spectrum, setSpectrum] = useState<ThreeAxisSpectrum | null>(null);
-  const [spectrumLoading, setSpectrumLoading] = useState(false);
-  const [specX, setSpecX] = useState('functionalPurpose');
-  const [specY, setSpecY] = useState('technicalMethod');
-  const [specZ, setSpecZ] = useState('distributionMedium');
-  const [specSliceZ, setSpecSliceZ] = useState('');
-  const sourceDropdownRef = useRef<HTMLDivElement>(null);
+function CaseThumb({ sample }: { sample: ComparisonSample }) {
+  if (!sample.thumbnail) {
+    return <span style={{ width: 54, height: 54, borderRadius: 6, background: theme.colors.bgSubtle }} />;
+  }
+  return <img src={sample.thumbnail} alt="" style={{ width: 54, height: 54, objectFit: 'cover', borderRadius: 6, background: theme.colors.bgSubtle }} />;
+}
 
-  const params = useMemo(() => {
-    const p = makeParams(filters, { rowDimension: rowDim, colDimension: colDim });
-    return p;
-  }, [filters, rowDim, colDim]);
-  const selectedSourceNames = useMemo(() => sourceNamesFromValue(filters.sourceName), [filters.sourceName]);
+function chartColor(index: number): string {
+  const colors = ['#4f7cac', '#f28c28', '#e15759', '#76b7b2', '#59a14f', '#edc948', '#b07aa1', '#9c755f'];
+  return colors[index % colors.length];
+}
+
+function subtypeColor(index: number): string {
+  const colors = ['#4f7cac', '#f28c28', '#59a14f', '#b07aa1', '#76b7b2', '#edc948', '#e15759', '#9c755f'];
+  return colors[index % colors.length];
+}
+
+export default function InsightsPage() {
+  const [dataByAxis, setDataByAxis] = useState<Record<AxisKey, ComparisonData | null>>({
+    functionalPurpose: null,
+    technicalMethod: null,
+    distributionMedium: null,
+  });
+  const [comparisonDataByAxis, setComparisonDataByAxis] = useState<Record<AxisKey, ComparisonData | null>>({
+    functionalPurpose: null,
+    technicalMethod: null,
+    distributionMedium: null,
+  });
+  const [drilldownSelection, setDrilldownSelection] = useState<{ axis: AxisKey; label: string }>({ axis: 'functionalPurpose', label: '记录' });
+  const [drilldownData, setDrilldownData] = useState<ComparisonData | null>(null);
+  const [drilldownLoading, setDrilldownLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [comparisonLoading, setComparisonLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [axis, setAxis] = useState<AxisKey>('functionalPurpose');
+  const [sourceA, setSourceA] = useState('sjtu');
+  const [sourceB, setSourceB] = useState('enterprise');
+  const [purpose, setPurpose] = useState<PurposeKey>('all');
+  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>('live');
 
   useEffect(() => {
     let ignore = false;
     setLoading(true);
     setError('');
-    api.getInsightSummary(params)
-      .then(res => {
+    Promise.all([
+      api.getComparison(undefined, 'functionalPurpose'),
+      api.getComparison(undefined, 'technicalMethod'),
+      api.getComparison(undefined, 'distributionMedium'),
+    ])
+      .then(([functional, technical, medium]) => {
         if (ignore) return;
-        if (res.success) setSummary(res.data);
-        else setError(res.error || '加载分析数据失败');
+        if (!functional.success || !technical.success || !medium.success) {
+          setError(functional.error || technical.error || medium.error || '加载对比数据失败');
+          return;
+        }
+        setDataByAxis({
+          functionalPurpose: functional.data,
+          technicalMethod: technical.data,
+          distributionMedium: medium.data,
+        });
       })
       .catch((err: Error) => {
-        if (!ignore) setError(err.message || '加载分析数据失败');
+        if (!ignore) setError(err.message || '加载对比数据失败');
       })
       .finally(() => {
         if (!ignore) setLoading(false);
       });
     return () => { ignore = true; };
-  }, [params]);
-
-  useEffect(() => {
-    api.getPoolSources().then(res => {
-      if (res.success) setPoolSources(res.data || []);
-    }).catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (viewMode !== 'spectrum') return;
     let ignore = false;
-    setSpectrumLoading(true);
-    api.getThreeAxisSpectrum(specX, specY, specZ)
-      .then(res => {
+    setComparisonLoading(true);
+    const focusGroups = [sourceA, sourceB].filter(Boolean);
+    Promise.all([
+      api.getComparison(undefined, 'functionalPurpose', analysisMode, focusGroups),
+      api.getComparison(undefined, 'technicalMethod', analysisMode, focusGroups),
+      api.getComparison(undefined, 'distributionMedium', analysisMode, focusGroups),
+    ])
+      .then(([functional, technical, medium]) => {
         if (ignore) return;
-        if (res.success) setSpectrum(res.data);
+        if (!functional.success || !technical.success || !medium.success) {
+          setError(functional.error || technical.error || medium.error || '加载对比数据失败');
+          return;
+        }
+        setComparisonDataByAxis({
+          functionalPurpose: functional.data,
+          technicalMethod: technical.data,
+          distributionMedium: medium.data,
+        });
+      })
+      .catch((err: Error) => {
+        if (!ignore) setError(err.message || '加载对比数据失败');
       })
       .finally(() => {
-        if (!ignore) setSpectrumLoading(false);
+        if (!ignore) setComparisonLoading(false);
       });
     return () => { ignore = true; };
-  }, [viewMode, specX, specY, specZ]);
+  }, [analysisMode, sourceA, sourceB]);
 
   useEffect(() => {
-    const handler = (event: MouseEvent) => {
-      if (sourceDropdownRef.current && !sourceDropdownRef.current.contains(event.target as Node)) {
-        setSourceDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
+    let ignore = false;
+    const config = DRILLDOWN_CONFIG[drilldownSelection.axis];
+    const focusGroups = [sourceA, sourceB].filter(Boolean);
+    setDrilldownLoading(true);
+    api.getComparisonDrilldown(config.dimension, drilldownSelection.axis, drilldownSelection.label, undefined, analysisMode, focusGroups)
+      .then(result => {
+        if (ignore) return;
+        if (result.success) setDrilldownData(result.data);
+      })
+      .catch(() => {
+        if (!ignore) setDrilldownData(null);
+      })
+      .finally(() => {
+        if (!ignore) setDrilldownLoading(false);
+      });
+    return () => { ignore = true; };
+  }, [drilldownSelection, analysisMode, sourceA, sourceB]);
 
-  const setFilter = (key: keyof InsightFilters, value: string) => {
-    setFilters(prev => ({ ...prev, [key]: value }));
+  const groups = dataByAxis.functionalPurpose?.groups || [];
+  const groupOptions = groups.map(group => ({ value: group.id, label: group.label }));
+  const aFunctionGroup = groupById(comparisonDataByAxis.functionalPurpose, sourceA) || groupById(dataByAxis.functionalPurpose, sourceA);
+  const bFunctionGroup = groupById(comparisonDataByAxis.functionalPurpose, sourceB) || groupById(dataByAxis.functionalPurpose, sourceB);
+  const aCurrent = groupById(comparisonDataByAxis[axis], sourceA) || groupById(dataByAxis[axis], sourceA);
+  const bCurrent = groupById(comparisonDataByAxis[axis], sourceB) || groupById(dataByAxis[axis], sourceB);
+  const diffRows = useMemo(() => buildDiffRows(sourceA, sourceB, comparisonDataByAxis), [sourceA, sourceB, comparisonDataByAxis]);
+  const insights = useMemo(() => makeInsight(aFunctionGroup, bFunctionGroup, comparisonDataByAxis), [aFunctionGroup, bFunctionGroup, comparisonDataByAxis]);
+  const selectedPurpose = PURPOSES.find(item => item.key === purpose) || PURPOSES[0];
+  const comparisonMeta = comparisonDataByAxis.functionalPurpose;
+  const modeHelper = analysisMode === 'balanced'
+    ? `均衡样本：当前 A/B 两组自动抽取相同数量案例进行比较，每组 ${compactNumber(comparisonMeta?.balancedSampleSize || aFunctionGroup?.total || 0)} 条。`
+    : '全库现状：按当前真实数量比较，适合看案例库目前收集结构。';
+
+  const selectDrilldown = (nextAxis: AxisKey, label: string) => {
+    setAxis(nextAxis);
+    setDrilldownSelection({ axis: nextAxis, label });
   };
 
-  const setSourceNames = (names: string[]) => {
-    setFilters(prev => ({
-      ...prev,
-      sourceDomain: '',
-      sourceName: [...new Set(names)].join(','),
-    }));
-  };
-
-  const copyInsights = async () => {
-    if (!summary) return;
-    try {
-      await navigator.clipboard.writeText(summary.generatedInsights.join('\n'));
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
-    } catch {
-      setCopied(false);
+  useEffect(() => {
+    if (sourceA === sourceB) {
+      const fallback = groups.find(group => group.id !== sourceA);
+      if (fallback) setSourceB(fallback.id);
     }
-  };
-
-  const exportMarkdown = async () => {
-    if (!summary) return;
-    const lines: string[] = [];
-    lines.push(`# 数据分析报告`);
-    lines.push('');
-    lines.push(`案例总数：${summary.totalCases}`);
-    lines.push(`来源数量：${summary.sourceCount}`);
-    lines.push('');
-    for (const dim of summary.allDimensions) {
-      const dist = summary.distributions[dim.key];
-      if (dist && dist.length > 0) {
-        lines.push(`## ${dim.label}分布`);
-        lines.push('');
-        lines.push('| 类别 | 数量 | 占比 |');
-        lines.push('|------|------|------|');
-        for (const item of dist) {
-          lines.push(`| ${item.label} | ${item.count} | ${item.percentage.toFixed(1)}% |`);
-        }
-        lines.push('');
-      }
-    }
-    lines.push(`## ${summary.crossMatrix.rowLabel} × ${summary.crossMatrix.columnLabel} 交叉矩阵`);
-    lines.push('');
-    const header = `| ${summary.crossMatrix.rowLabel} | 样本数 | ${summary.crossMatrix.columns.join(' | ')} |`;
-    lines.push(header);
-    lines.push('|' + header.split('|').map(() => '------|').join(''));
-    for (const row of summary.crossMatrix.rows) {
-      const cells = row.cells.map(c => c.count > 0 ? `${c.percentage.toFixed(1)}%` : '-').join(' | ');
-      lines.push(`| ${row.rowLabel} | ${row.total} | ${cells} |`);
-    }
-    lines.push('');
-    lines.push(`## 评分分布`);
-    lines.push('');
-    for (const r of summary.ratingDistribution) {
-      lines.push(`- ${r.label}：${r.count}（${r.percentage.toFixed(1)}%）`);
-    }
-    lines.push('');
-    lines.push(`## 结论`);
-    lines.push('');
-    for (const insight of summary.generatedInsights) {
-      lines.push(`- ${insight}`);
-    }
-    try {
-      await navigator.clipboard.writeText(lines.join('\n'));
-      setExported(true);
-      window.setTimeout(() => setExported(false), 1400);
-    } catch {}
-  };
-
-  const navigateToCases = (filterKey: string, filterValue: string) => {
-    const search = new URLSearchParams();
-    search.set(filterKey, filterValue);
-    search.set('review_status', 'approved');
-    navigate(`/cases?${search.toString()}`);
-  };
-
-  const navigateToCrossCell = (rowVal: string, colVal: string) => {
-    const search = new URLSearchParams();
-    search.set('review_status', 'approved');
-    const rowFilterKey = DIMENSION_FILTER_MAP[rowDim];
-    const colFilterKey = DIMENSION_FILTER_MAP[colDim];
-    if (rowFilterKey) search.set(rowFilterKey, rowVal);
-    if (colFilterKey) search.set(colFilterKey, colVal);
-    navigate(`/cases?${search.toString()}`);
-  };
-
-  const filterOptions = summary?.filterOptions;
-
-  const DIM_CHOICES = [
-    { key: 'functionalPurpose', label: '功能用途' },
-    { key: 'distributionMedium', label: '传播媒介' },
-    { key: 'technicalMethod', label: '技术手段' },
-    { key: 'discipline', label: '学科' },
-    { key: 'mediaType', label: '呈现方式' },
-    { key: 'contentType', label: '内容类型' },
-  ];
-
-  const tabStyle = (active: boolean): CSSProperties => ({
-    padding: '8px 18px',
-    borderRadius: `${theme.radius.md}px ${theme.radius.md}px 0 0`,
-    border: 'none',
-    borderBottom: active ? `2px solid ${theme.colors.text.primary}` : '2px solid transparent',
-    background: 'transparent',
-    color: active ? theme.colors.text.primary : theme.colors.text.secondary,
-    fontSize: theme.typography.size.sm,
-    fontWeight: active ? 650 : 500,
-    cursor: 'pointer',
-  });
+  }, [sourceA, sourceB, groups]);
 
   return (
     <div style={{ paddingBottom: 48 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 20, marginBottom: 22 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 22, marginBottom: 20 }}>
         <div>
-          <h1 style={{
-            fontSize: theme.typography.size['3xl'],
-            fontWeight: 650,
-            color: theme.colors.text.primary,
-            letterSpacing: '-0.03em',
-            margin: 0,
-          }}>
-            数据分析
+          <h1 style={{ margin: 0, color: theme.colors.text.primary, fontSize: theme.typography.size['3xl'], fontWeight: 750, letterSpacing: 0 }}>
+            案例库现状与对比
           </h1>
-          <p style={{ margin: '8px 0 0', color: theme.colors.text.secondary, fontSize: theme.typography.size.base }}>
-            {viewMode === 'overview' ? '按来源、学科和视觉标签实时统计案例库，生成可放入 PPT 的趋势结论。' : '三轴交叉分析：探索功能用途 × 呈现方式 × 学科的分布格局。'}
+          <p style={{ margin: '8px 0 0', color: theme.colors.text.secondary, fontSize: theme.typography.size.base, lineHeight: 1.6 }}>
+            用较少筛选看清当前案例库结构，并动态比较两个来源组在功能、媒介和技术维度上的差异。
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexDirection: 'column', alignItems: 'flex-end' }}>
-          <div style={{ display: 'flex', gap: 0, marginBottom: -2 }}>
-            <button onClick={() => setViewMode('overview')} style={tabStyle(viewMode === 'overview')}>数据总览</button>
-            <button onClick={() => setViewMode('spectrum')} style={tabStyle(viewMode === 'spectrum')}>三轴频谱</button>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={exportMarkdown} disabled={!summary}
-            style={{
-              height: 34, padding: '0 14px', borderRadius: theme.radius.md,
-              border: `1px solid ${theme.colors.border}`, background: theme.colors.bgCard,
-              color: theme.colors.text.secondary, cursor: summary ? 'pointer' : 'not-allowed',
-              fontSize: theme.typography.size.sm, fontWeight: 600,
-            }}
-          >
-            {exported ? '已复制报告' : '导出报告'}
-          </button>
-          <button onClick={() => setFilters(DEFAULT_FILTERS)}
-            style={{
-              height: 34, padding: '0 14px', borderRadius: theme.radius.md,
-              border: `1px solid ${theme.colors.border}`, background: theme.colors.bgCard,
-              color: theme.colors.text.secondary, cursor: 'pointer',
-              fontSize: theme.typography.size.sm, fontWeight: 600,
-            }}
-          >
-            重置筛选
-          </button>
-        </div>
       </div>
-      </div>
-
-      {viewMode === 'overview' && (
-      <>
-      <Card padding={16} style={{ marginBottom: 18 }}>
-        <div ref={sourceDropdownRef} style={{ marginBottom: 14 }}>
-          <SourceMultiSelect
-            sources={poolSources}
-            selectedNames={selectedSourceNames}
-            open={sourceDropdownOpen}
-            onOpenChange={setSourceDropdownOpen}
-            onSetSelected={setSourceNames}
-          />
-        </div>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
-          gap: 14,
-          alignItems: 'end',
-        }}>
-          <FieldSelect label="学科" value={filters.discipline} emptyLabel="全部学科" filterKey="discipline"
-            options={filterOptions?.discipline || []} onChange={(value) => setFilter('discipline', value)} />
-          <FieldSelect label="功能用途" value={filters.functionalPurpose} emptyLabel="全部功能用途" filterKey="functionalPurpose"
-            options={filterOptions?.functionalPurpose || []} onChange={(value) => setFilter('functionalPurpose', value)} />
-          <FieldSelect label="传播媒介" value={filters.distributionMedium} emptyLabel="全部传播媒介" filterKey="distributionMedium"
-            options={filterOptions?.distributionMedium || []} onChange={(value) => setFilter('distributionMedium', value)} />
-          <FieldSelect label="技术手段" value={filters.technicalMethod} emptyLabel="全部技术手段" filterKey="technicalMethod"
-            options={filterOptions?.technicalMethod || []} onChange={(value) => setFilter('technicalMethod', value)} />
-          <FieldSelect label="内容类型" value={filters.contentType} emptyLabel="全部内容类型" filterKey="contentType"
-            options={filterOptions?.contentType || []} onChange={(value) => setFilter('contentType', value)} />
-          <FieldSelect label="呈现方式" value={filters.mediaType} emptyLabel="全部呈现方式" filterKey="mediaType"
-            options={filterOptions?.mediaType || []} onChange={(value) => setFilter('mediaType', value)} />
-          <FieldSelect label="构图" value={filters.composition} emptyLabel="全部构图" filterKey="composition"
-            options={filterOptions?.composition || []} onChange={(value) => setFilter('composition', value)} />
-          <FieldSelect label="色调" value={filters.colorTone} emptyLabel="全部色调" filterKey="colorTone"
-            options={filterOptions?.colorTone || []} onChange={(value) => setFilter('colorTone', value)} />
-          <FieldSelect label="复核状态" value={filters.reviewStatus} emptyLabel="全部状态" filterKey="reviewStatus"
-            options={filterOptions?.reviewStatus || []} onChange={(value) => setFilter('reviewStatus', value)} />
-        </div>
-      </Card>
 
       {error && (
-        <div style={{
-          background: theme.colors.redBg, border: `1px solid ${theme.colors.redBorder}`,
-          color: theme.colors.red, borderRadius: theme.radius.md, padding: 12, marginBottom: 18, fontSize: theme.typography.size.sm,
-        }}>
+        <div style={{ marginBottom: 18, padding: 12, borderRadius: 8, border: `1px solid ${theme.colors.redBorder}`, background: theme.colors.redBg, color: theme.colors.red }}>
           {error}
         </div>
       )}
 
-      {summary?.totalCases !== undefined && summary.totalCases < 20 && (
-        <div style={{
-          background: theme.colors.orangeBg, border: `1px solid ${theme.colors.orangeBorder}`,
-          color: theme.colors.orange, borderRadius: theme.radius.md, padding: 12, marginBottom: 18,
-          fontSize: theme.typography.size.sm, fontWeight: 600,
-        }}>
-          当前筛选样本较少，结论仅供参考。
-        </div>
-      )}
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 14, marginBottom: 18 }}>
-        <MetricCard label="案例总数" value={loading && !summary ? '...' : compactNumber(summary?.totalCases || 0)} hint="当前筛选结果" />
-        <MetricCard label="来源数量" value={compactNumber(summary?.sourceCount || 0)} hint="当前样本覆盖来源" />
-        <MetricCard label="主要呈现方式" value={summary?.leadingMediaType || '-'} />
-        <MetricCard label="主要学科" value={summary?.leadingDiscipline || '-'} />
-        <MetricCard label="主要技术手段" value={summary?.leadingTechnicalMethod || '-'} />
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 18, marginBottom: 18 }}>
-        {summary?.allDimensions.map(dim => {
-          const dist = summary.distributions[dim.key];
-          if (!dist || dist.length === 0) return null;
-          const filterKey = DIMENSION_FILTER_MAP[dim.key];
-          return (
-            <DistributionChart
-              key={dim.key}
-              title={`${dim.label}占比`}
-              data={dist}
-              emptyText={`暂无${dim.label}数据。`}
-              onBarClick={filterKey ? (label) => navigateToCases(filterKey, label) : undefined}
-            />
-          );
-        })}
-        {summary && (
-          <DistributionChart
-            title="评分分布"
-            data={summary.ratingDistribution}
-            emptyText="暂无评分数据。"
-          />
-        )}
-      </div>
-
-      {summary && (
+      {loading ? (
+        <Card padding={24}><div style={{ color: theme.colors.text.secondary, textAlign: 'center', padding: 40 }}>加载案例库对比数据...</div></Card>
+      ) : (
         <>
-          <Card padding={18} style={{ marginBottom: 18 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, marginBottom: 16 }}>
-              <h2 style={{ margin: 0, color: theme.colors.text.primary, fontSize: theme.typography.size.xl, fontWeight: 650 }}>
-                交叉矩阵
+          <section style={{ marginBottom: 18 }}>
+            <div style={{ marginBottom: 12 }}>
+              <h2 style={{ margin: 0, color: theme.colors.text.primary, fontSize: theme.typography.size['2xl'], fontWeight: 750 }}>
+                全库来源组概览
               </h2>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: theme.typography.size.sm }}>
-                  <span style={{ color: theme.colors.text.secondary }}>行</span>
-                  <select value={rowDim} onChange={(e) => setRowDim(e.target.value)} style={{ ...selectStyle, width: 130 }}>
-                    {summary.allDimensions.map(dim => (
-                      <option key={dim.key} value={dim.key}>{dim.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <span style={{ color: theme.colors.text.tertiary }}>×</span>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: theme.typography.size.sm }}>
-                  <span style={{ color: theme.colors.text.secondary }}>列</span>
-                  <select value={colDim} onChange={(e) => setColDim(e.target.value)} style={{ ...selectStyle, width: 130 }}>
-                    {summary.allDimensions.map(dim => (
-                      <option key={dim.key} value={dim.key}>{dim.label}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
+              <p style={{ margin: '6px 0 0', color: theme.colors.text.tertiary, fontSize: theme.typography.size.sm }}>
+                这里先回答“目前案例库里收集了哪些来源组，以及每组主要是什么结构”。
+              </p>
             </div>
-            <CrossMatrixView matrix={summary.crossMatrix} onCellClick={navigateToCrossCell} />
-          </Card>
+            <SourceOverview dataByAxis={dataByAxis} />
+          </section>
+
+          <section style={{ marginBottom: 18 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 14, marginBottom: 10 }}>
+              <div>
+                <h2 style={{ margin: 0, color: theme.colors.text.primary, fontSize: theme.typography.size['2xl'], fontWeight: 750 }}>全库整体分布</h2>
+                <p style={{ margin: '6px 0 0', color: theme.colors.text.tertiary, fontSize: theme.typography.size.sm }}>
+                  这不是 A/B 对比，而是把当前所有来源组汇总后看三轴结构。
+                </p>
+              </div>
+              <SegmentedButton
+                value={axis}
+                onChange={setAxis}
+                items={AXES.map(item => ({ key: item.key, label: item.label }))}
+              />
+            </div>
+            <OverallDistribution
+              axis={axis}
+              data={dataByAxis[axis]}
+              selectedLabel={drilldownSelection.axis === axis ? drilldownSelection.label : undefined}
+              onSelect={selectDrilldown}
+            />
+          </section>
+
+          <section style={{ marginBottom: 18 }}>
+            <Card padding={16} style={{ marginBottom: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 18, flexWrap: 'wrap', marginBottom: 14 }}>
+                <div>
+                  <h2 style={{ margin: 0, color: theme.colors.text.primary, fontSize: theme.typography.size['2xl'], fontWeight: 800 }}>
+                    <span style={{ color: GROUP_COLORS[sourceA] || theme.colors.accent }}>{aFunctionGroup?.label || '-'}</span>
+                    <span style={{ color: theme.colors.text.tertiary, fontWeight: 650 }}> vs </span>
+                    <span style={{ color: GROUP_COLORS[sourceB] || theme.colors.orange }}>{bFunctionGroup?.label || '-'}</span>
+                  </h2>
+                  <p style={{ margin: '6px 0 0', color: theme.colors.text.tertiary, fontSize: theme.typography.size.sm, lineHeight: 1.6 }}>
+                    这里是两组对比工作区。选择对象、查看三轴差异、点击一级分类看细分，都在这一段完成。
+                  </p>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
+                  <span style={{ color: theme.colors.text.secondary, fontSize: theme.typography.size.xs, fontWeight: 700 }}>汇报目的视角</span>
+                  <SegmentedButton
+                    value={purpose}
+                    onChange={setPurpose}
+                    items={PURPOSES.map(item => ({ key: item.key, label: item.label }))}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(180px, 1fr) auto', gap: 14, alignItems: 'end' }}>
+                <SelectField label="对比对象 A" value={sourceA} options={groupOptions} onChange={setSourceA} />
+                <SelectField label="对比对象 B" value={sourceB} options={groupOptions.filter(option => option.value !== sourceA)} onChange={setSourceB} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span style={{ color: theme.colors.text.secondary, fontSize: theme.typography.size.xs, fontWeight: 700 }}>分析口径</span>
+                  <SegmentedButton
+                    value={analysisMode}
+                    onChange={setAnalysisMode}
+                    items={[
+                      { key: 'live', label: '全库现状' },
+                      { key: 'balanced', label: '均衡样本' },
+                    ]}
+                  />
+                </div>
+              </div>
+
+              <div style={{ marginTop: 10, color: theme.colors.text.secondary, fontSize: theme.typography.size.sm, lineHeight: 1.6 }}>
+                <strong style={{ color: theme.colors.text.primary }}>当前口径：</strong>
+                {comparisonLoading ? '正在更新对比数据...' : modeHelper}
+                {analysisMode === 'balanced' && (
+                  <span style={{ display: 'block', color: theme.colors.text.tertiary, fontSize: theme.typography.size.xs, marginTop: 2 }}>
+                    N 由当前各来源组可用样本的最小值自动计算，不是固定数；顶部“全库”模块仍显示真实库存。
+                  </span>
+                )}
+              </div>
+
+              {purpose !== 'all' && (
+                <div style={{ marginTop: 10, color: theme.colors.text.secondary, fontSize: theme.typography.size.sm }}>
+                  当前解释视角：{selectedPurpose.helper}。这里不改变样本范围，只帮助你用对应目的阅读结果。
+                </div>
+              )}
+            </Card>
+
+            <UsageGuide aLabel={aFunctionGroup?.label || 'A'} bLabel={bFunctionGroup?.label || 'B'} />
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 18 }}>
+              <AxisComparisonChart
+                axis="functionalPurpose"
+                a={groupById(comparisonDataByAxis.functionalPurpose, sourceA)}
+                b={groupById(comparisonDataByAxis.functionalPurpose, sourceB)}
+                selectedLabel={drilldownSelection.axis === 'functionalPurpose' ? drilldownSelection.label : undefined}
+                onSelect={selectDrilldown}
+              />
+              <AxisComparisonChart
+                axis="technicalMethod"
+                a={groupById(comparisonDataByAxis.technicalMethod, sourceA)}
+                b={groupById(comparisonDataByAxis.technicalMethod, sourceB)}
+                selectedLabel={drilldownSelection.axis === 'technicalMethod' ? drilldownSelection.label : undefined}
+                onSelect={selectDrilldown}
+              />
+              <AxisComparisonChart
+                axis="distributionMedium"
+                a={groupById(comparisonDataByAxis.distributionMedium, sourceA)}
+                b={groupById(comparisonDataByAxis.distributionMedium, sourceB)}
+                selectedLabel={drilldownSelection.axis === 'distributionMedium' ? drilldownSelection.label : undefined}
+                onSelect={selectDrilldown}
+              />
+              <DrilldownFocusCard
+                selection={drilldownSelection}
+                data={drilldownData}
+                loading={drilldownLoading}
+                aId={sourceA}
+                bId={sourceB}
+              />
+              <DifferenceChart rows={diffRows} aLabel={aFunctionGroup?.label || 'A'} bLabel={bFunctionGroup?.label || 'B'} />
+            </div>
+          </section>
+
+          <section style={{ marginBottom: 18, display: 'grid', gridTemplateColumns: 'minmax(320px, 0.8fr) minmax(360px, 1.2fr)', gap: 18 }}>
+            <InsightPanel insights={insights} />
+            <SampleLinks a={aCurrent} b={bCurrent} axisData={comparisonDataByAxis[axis]} />
+          </section>
         </>
-      )}
-
-      <Card padding={18}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 16, marginBottom: 14 }}>
-          <h2 style={{ margin: 0, color: theme.colors.text.primary, fontSize: theme.typography.size.xl, fontWeight: 650 }}>
-            PPT 初步结论
-          </h2>
-          <button
-            onClick={copyInsights}
-            disabled={!summary || summary.generatedInsights.length === 0}
-            style={{
-              height: 30, padding: '0 12px', borderRadius: theme.radius.md,
-              border: `1px solid ${theme.colors.border}`, background: theme.colors.bgCard,
-              color: theme.colors.text.secondary, cursor: summary ? 'pointer' : 'not-allowed',
-              fontSize: theme.typography.size.xs, fontWeight: 600,
-            }}
-          >
-            {copied ? '已复制' : '复制结论'}
-          </button>
-        </div>
-        <ol style={{ margin: 0, paddingLeft: 20, color: theme.colors.text.primary, fontSize: theme.typography.size.base, lineHeight: 1.8 }}>
-          {(summary?.generatedInsights || []).map(item => (
-            <li key={item}>{item}</li>
-          ))}
-        </ol>
-        {!summary?.generatedInsights.length && (
-          <div style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.size.sm }}>
-            选择筛选条件后会自动生成 3-5 条基于当前样本库的结论。
-          </div>
-        )}
-      </Card>
-      </>
-      )}
-
-      {viewMode === 'spectrum' && (
-        <SpectrumView
-          spectrum={spectrum}
-          loading={spectrumLoading}
-          specX={specX}
-          specY={specY}
-          specZ={specZ}
-          specSliceZ={specSliceZ}
-          dimChoices={DIM_CHOICES}
-          onSpecXChange={setSpecX}
-          onSpecYChange={setSpecY}
-          onSpecZChange={(v) => { setSpecZ(v); setSpecSliceZ(''); }}
-          onSpecSliceZChange={setSpecSliceZ}
-          onNavigate={(discipline, mediaType, fp) => {
-            const search = new URLSearchParams();
-            search.set('review_status', 'approved');
-            if (discipline) search.set('discipline', discipline);
-            if (mediaType) search.set('media_type', mediaType);
-            if (fp) search.set('functional_purpose', fp);
-            navigate(`/cases?${search.toString()}`);
-          }}
-        />
       )}
     </div>
   );

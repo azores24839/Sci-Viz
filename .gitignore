@@ -9,3 +9,4 @@ journal_covers/
 .env.*
 *.swp
 *.save
+nasa_svs_output/

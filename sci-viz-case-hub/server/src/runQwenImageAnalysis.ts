@@ -30,10 +30,16 @@ function hasFlag(name: string): boolean {
   return process.argv.includes(`--${name}`) || process.env[name.toUpperCase()] === '1';
 }
 
+function sourceDomainsArg(): string[] {
+  const raw = argValue('source-domains') || process.env.SOURCE_DOMAINS || '';
+  return raw.split(',').map(d => d.trim()).filter(Boolean);
+}
+
 async function main() {
   const limit = intArg('limit', DEFAULT_LIMIT, 200);
   const concurrency = intArg('concurrency', DEFAULT_CONCURRENCY, 5);
   const statuses = statusesArg();
+  const sourceDomains = sourceDomainsArg();
   const autoApprove = hasFlag('approve');
   const dryRun = hasFlag('dry-run');
   const missingCoreOnly = hasFlag('missing-core');
@@ -43,6 +49,7 @@ async function main() {
     where: {
       AND: [
         { reviewStatus: { in: statuses } },
+        sourceDomains.length > 0 ? { sourceDomain: { in: sourceDomains } } : {},
         missingCoreOnly
           ? {
               OR: [

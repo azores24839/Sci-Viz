@@ -8,6 +8,8 @@ import pLimit from 'p-limit';
 const INTERNATIONAL_DOMAINS = [
   'news.mit.edu',
   'news.harvard.edu',
+  'www.harvard.edu',
+  'harvard.edu',
   'news.stanford.edu',
   'engineering.stanford.edu',
   'newscenter.lbl.gov',

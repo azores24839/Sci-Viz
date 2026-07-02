@@ -19,6 +19,8 @@ export interface CollectionScoreResult {
 const HIGH_VALUE_HOSTS = [
   'news.mit.edu',
   'news.harvard.edu',
+  'www.harvard.edu',
+  'harvard.edu',
   'newscenter.lbl.gov',
   'www.mpg.de',
   'www.nature.com',

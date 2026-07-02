@@ -1,0 +1,379 @@
+{
+  "generated_at": "2026-06-17 15:09",
+  "total_approved": 6131,
+  "source_rows": [
+    {
+      "id": "ime",
+      "label": "长兴海洋实验室",
+      "count": 113,
+      "top_function": "记录",
+      "top_function_pct": 73.5,
+      "top_tech": "拍摄",
+      "top_tech_pct": 82.3,
+      "top_medium": "静图",
+      "top_medium_pct": 100.0
+    },
+    {
+      "id": "sjtu",
+      "label": "交大工科/校内科研",
+      "count": 207,
+      "top_function": "记录",
+      "top_function_pct": 48.8,
+      "top_tech": "拍摄",
+      "top_tech_pct": 69.6,
+      "top_medium": "静图",
+      "top_medium_pct": 91.8
+    },
+    {
+      "id": "domestic",
+      "label": "国内高校/科研机构",
+      "count": 396,
+      "top_function": "解释",
+      "top_function_pct": 46.2,
+      "top_tech": "拍摄",
+      "top_tech_pct": 50.8,
+      "top_medium": "静图",
+      "top_medium_pct": 97.2
+    },
+    {
+      "id": "overseas",
+      "label": "国外高校",
+      "count": 1353,
+      "top_function": "传播",
+      "top_function_pct": 41.0,
+      "top_tech": "拍摄",
+      "top_tech_pct": 80.6,
+      "top_medium": "静图",
+      "top_medium_pct": 99.6
+    },
+    {
+      "id": "international",
+      "label": "国际研究机构/期刊",
+      "count": 2699,
+      "top_function": "传播",
+      "top_function_pct": 69.0,
+      "top_tech": "拍摄",
+      "top_tech_pct": 32.6,
+      "top_medium": "静图",
+      "top_medium_pct": 99.1
+    },
+    {
+      "id": "enterprise",
+      "label": "头部企业/产业案例",
+      "count": 1044,
+      "top_function": "展示",
+      "top_function_pct": 45.1,
+      "top_tech": "拍摄",
+      "top_tech_pct": 44.0,
+      "top_medium": "静图",
+      "top_medium_pct": 99.1
+    },
+    {
+      "id": "other",
+      "label": "其他来源",
+      "count": 319,
+      "top_function": "传播",
+      "top_function_pct": 36.1,
+      "top_tech": "拍摄",
+      "top_tech_pct": 46.1,
+      "top_medium": "静图",
+      "top_medium_pct": 94.7
+    }
+  ],
+  "all_function": [
+    {
+      "label": "传播",
+      "count": 2835,
+      "pct": 46.2
+    },
+    {
+      "label": "记录",
+      "count": 1312,
+      "pct": 21.4
+    },
+    {
+      "label": "解释",
+      "count": 1101,
+      "pct": 18.0
+    },
+    {
+      "label": "展示",
+      "count": 825,
+      "pct": 13.5
+    },
+    {
+      "label": "数据",
+      "count": 57,
+      "pct": 0.9
+    },
+    {
+      "label": "交互",
+      "count": 1,
+      "pct": 0.0
+    }
+  ],
+  "all_tech": [
+    {
+      "label": "拍摄",
+      "count": 3015,
+      "pct": 49.2
+    },
+    {
+      "label": "绘设",
+      "count": 1264,
+      "pct": 20.6
+    },
+    {
+      "label": "渲染",
+      "count": 950,
+      "pct": 15.5
+    },
+    {
+      "label": "成像",
+      "count": 612,
+      "pct": 10.0
+    },
+    {
+      "label": "数据",
+      "count": 253,
+      "pct": 4.1
+    },
+    {
+      "label": "生成",
+      "count": 37,
+      "pct": 0.6
+    }
+  ],
+  "all_medium": [
+    {
+      "label": "静图",
+      "count": 6046,
+      "pct": 98.6
+    },
+    {
+      "label": "图组",
+      "count": 46,
+      "pct": 0.8
+    },
+    {
+      "label": "动图",
+      "count": 20,
+      "pct": 0.3
+    },
+    {
+      "label": "视频",
+      "count": 18,
+      "pct": 0.3
+    },
+    {
+      "label": "交互",
+      "count": 1,
+      "pct": 0.0
+    }
+  ],
+  "purpose_rows": [
+    {
+      "label": "学术交流：证据与解释",
+      "count": 2470,
+      "pct": 40.3
+    },
+    {
+      "label": "公众传播：理解与记忆",
+      "count": 2835,
+      "pct": 46.2
+    },
+    {
+      "label": "产业转化：应用与展示",
+      "count": 826,
+      "pct": 13.5
+    }
+  ],
+  "compare_rows": [
+    {
+      "label": "长兴海洋实验室",
+      "count": 113,
+      "record": 73.5,
+      "explain": 9.7,
+      "communicate": 8.0,
+      "display": 8.0,
+      "shoot": 82.3,
+      "draw": 14.2,
+      "render": 1.8,
+      "imaging": 0.9,
+      "data": 0.9,
+      "top_f": "记录",
+      "top_t": "拍摄"
+    },
+    {
+      "label": "交大工科/校内科研",
+      "count": 207,
+      "record": 48.8,
+      "explain": 14.5,
+      "communicate": 20.3,
+      "display": 10.1,
+      "shoot": 69.6,
+      "draw": 18.4,
+      "render": 0.5,
+      "imaging": 1.9,
+      "data": 9.7,
+      "top_f": "记录",
+      "top_t": "拍摄"
+    },
+    {
+      "label": "国内高校/科研机构",
+      "count": 396,
+      "record": 35.1,
+      "explain": 46.2,
+      "communicate": 7.1,
+      "display": 10.4,
+      "shoot": 50.8,
+      "draw": 26.5,
+      "render": 2.0,
+      "imaging": 3.0,
+      "data": 17.7,
+      "top_f": "解释",
+      "top_t": "拍摄"
+    },
+    {
+      "label": "国外高校",
+      "count": 1353,
+      "record": 36.4,
+      "explain": 16.2,
+      "communicate": 41.0,
+      "display": 6.3,
+      "shoot": 80.6,
+      "draw": 11.7,
+      "render": 4.3,
+      "imaging": 2.4,
+      "data": 1.0,
+      "top_f": "传播",
+      "top_t": "拍摄"
+    },
+    {
+      "label": "国际研究机构/期刊",
+      "count": 2699,
+      "record": 13.9,
+      "explain": 10.0,
+      "communicate": 69.0,
+      "display": 6.0,
+      "shoot": 32.6,
+      "draw": 25.2,
+      "render": 19.9,
+      "imaging": 18.7,
+      "data": 3.2,
+      "top_f": "传播",
+      "top_t": "拍摄"
+    },
+    {
+      "label": "头部企业/产业案例",
+      "count": 1044,
+      "record": 5.3,
+      "explain": 27.3,
+      "communicate": 21.6,
+      "display": 45.1,
+      "shoot": 44.0,
+      "draw": 14.9,
+      "render": 30.7,
+      "imaging": 3.3,
+      "data": 4.9,
+      "top_f": "展示",
+      "top_t": "拍摄"
+    }
+  ],
+  "ime_function": [
+    {
+      "label": "记录",
+      "count": 83,
+      "pct": 73.5
+    },
+    {
+      "label": "解释",
+      "count": 11,
+      "pct": 9.7
+    },
+    {
+      "label": "展示",
+      "count": 9,
+      "pct": 8.0
+    },
+    {
+      "label": "传播",
+      "count": 9,
+      "pct": 8.0
+    },
+    {
+      "label": "数据",
+      "count": 1,
+      "pct": 0.9
+    }
+  ],
+  "ime_tech": [
+    {
+      "label": "拍摄",
+      "count": 93,
+      "pct": 82.3
+    },
+    {
+      "label": "绘设",
+      "count": 16,
+      "pct": 14.2
+    },
+    {
+      "label": "渲染",
+      "count": 2,
+      "pct": 1.8
+    },
+    {
+      "label": "数据",
+      "count": 1,
+      "pct": 0.9
+    },
+    {
+      "label": "成像",
+      "count": 1,
+      "pct": 0.9
+    }
+  ],
+  "ime_content": [
+    {
+      "label": "单人肖像",
+      "count": 47,
+      "pct": 42.0
+    },
+    {
+      "label": "团队场景",
+      "count": 18,
+      "pct": 16.1
+    },
+    {
+      "label": "群体肖像",
+      "count": 14,
+      "pct": 12.5
+    },
+    {
+      "label": "实验设备",
+      "count": 12,
+      "pct": 10.7
+    },
+    {
+      "label": "科普传播",
+      "count": 8,
+      "pct": 7.1
+    },
+    {
+      "label": "机制模型",
+      "count": 7,
+      "pct": 6.2
+    },
+    {
+      "label": "数据结果",
+      "count": 4,
+      "pct": 3.6
+    },
+    {
+      "label": "实验过程",
+      "count": 1,
+      "pct": 0.9
+    }
+  ]
+}

@@ -32,6 +32,16 @@ export async function runAnalysis(
         ? 'needs_review'
         : 'low_confidence_review';
 
+    const existingCase = await prisma.visualCase.findUnique({
+      where: { id: caseId },
+      select: { distributionMedium: true, imageUrl: true },
+    });
+    const preSetDistributionMedium = existingCase?.distributionMedium || '';
+    const isGifByUrl = /\.gif(\?|$)/i.test(existingCase?.imageUrl || '');
+    const finalDistributionMedium = preSetDistributionMedium === '动图' || isGifByUrl
+      ? '动图'
+      : (visionResult.distribution_medium || undefined);
+
     await prisma.visualCase.update({
       where: { id: caseId },
       data: {
@@ -43,7 +53,7 @@ export async function runAnalysis(
         colorTone: visionResult.color_tone,
         useCase: JSON.stringify(visionResult.use_case),
         functionalPurpose: visionResult.functional_purpose || undefined,
-        distributionMedium: visionResult.distribution_medium || undefined,
+        distributionMedium: finalDistributionMedium,
         aiSummary: visionResult.ai_summary,
         caseTitle: visionResult.case_title,
         borrowablePoints: JSON.stringify(visionResult.borrowable_points),

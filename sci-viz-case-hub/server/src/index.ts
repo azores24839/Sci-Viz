@@ -104,6 +104,7 @@ if (process.argv.includes('--seed-videos')) {
     shuttingDown = true;
     console.log(`[server] Received ${signal}, shutting down...`);
     stopAnalysisRecovery();
+    server.closeAllConnections();
     server.close(async () => {
       await prisma.$disconnect().catch(() => {});
       console.log('[server] Shutdown complete');

@@ -47,6 +47,18 @@ async function renderHtml(url: string, executablePath: string | null): Promise<{
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(3000);
 
+    await page.evaluate(async () => {
+      const distance = 400;
+      const delay = 200;
+      const scrollHeight = document.documentElement.scrollHeight;
+      for (let y = 0; y < scrollHeight; y += distance) {
+        window.scrollTo(0, y);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+      window.scrollTo(0, 0);
+    });
+    await page.waitForTimeout(2000);
+
     await page.$$eval('img', imgs => {
       for (const img of imgs) {
         const currentSrc = img.currentSrc || img.src;
@@ -65,13 +77,29 @@ async function renderHtml(url: string, executablePath: string | null): Promise<{
 
     const renderedImages = await page.$$eval('img', imgs =>
       imgs
-        .map(img => ({
-          src: img.currentSrc || img.src,
-          alt: img.alt || '',
-          width: img.naturalWidth || 0,
-          height: img.naturalHeight || 0,
-        }))
-        .filter(img => img.src && img.width >= 160 && img.height >= 100)
+        .map(img => {
+          let width = img.naturalWidth || 0;
+          let height = img.naturalHeight || 0;
+          if (!width && img.hasAttribute('width')) {
+            width = parseInt(img.getAttribute('width') || '0', 10);
+          }
+          if (!height && img.hasAttribute('height')) {
+            height = parseInt(img.getAttribute('height') || '0', 10);
+          }
+          return {
+            src: img.currentSrc || img.src,
+            alt: img.alt || '',
+            width,
+            height,
+            loaded: img.naturalWidth > 0,
+          };
+        })
+        .filter(img => {
+          if (!img.src) return false;
+          if (img.width >= 160 && img.height >= 100) return true;
+          if (!img.loaded && img.width > 0 && img.height > 0) return true;
+          return false;
+        })
     );
     await page.evaluate((images) => {
       const container = document.createElement('section');
@@ -263,6 +291,7 @@ async function main() {
     const result = await processRenderedSource(source, { execute, maxImages, executablePath });
     results.push(result);
     console.log(JSON.stringify(result));
+    await new Promise(r => setTimeout(r, 2000));
   }
 
   const summary = results.reduce((acc, result) => ({

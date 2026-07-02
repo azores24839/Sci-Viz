@@ -73,6 +73,7 @@ const COMPANY_RULES: CompanyRule[] = [
   { companyName: 'Sony', companyKey: 'sony', patterns: [/sony/i] },
   { companyName: 'Apple', companyKey: 'apple', patterns: [/apple/i] },
   { companyName: 'Tesla', companyKey: 'tesla', patterns: [/tesla/i] },
+  { companyName: 'SpaceX', companyKey: 'spacex', patterns: [/spacex|starlink/i] },
   { companyName: 'Unitree', companyKey: 'unitree', patterns: [/unitree/i] },
   { companyName: 'Xiaomi', companyKey: 'xiaomi', patterns: [/xiaomi|\bmi\.com/i] },
   { companyName: 'Samsung', companyKey: 'samsung', patterns: [/samsung/i] },

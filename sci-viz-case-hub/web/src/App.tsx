@@ -15,7 +15,7 @@ const navItems = [
   { path: '/', label: '案例库' },
   { path: '/review', label: '处理工作台' },
   { path: '/pool', label: '采集来源' },
-  { path: '/insights', label: '数据分析' },
+  { path: '/insights', label: '案例库现状与对比' },
   { path: '/comparison', label: '跨源对比' },
   { path: '/report', label: '分析报告' },
 ];

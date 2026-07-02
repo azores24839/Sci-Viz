@@ -297,7 +297,7 @@ export const CATEGORY_LABELS: Record<string, string> = {
   'SJTU-NATLAB': '国家级科研平台',
 };
 
-export type ComparisonGroupId = 'sjtu' | 'domestic' | 'international' | 'enterprise';
+export type ComparisonGroupId = 'ime' | 'sjtu' | 'domestic' | 'overseasUniversity' | 'international' | 'enterprise';
 
 export interface ComparisonDistributionItem {
   label: string;
@@ -324,6 +324,7 @@ export interface ComparisonGroup {
   id: ComparisonGroupId;
   label: string;
   sourceDomains: string[];
+  rawTotal?: number;
   total: number;
   distribution: ComparisonDistributionItem[];
   samples: ComparisonSample[];
@@ -372,6 +373,10 @@ export interface ComparisonData {
   school?: string;
   dimension: string;
   dimensionLabel: string;
+  parentDimension?: string;
+  parentValue?: string;
+  sampleMode?: 'live' | 'balanced';
+  balancedSampleSize?: number;
   groups: ComparisonGroup[];
   findings: Finding[];
   subtypeCross: SubtypeCross | null;

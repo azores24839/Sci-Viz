@@ -1,16 +1,29 @@
 import 'dotenv/config';
 import Fastify from 'fastify';
+import multipart from '@fastify/multipart';
 import { DeepSeekGateway, generateAgentDraft, readDeepSeekConfig } from '@studio/ai-workflows';
 import { AgentDraftRequestSchema } from '@studio/contracts';
+import { createSourceRepository } from './sources/repository.js';
+import { createObjectStorage } from './sources/storage.js';
+import { SourceProcessor } from './sources/processor.js';
+import { registerSourceRoutes } from './sources/routes.js';
 
 const app = Fastify({ logger: true });
+await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024, files: 1 } });
+
+const sourceRepository = createSourceRepository(process.env);
+const sourceStorage = createObjectStorage(process.env);
+const sourceProcessor = new SourceProcessor(sourceRepository, sourceStorage, process.env, Number(process.env.SOURCE_WORKER_CONCURRENCY ?? 2));
+await registerSourceRoutes(app, { repo: sourceRepository, storage: sourceStorage, processor: sourceProcessor });
+await sourceProcessor.resume();
 
 app.addHook('onRequest', async (request, reply) => {
   const origin = request.headers.origin;
-  reply.header('Access-Control-Allow-Origin', origin ?? '*');
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? 'http://127.0.0.1:5178').split(',').map((value) => value.trim());
+  if (origin && allowedOrigins.includes(origin)) reply.header('Access-Control-Allow-Origin', origin);
   reply.header('Vary', 'Origin');
-  reply.header('Access-Control-Allow-Headers', 'Content-Type');
-  reply.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  reply.header('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
   if (request.method === 'OPTIONS') {
     return reply.code(204).send();
   }
@@ -19,7 +32,7 @@ app.addHook('onRequest', async (request, reply) => {
 app.get('/api/v1/health', async () => ({
   success: true,
   data: {
-    service: 'sci-viz-studio',
+    service: 'sci-ai-studio',
     aiProvider: process.env.AI_PROVIDER ?? 'mock',
   },
 }));

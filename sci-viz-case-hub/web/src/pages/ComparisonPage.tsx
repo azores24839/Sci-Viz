@@ -52,17 +52,18 @@ const SJTU_SCHOOLS = [
   { id: 'aero', label: '航空航天学院', discipline: '工程' },
 ];
 
-type ExpressionKey = 'record' | 'explain' | 'prove' | 'communicate' | 'translate';
+type ExpressionKey = 'record' | 'explain' | 'data' | 'display' | 'communicate' | 'interact';
 
 const EXPRESSION_LABELS: Record<ExpressionKey, string> = {
   record: '记录',
   explain: '解释',
-  prove: '证明',
+  data: '数据',
+  display: '展示',
   communicate: '传播',
-  translate: '转译',
+  interact: '交互',
 };
 
-const EXPRESSION_ORDER: ExpressionKey[] = ['record', 'explain', 'prove', 'communicate', 'translate'];
+const EXPRESSION_ORDER: ExpressionKey[] = ['record', 'explain', 'data', 'display', 'communicate', 'interact'];
 
 const cardStyle: CSSProperties = {
   background: '#ffffff',
@@ -90,20 +91,23 @@ const selectStyle: CSSProperties = {
 
 function normalizeFunctionalPurpose(label: string): ExpressionKey | null {
   const t = label.trim();
-  if (/转译|应用|场景|产品|方案|客户|商业|价值|行业|解决/i.test(t)) return 'translate';
-  if (/解释|机制|结构|流程|原理|说明|图解|示意|模型|建模/i.test(t)) return 'explain';
-  if (/证明|数据|结果|统计|对比|验证|图表|曲线|趋势|分布/i.test(t)) return 'prove';
   if (/记录|现场|样本|设备|过程|摄影|实验|观测|采集|检测/i.test(t)) return 'record';
-  if (/传播|科普|成果|封面|展示|品牌|公众|宣传|推广|展览|新闻/i.test(t)) return 'communicate';
+  if (/解释|机制|结构|流程|原理|说明|图解|示意|模型|建模/i.test(t)) return 'explain';
+  if (/数据|证明|结果|统计|对比|验证|图表|曲线|趋势|分布|网络|可视化|地图/i.test(t)) return 'data';
+  if (/展示|转译|产品|方案|应用|成果|空间|项目|样机|平台/i.test(t)) return 'display';
+  if (/传播|品牌|科普|公众|宣传|推广|封面|展览|新闻/i.test(t)) return 'communicate';
+  if (/交互|互动|仪表盘|dashboard|筛选|浏览|缩放|explore/i.test(t)) return 'interact';
   return null;
 }
 
 function mediaTypeToExpression(mediaType: string): ExpressionKey | null {
   const t = mediaType.trim();
   if (/摄影|照片|图片|图像|显微|电镜|SEM|TEM/i.test(t)) return 'record';
-  if (/3D|渲染|三维|建模|模型|信息图|插图|图解|示意/i.test(t)) return 'explain';
-  if (/数据|图表|统计|曲线|柱状|折线/i.test(t)) return 'prove';
-  if (/视频|动画|动图|GIF|交互|多媒体/i.test(t)) return 'communicate';
+  if (/3D|渲染|三维|建模|模型|图解|示意|结构|插画/i.test(t)) return 'explain';
+  if (/数据|图表|统计|曲线|柱状|折线|网络|地图|可视化/i.test(t)) return 'data';
+  if (/信息图|展示|方案|产品|应用|样机|平台/i.test(t)) return 'display';
+  if (/视频|动画|动图|GIF|新闻|封面|科普|传播/i.test(t)) return 'communicate';
+  if (/交互|互动|仪表盘|dashboard|筛选|浏览|缩放|explore|多媒体/i.test(t)) return 'interact';
   return null;
 }
 
@@ -115,16 +119,18 @@ function findSampleForExpression(samples: ComparisonSample[], expression: Expres
   const patterns: Record<ExpressionKey, RegExp> = {
     record: /摄影|照片|图片|记录|现场|样本|设备|观测|显微|电镜/i,
     explain: /3D|渲染|三维|机制|结构|流程|原理|图解|示意|模型/i,
-    prove: /数据|图表|统计|曲线|对比|验证|证明|结果/i,
-    communicate: /视频|动画|动图|传播|科普|新闻|封面|展示/i,
-    translate: /信息图|应用|场景|产品|方案|商业|客户|价值|解决|行业/i,
+    data: /数据|图表|统计|曲线|对比|验证|证明|结果|网络|地图/i,
+    display: /展示|转译|产品|方案|应用|场景|成果|样机|平台/i,
+    communicate: /视频|动画|动图|传播|科普|新闻|封面|宣传|品牌/i,
+    interact: /交互|互动|仪表盘|dashboard|筛选|浏览|缩放|explore/i,
   };
   const scored = samples.map(sample => {
     let score = patterns[expression].test(sampleText(sample)) ? 20 : 0;
     if (expression === 'record' && /摄影|显微/i.test(sample.mediaType || '')) score += 8;
     if (expression === 'explain' && /3D|渲染|信息图/i.test(sample.mediaType || '')) score += 8;
-    if (expression === 'prove' && /数据|图表/i.test(sample.mediaType || '')) score += 8;
-    if (expression === 'translate' && /信息图|方案/i.test(sample.mediaType || '')) score += 8;
+    if (expression === 'data' && /数据|图表/i.test(sample.mediaType || '')) score += 8;
+    if (expression === 'display' && /信息图|方案/i.test(sample.mediaType || '')) score += 8;
+    if (expression === 'interact' && /交互|dashboard|仪表盘/i.test(sample.mediaType || '')) score += 8;
     return { sample, score };
   });
   scored.sort((a, b) => b.score - a.score);
@@ -233,13 +239,13 @@ function AnalysisSidebar({
           <strong style={{ color: '#0b5bd3', fontSize: 15 }}>核心发现</strong>
         </div>
         <p style={{ margin: '0 0 16px', color: '#0b5bd3', fontSize: 14, lineHeight: 1.75, fontWeight: 650 }}>
-          交大案例更偏向记录型视觉，国际研究更偏向解释型与证明型视觉，企业案例更偏向转译型视觉。
+          交大案例更偏向记录型视觉，国际研究更偏向解释型与数据型视觉，企业案例更偏向展示型视觉。
         </p>
         <div style={{ display: 'grid', gap: 0 }}>
           {[
             '记录型视觉强调现场、样本与实验真实性',
             '解释型视觉强调机制、结构与过程可理解性',
-            '转译型视觉强调应用场景、客户价值与成果落地',
+            '展示型视觉强调应用场景、客户价值与成果落地',
           ].map(item => (
             <div key={item} style={{
               display: 'flex',
@@ -305,9 +311,10 @@ function ExpressionBarChart({ groups, dimension }: { groups: ComparisonGroup[]; 
     const entries: Record<ExpressionKey, Record<string, number>> = {
       record: {},
       explain: {},
-      prove: {},
+      data: {},
+      display: {},
       communicate: {},
-      translate: {},
+      interact: {},
     };
 
     for (const group of displayGroups) {
@@ -361,7 +368,7 @@ function ExpressionBarChart({ groups, dimension }: { groups: ComparisonGroup[]; 
           {displayGroups.map(group => (
             <span key={group.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: '#475569', fontSize: 12, fontWeight: 560 }}>
               <i style={{ width: 12, height: 12, borderRadius: 2, background: GROUP_COLORS[group.id], display: 'inline-block' }} />
-              {GROUP_LABELS[group.id] || group.label}
+              {GROUP_LABELS[group.id] || group.label} ({group.total}条)
             </span>
           ))}
         </div>
@@ -426,7 +433,7 @@ function StrategyExplanation() {
   const chips = [
     { groupId: 'sjtu', label: '记录型', desc: '增强科研过程可信度' },
     { groupId: 'international', label: '解释型', desc: '降低复杂机制理解门槛' },
-    { groupId: 'enterprise', label: '转译型', desc: '连接科研成果与应用场景' },
+    { groupId: 'enterprise', label: '展示型', desc: '连接科研成果与应用场景' },
   ];
   return (
     <section style={{ ...cardStyle, padding: 18 }}>
@@ -556,22 +563,22 @@ function StrategyCasesRail({ groups }: { groups: ComparisonGroup[] }) {
       sample: sampleForGroup(groups, 'international', 'explain', allSamples),
     },
     {
-      title: '证明型案例',
-      tags: ['数据图表', '证明'],
+      title: '数据型案例',
+      tags: ['数据图表', '数据'],
       insight: '用数据强化研究说服力',
       groupId: 'domestic',
       sample: findSampleForExpression([
         ...(groups.find(group => group.id === 'international')?.samples || []),
         ...(groups.find(group => group.id === 'domestic')?.samples || []),
         ...allSamples,
-      ], 'prove'),
+      ], 'data'),
     },
     {
-      title: '转译型案例',
-      tags: ['信息图', '转译'],
+      title: '展示型案例',
+      tags: ['信息图', '展示'],
       insight: '把技术能力转化为应用价值',
       groupId: 'enterprise',
-      sample: sampleForGroup(groups, 'enterprise', 'translate', allSamples),
+      sample: sampleForGroup(groups, 'enterprise', 'display', allSamples),
     },
   ];
 
@@ -590,12 +597,12 @@ function StrategyCasesRail({ groups }: { groups: ComparisonGroup[] }) {
 const MEDIA_FORMS = ['摄影', '显微图', '信息图', '3D渲染', '数据图表', '视频动画'];
 
 const STATIC_MATRIX: Record<string, Record<ExpressionKey, 'strong' | 'medium' | 'weak'>> = {
-  '摄影': { record: 'strong', explain: 'medium', prove: 'medium', communicate: 'weak', translate: 'medium' },
-  '显微图': { record: 'strong', explain: 'strong', prove: 'medium', communicate: 'weak', translate: 'medium' },
-  '信息图': { record: 'weak', explain: 'strong', prove: 'medium', communicate: 'strong', translate: 'strong' },
-  '3D渲染': { record: 'weak', explain: 'strong', prove: 'medium', communicate: 'strong', translate: 'strong' },
-  '数据图表': { record: 'weak', explain: 'medium', prove: 'strong', communicate: 'medium', translate: 'medium' },
-  '视频动画': { record: 'medium', explain: 'strong', prove: 'medium', communicate: 'strong', translate: 'strong' },
+  '摄影': { record: 'strong', explain: 'medium', data: 'medium', display: 'medium', communicate: 'weak', interact: 'weak' },
+  '显微图': { record: 'strong', explain: 'strong', data: 'medium', display: 'medium', communicate: 'weak', interact: 'weak' },
+  '信息图': { record: 'weak', explain: 'strong', data: 'medium', display: 'strong', communicate: 'strong', interact: 'medium' },
+  '3D渲染': { record: 'weak', explain: 'strong', data: 'medium', display: 'strong', communicate: 'strong', interact: 'medium' },
+  '数据图表': { record: 'weak', explain: 'medium', data: 'strong', display: 'medium', communicate: 'medium', interact: 'medium' },
+  '视频动画': { record: 'medium', explain: 'strong', data: 'medium', display: 'strong', communicate: 'strong', interact: 'strong' },
 };
 
 const STRENGTH_COLORS: Record<string, { bg: string; text: string; label: string }> = {

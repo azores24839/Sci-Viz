@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: studio
+      POSTGRES_USER: studio
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - studio-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U studio"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  server:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.server
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3011
+      PUBLIC_API_URL: ${PUBLIC_API_URL}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+      DATABASE_URL: postgres://studio:${POSTGRES_PASSWORD}@postgres:5432/studio
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
+      DASHSCOPE_API_URL: ${DASHSCOPE_API_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
+      QWEN_VISION_MODEL: ${QWEN_VISION_MODEL:-qwen3.6-plus}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_API_URL: ${OPENROUTER_API_URL:-https://openrouter.ai/api/v1/chat/completions}
+      OPENROUTER_QWEN_MODEL: ${OPENROUTER_QWEN_MODEL:-qwen/qwen2.5-vl-72b-instruct}
+      SOURCE_WORKER_CONCURRENCY: ${SOURCE_WORKER_CONCURRENCY:-2}
+      PDF_OCR_MAX_PAGES: ${PDF_OCR_MAX_PAGES:-12}
+      OSS_REGION: ${OSS_REGION}
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET}
+      OSS_BUCKET: ${OSS_BUCKET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+
+volumes:
+  studio-postgres:

@@ -10,5 +10,6 @@ apps/server/.env.*
 !apps/server/.env.example
 playwright-report/
 test-results/
+output/
 *.log
 .DS_Store

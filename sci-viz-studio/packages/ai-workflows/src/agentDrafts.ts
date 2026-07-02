@@ -1,15 +1,15 @@
 import type { AgentDraftRequest, AgentDraftResponse, AgentRole } from '@studio/contracts';
 import type { ModelGateway } from './modelGateway';
-import { productionDirectorPrompt } from './prompts/productionDirector';
-import { projectProducerPrompt } from './prompts/projectProducer';
+import { photoPlannerPrompt } from './prompts/productionDirector';
+import { sourceAnalystPrompt } from './prompts/projectProducer';
 import { researchCuratorPrompt } from './prompts/researchCurator';
-import { visualStrategistPrompt } from './prompts/visualStrategist';
+import { scienceReviewerPrompt } from './prompts/visualStrategist';
 
 const prompts = {
-  PROJECT_PRODUCER: projectProducerPrompt,
+  SOURCE_ANALYST: sourceAnalystPrompt,
+  SCIENCE_REVIEWER: scienceReviewerPrompt,
   RESEARCH_CURATOR: researchCuratorPrompt,
-  VISUAL_STRATEGIST: visualStrategistPrompt,
-  PRODUCTION_DIRECTOR: productionDirectorPrompt,
+  PHOTO_PLANNER: photoPlannerPrompt,
 } satisfies Record<AgentRole, { version: string; instructions: string }>;
 
 export function getPromptForAgent(role: AgentRole) {
@@ -39,37 +39,63 @@ export function buildAgentUserPrompt(request: AgentDraftRequest): string {
 }
 
 export function createMockAgentDraft(request: AgentDraftRequest): AgentDraftResponse {
-  const heading = `### ${request.planLabel} · ${request.nodeLabel}草案`;
+  const heading = `### ${request.nodeLabel}草案`;
   const revisionNote = request.revisionInstruction
     ? `\n- 已根据修改意见调整：${request.revisionInstruction}`
     : '';
+  const sourceAnalystBody = request.nodeId === 'goal-output-selection'
+    ? [
+        heading,
+        '- 主目标：产业转化/合作。',
+        '- 次目标：公众传播。',
+        '- 产物类型：拍摄静图；录影/影片暂不可选。',
+        '- 目标匹配度：02 的结构诊断显示，现有素材更能支撑设备能力和空间秩序，对应用场景、可靠性证据和公众可理解过程支撑不足。',
+        '- 目标缺口：补充工程应用、团队协作、关键操作、脱敏数据界面和人物尺度画面。',
+        revisionNote,
+      ].join('\n')
+    : [
+        heading,
+        '- 素材总览：当前以 Sci-Viz Case Hub mock 资料库作为测试资料源；样本包含静图结构、技术维度分布和对标案例缩略图。',
+        '- 功能维度结构：记录型约 72%，解释型约 12%，展示型约 9%，传播型约 5%，数据型约 2%；此处只描述现状结构，不判断传播目标。',
+        '- 技术维度结构：拍摄 50%，绘设 19.6%，渲染 16.1%，成像 9.7%，数据 3.9%，生成 0.7%。',
+        '- 内容对象结构：设备、实验过程、团队协作和人物肖像较多；应用场景、样品细节和脱敏数据界面不足。',
+        '- 画面质量诊断：远景记录偏多，景别层次、操作过程、尺度参照和统一色调需要补强。',
+        '- 风险标记：屏幕数据、设备铭牌、合作单位、人员面部和未公开实验细节待确认。',
+        revisionNote,
+      ].join('\n');
+  const curatorBody = request.nodeId === 'case-benchmark'
+    ? [
+        heading,
+        '- 对标组：Sci-Viz Case Hub 中的高校平台实验室、企业工程案例、科研机构设备场景和期刊传播静图。',
+        '- 匹配依据：同为静图媒介，且包含设备尺度、实验过程、人物协作和工程应用语境。',
+        '- 结构差距：我方 mock 样本记录型较高；对标组在实验过程、应用展示和传播型画面上更完整。',
+        '- 借鉴方向：保留真实设备与空间秩序，同时补充人物尺度、关键操作、局部细节和外部应用语境。',
+        revisionNote,
+      ].join('\n')
+    : [
+        heading,
+        '- 视觉路线：从“设备记录”走向“工程能力可见”，用尺度、过程、细节和协作关系补足可信证据。',
+        '- 叙事主线：平台能力 → 关键过程 → 团队协作 → 应用想象。',
+        '- 必须强化的视觉证据：大型设备尺度、科研人员操作、样品或结构细节、脱敏数据界面、工程空间秩序。',
+        '- 科研审校员 · 贯穿风险层：持续检查事实、保密、安全和可拍条件；阻塞项未确认时，方案只能预览，不能标记为可执行。',
+        '- 不能照搬：不使用过度商业化口号，不把未确认指标视觉化为确定成果。',
+        revisionNote,
+      ].join('\n');
   const bodyByRole: Record<AgentRole, string> = {
-    PROJECT_PRODUCER: [
+    SOURCE_ANALYST: sourceAnalystBody,
+    SCIENCE_REVIEWER: [
       heading,
-      '- 主目的：科研展示；辅助目的：公众传播、项目汇报。',
-      '- 目标受众：科研合作方、项目评审与非专业公众。',
-      '- 约束：屏幕数据、设备运行状态和合作单位名称需要确认后公开。',
+      '- 待确认事实：设备运行状态、屏幕数据、合作单位署名、是否允许人物正脸出镜。',
+      '- 保密边界：控制界面、实时参数、内部结构和未公开项目名称需要标记为谨慎。',
+      '- 安全要求：大型设备拍摄距离、通行区域和演示操作必须由现场负责人确认。',
       revisionNote,
     ].join('\n'),
-    RESEARCH_CURATOR: [
+    RESEARCH_CURATOR: curatorBody,
+    PHOTO_PLANNER: [
       heading,
-      '- 核心科学问题：如何用海洋装备、绿色动力和智能制造体现实验室研究价值。',
-      '- 可视化机会：设备尺度、人员协作、数据界面、实验环境和深海应用场景。',
-      '- 表达边界：不把设备先进性写成未经验证的性能结论。',
-      revisionNote,
-    ].join('\n'),
-    VISUAL_STRATEGIST: [
-      heading,
-      '- 核心概念：用克制、清晰的影像语言把科研问题转化为可理解的视觉叙事。',
-      '- 画面结构：环境建立、关键设备、操作过程、数据/结果、人物协作。',
-      '- 风格建议：白底、冷蓝点缀、低噪声、高可信度。',
-      revisionNote,
-    ].join('\n'),
-    PRODUCTION_DIRECTOR: [
-      heading,
-      '- 执行目标：把视觉方案转成可拍摄、可制作、可审核的素材清单。',
-      '- 清单：场地、设备、人员动作、屏幕替代画面、局部细节、备选素材。',
-      '- 风险：安全边界、涉密画面、设备运行状态和现场权限。',
+      '- 拍摄主题：设备尺度、操作过程、科研协作、局部细节和应用想象。',
+      '- 执行建议：必拍广角环境、人物与设备关系、中近景操作、微距细节、脱敏屏幕替代画面。',
+      '- 色调建议：冷白、深灰和克制蓝色点缀，保留工业现场质感但避免脏乱。',
       revisionNote,
     ].join('\n'),
   };
@@ -77,7 +103,7 @@ export function createMockAgentDraft(request: AgentDraftRequest): AgentDraftResp
   return {
     label: `${request.outputLabel} v${request.revision}`,
     body: bodyByRole[request.agentRole],
-    blockerCount: request.agentRole === 'RESEARCH_CURATOR' ? 2 : 0,
+    blockerCount: request.agentRole === 'SCIENCE_REVIEWER' ? 2 : 0,
     provider: 'mock',
   };
 }
@@ -98,7 +124,7 @@ export async function generateAgentDraft(
   return {
     label: `${request.outputLabel} v${request.revision}`,
     body,
-    blockerCount: request.agentRole === 'RESEARCH_CURATOR' && body.includes('待确认') ? 1 : 0,
+    blockerCount: request.agentRole === 'SCIENCE_REVIEWER' && body.includes('待确认') ? 1 : 0,
     provider: 'deepseek',
   };
 }

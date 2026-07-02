@@ -6,6 +6,7 @@ type CheerioRoot = ReturnType<typeof cheerio.load>;
 const PLACEHOLDER_PATTERNS = [
   'placeholder', '1x1.gif', 'pixel.gif', 'blank.gif', 'empty.gif',
   'data:image/gif;base64',
+  'shims/', 'placeholder', 'blank.png', 'spacer',
 ];
 
 export interface ImageCandidate {
@@ -144,7 +145,10 @@ export async function extractImagesFromPage(url: string, html: string): Promise<
   }
   const bodyText = $bodyClone.text().replace(/\s+/g, ' ').trim().substring(0, 1000);
 
-  const baseUrl = $('base[href]').first().attr('href') || url;
+  const baseHref = $('base[href]').first().attr('href');
+  const baseUrl = baseHref ? (() => {
+    try { return new URL(baseHref, url).href; } catch { return url; }
+  })() : url;
 
   const images: ImageCandidate[] = [];
   const seenUrls = new Set<string>();
@@ -225,6 +229,14 @@ export async function extractImagesFromPage(url: string, html: string): Promise<
 
     const contextText = extractContext($, el, pageTitle, contentSelectors);
     addCandidate(src, alt, width, height, contextText);
+  });
+
+  $scope.find('video').each((_, el) => {
+    const $el = $(el);
+    const poster = $el.attr('poster') || '';
+    if (poster) {
+      addCandidate(poster, pageTitle, null, null, [pageTitle, 'Video poster'].join(' | '));
+    }
   });
 
   return { pageTitle, metaDescription, bodyText, images };

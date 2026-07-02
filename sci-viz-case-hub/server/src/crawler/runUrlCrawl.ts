@@ -33,7 +33,7 @@ const AUTH_URL_PARAMS = [
   'response_type=cookie',
 ];
 
-const MAX_IMAGES_PER_PAGE = 5;
+const MAX_IMAGES_PER_PAGE = 10;
 
 function detectAuthRedirect(originalUrl: string, finalUrl: string): string | null {
   if (originalUrl === finalUrl) return null;
@@ -289,6 +289,9 @@ export async function processSingleUrl(
 
         const userHint = [sourceName, sourceType].filter(Boolean).join(' / ');
 
+        const isAnimatedGif = /\.gif(\?|$)/i.test(img.src);
+        const initialDistributionMedium = isAnimatedGif ? '动图' : undefined;
+
         const caseEntry = await prisma.visualCase.create({
           data: {
             sourceUrl: parsedUrl.href,
@@ -304,6 +307,7 @@ export async function processSingleUrl(
             collectionScore: scored.score.score,
             collectionReasons: JSON.stringify(scored.score.reasons),
             reviewStatus: 'pending_ai_analysis',
+            distributionMedium: initialDistributionMedium,
           },
         });
 

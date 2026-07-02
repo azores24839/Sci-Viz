@@ -50,13 +50,22 @@ async function runLocalOcr(filePath: string) {
 
 async function main() {
   const startedAt = new Date();
+  const args = process.argv.slice(2);
+  const domainFilter = args.length > 0 ? args : null;
+
+  const where: any = {
+    ocrText: '',
+    imagePath: { startsWith: '/uploads/originals/' },
+    reviewStatus: { not: 'rejected' },
+  };
+  if (domainFilter) {
+    where.sourceDomain = { in: domainFilter };
+    console.log(`Filtering by domains: ${domainFilter.join(', ')}`);
+  }
+
   const cases = await prisma.visualCase.findMany({
-    where: {
-      ocrText: '',
-      imagePath: { startsWith: '/uploads/originals/' },
-      reviewStatus: { not: 'rejected' },
-    },
-    select: { id: true, imagePath: true, thumbnailPath: true, manualNotes: true },
+    where,
+    select: { id: true, sourceDomain: true, imagePath: true, thumbnailPath: true, manualNotes: true },
   });
 
   let updated = 0;
@@ -107,8 +116,9 @@ async function main() {
   }
 
   const remaining = await prisma.visualCase.count({ where: { ocrText: '' } });
+  const domainLabel = domainFilter ? ` (${domainFilter.join(', ')})` : '';
   const lines = [
-    '# 本地 OCR 补跑报告',
+    '# 本地 OCR 补跑报告' + domainLabel,
     '',
     `开始时间：${startedAt.toISOString()}`,
     `结束时间：${new Date().toISOString()}`,

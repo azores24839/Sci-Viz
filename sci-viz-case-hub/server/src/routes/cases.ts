@@ -22,6 +22,15 @@ function sourceDomainFromUrl(url: string): string {
   }
 }
 
+function sourceHintWhere(name: string): Prisma.VisualCaseWhereInput {
+  return {
+    OR: [
+      { userHint: name },
+      { userHint: { startsWith: `${name} /` } },
+    ],
+  };
+}
+
 async function makeSourceNameWhere(names: string[]): Promise<Prisma.VisualCaseWhereInput | null> {
   if (names.length === 0) return null;
 
@@ -30,25 +39,51 @@ async function makeSourceNameWhere(names: string[]): Promise<Prisma.VisualCaseWh
     select: { name: true, url: true },
   });
   const sourceByName = new Map(sources.map(source => [source.name, source]));
+  const domainCounts = new Map<string, number>();
+  const enabledSources = await prisma.crawlSource.findMany({
+    where: { enabled: true },
+    select: { url: true },
+  });
+  for (const source of enabledSources) {
+    const domain = sourceDomainFromUrl(source.url);
+    if (!domain) continue;
+    domainCounts.set(domain, (domainCounts.get(domain) || 0) + 1);
+  }
 
   const clauses: Prisma.VisualCaseWhereInput[] = [];
 
   for (const name of names) {
     const source = sourceByName.get(name);
     const domain = source ? sourceDomainFromUrl(source.url) : '';
-    const userHintCount = await prisma.visualCase.count({ where: { userHint: { contains: name } } });
+    const hintWhere = sourceHintWhere(name);
+    const userHintCount = await prisma.visualCase.count({ where: hintWhere });
     if (userHintCount > 0) {
-      clauses.push({ userHint: { contains: name } });
+      clauses.push(hintWhere);
       continue;
     }
 
-    const titleCount = await prisma.visualCase.count({ where: { caseTitle: { contains: name } } });
+    if (source?.url) {
+      const urlWhere: Prisma.VisualCaseWhereInput = { sourceUrl: { startsWith: source.url } };
+      const urlCount = await prisma.visualCase.count({ where: urlWhere });
+      if (urlCount > 0) {
+        clauses.push(urlWhere);
+        continue;
+      }
+    }
+
+    const titleWhere: Prisma.VisualCaseWhereInput = {
+      OR: [
+        { caseTitle: name },
+        { caseTitle: { startsWith: `${name} /` } },
+      ],
+    };
+    const titleCount = await prisma.visualCase.count({ where: titleWhere });
     if (titleCount > 0) {
-      clauses.push({ caseTitle: { contains: name } });
+      clauses.push(titleWhere);
       continue;
     }
 
-    if (domain) clauses.push({ sourceDomain: domain });
+    if (domain && (domainCounts.get(domain) || 0) === 1) clauses.push({ sourceDomain: domain });
   }
 
   if (clauses.length === 0) return null;
@@ -69,6 +104,7 @@ async function buildWhere(query: Record<string, unknown>, exclude: string[] = []
   if (!exclude.includes('discipline') && query.discipline) where.discipline = query.discipline;
   if (!exclude.includes('technical_method') && query.technical_method) where.technicalMethod = query.technical_method;
   if (!exclude.includes('distribution_medium') && query.distribution_medium) where.distributionMedium = query.distribution_medium;
+  if (!exclude.includes('functional_purpose') && query.functional_purpose) where.functionalPurpose = query.functional_purpose;
   if (query.review_status) where.reviewStatus = query.review_status;
   if (query.rating) {
     const parsedRating = clampInt(query.rating, 0, 0, 5);
@@ -146,11 +182,12 @@ casesRouter.get('/cases/facet-counts', async (req: Request, res: Response) => {
   try {
     const q = req.query as Record<string, unknown>;
 
-    const [mediaTypeCounts, disciplineCounts, technicalMethodCounts, distributionMediumCounts, contentTypeCounts, captureTypeCounts, sourceDomainCounts] = await Promise.all([
+    const [mediaTypeCounts, disciplineCounts, technicalMethodCounts, distributionMediumCounts, functionalPurposeCounts, contentTypeCounts, captureTypeCounts, sourceDomainCounts] = await Promise.all([
       prisma.visualCase.groupBy({ by: ['mediaType'], where: await buildWhere(q, ['media_type']), _count: { _all: true } }),
       prisma.visualCase.groupBy({ by: ['discipline'], where: await buildWhere(q, ['discipline']), _count: { _all: true } }),
       prisma.visualCase.groupBy({ by: ['technicalMethod'], where: await buildWhere(q, ['technical_method']), _count: { _all: true } }),
       prisma.visualCase.groupBy({ by: ['distributionMedium'], where: await buildWhere(q, ['distribution_medium']), _count: { _all: true } }),
+      prisma.visualCase.groupBy({ by: ['functionalPurpose'], where: await buildWhere(q, ['functional_purpose']), _count: { _all: true } }),
       prisma.visualCase.groupBy({ by: ['contentType'], where: await buildWhere(q, ['content_type']), _count: { _all: true } }),
       prisma.visualCase.groupBy({ by: ['captureType'], where: await buildWhere(q, ['capture_type']), _count: { _all: true } }),
       prisma.visualCase.groupBy({ by: ['sourceDomain'], where: await buildWhere(q, ['source_domain']), _count: { _all: true } }),
@@ -205,6 +242,7 @@ casesRouter.get('/cases/facet-counts', async (req: Request, res: Response) => {
         discipline: toMap(disciplineCounts, 'discipline'),
         technicalMethod: toMap(technicalMethodCounts, 'technicalMethod'),
         distributionMedium: toMap(distributionMediumCounts, 'distributionMedium'),
+        functionalPurpose: toMap(functionalPurposeCounts, 'functionalPurpose'),
         contentType: contentTypeMap,
         captureType: toMap(captureTypeCounts, 'captureType'),
         sourceDomain: toMap(sourceDomainCounts, 'sourceDomain'),

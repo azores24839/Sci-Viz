@@ -4,10 +4,10 @@ import { getNodePreviewTone, summarizeNodeContent } from './nodePreview';
 describe('node content preview', () => {
   it('turns markdown artifacts into a compact canvas summary', () => {
     expect(summarizeNodeContent([
-      '### Plan A · 科研分析草案',
-      '- 研究主题：长兴海洋实验室。',
+      '### Plan A · 视觉现状诊断',
+      '- 团队类型：长兴海洋实验室。',
       '- 视觉机会：设备、人员协作和数据界面。',
-    ].join('\n'), 'fallback')).toBe('Plan A · 科研分析草案 · 研究主题：长兴海洋实验室。 · 视觉机会：设备、人员协作和数据界面。');
+    ].join('\n'), 'fallback')).toBe('Plan A · 视觉现状诊断 · 团队类型：长兴海洋实验室。 · 视觉机会：设备、人员协作和数据界面。');
   });
 
   it('falls back to node description when no artifact exists', () => {

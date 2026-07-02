@@ -1,6 +1,14 @@
 @import "@studio/design-system/tokens.css";
 @import "@xyflow/react/dist/style.css";
 
+@font-face {
+  font-family: "SweiSpringTC";
+  src: url("/fonts/CJK%20TC/SweiSpringCJKtc-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
 * { box-sizing: border-box; }
 
 html, body, #root { width: 100%; min-width: 320px; height: 100%; margin: 0; }
@@ -16,7 +24,7 @@ button, input, textarea { font: inherit; }
 button { color: inherit; }
 
 :focus-visible {
-  outline: 3px solid rgb(23 105 243 / 28%);
+  outline: 3px solid rgb(20 20 18 / 24%);
   outline-offset: 3px;
 }
 

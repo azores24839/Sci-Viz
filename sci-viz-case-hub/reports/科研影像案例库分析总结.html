@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>科研影像案例库分析总结</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'PingFang SC','Microsoft YaHei',Arial,sans-serif;background:#eef1f5;color:#283040;padding:30px;}
+.container{max-width:1120px;margin:0 auto;background:#fff;border-radius:14px;box-shadow:0 2px 30px rgba(0,0,0,.1);overflow:hidden;}
+.header{background:linear-gradient(135deg,#18336b,#28558f,#4979b7);padding:36px 42px 30px;color:white;}
+.header h1{font-size:27px;font-weight:780;letter-spacing:.5px;}
+.subtitle{font-size:14px;opacity:.88;margin-top:10px;border-top:1px solid rgba(255,255,255,.18);padding-top:12px;line-height:1.7;}
+.subtitle span{display:inline-block;background:rgba(255,255,255,.14);padding:2px 10px;border-radius:5px;margin-right:6px;font-size:12px;}
+.content{padding:30px 42px 42px;}
+.exec{background:#f4f6fe;border-left:4px solid #2f5f9d;border-radius:0 8px 8px 0;padding:18px 22px;margin-bottom:24px;}
+.exec h2{font-size:18px;color:#18336b;margin-bottom:10px;}
+.exec ul{padding-left:20px;line-height:1.85;font-size:14px;color:#485267;}
+.exec b{color:#20345d;}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin:20px 0 28px;}
+.stat-card{position:relative;border-radius:10px;padding:20px 16px;text-align:center;color:#fff;overflow:hidden;}
+.stat-card::before{content:'';position:absolute;top:-35px;right:-20px;width:80px;height:80px;border-radius:50%;background:rgba(255,255,255,.1);}
+.stat-card .num{font-size:31px;font-weight:800;line-height:1.2;}
+.stat-card .label{font-size:12px;margin-top:6px;opacity:.9;line-height:1.4;}
+.s1{background:linear-gradient(135deg,#667eea,#764ba2);}.s2{background:linear-gradient(135deg,#11998e,#38b27d);}.s3{background:linear-gradient(135deg,#f2994a,#f2c94c);}.s4{background:linear-gradient(135deg,#4facfe,#00b6d4);}.s5{background:linear-gradient(135deg,#a18cd1,#d287c4);}.s6{background:linear-gradient(135deg,#f0938c,#e15759);}
+.section-title{font-size:20px;font-weight:780;color:#18336b;margin:34px 0 14px;padding-bottom:10px;border-bottom:2px solid #e8ecf4;position:relative;padding-left:14px;}
+.section-title::before{content:'';position:absolute;left:0;top:2px;bottom:10px;width:4px;background:linear-gradient(180deg,#28558f,#76a7d8);border-radius:2px;}
+.section-desc{font-size:13px;color:#7a8394;margin-bottom:14px;line-height:1.7;}
+.sub-title{font-size:16px;font-weight:700;color:#18336b;margin:22px 0 8px;}
+.note{font-size:12px;color:#8891a2;line-height:1.6;margin:8px 0 14px;}
+.bar-row{display:flex;align-items:center;margin:5px 0;gap:7px;}
+.bar-label{text-align:right;padding-right:6px;white-space:nowrap;font-size:12px;color:#4b5565;flex-shrink:0;}
+.bar-track{flex:1;background:#f0f2f6;border-radius:5px;overflow:hidden;min-width:80px;height:24px;}
+.bar-fill{height:100%;border-radius:5px;text-align:center;color:#fff;font-weight:700;font-size:11px;line-height:24px;min-width:22px;}
+.bar-info{width:88px;padding-left:8px;font-size:11px;color:#778092;flex-shrink:0;line-height:1.25;}
+.bar-hint{font-size:10px;color:#9aa2b1;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px;}
+.source-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-top:12px;}
+.source-card{border:1px solid #e8ecf4;border-top:4px solid #4e79a7;border-radius:10px;padding:14px 14px 13px;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.03);}
+.source-top{display:flex;justify-content:space-between;gap:10px;align-items:baseline;margin-bottom:10px;color:#25304a;}
+.source-top span{font-size:12px;color:#81899a;}
+.source-line{font-size:12px;color:#626b7d;line-height:1.8;}
+.source-line b{color:#20345d;}
+.source-line small{color:#9aa2b1;}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:12px;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.05);}
+thead th{background:#18336b;color:#fff;padding:10px 7px;font-weight:600;text-align:center;font-size:12px;}
+tbody td{padding:8px;text-align:center;border-bottom:1px solid #f0f2f7;font-size:12px;}
+tbody tr:nth-child(even){background:#f8f9fe;}
+.finding{border-left:4px solid #28558f;background:#f4f6fe;padding:14px 18px;margin:11px 0;border-radius:0 7px 7px 0;}
+.finding h4{color:#18336b;font-size:14px;margin-bottom:5px;}
+.finding p{font-size:13px;color:#526073;line-height:1.7;}
+.purpose-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-top:14px;}
+.purpose-card{background:#fbfcff;border:1px solid #e8ecf4;border-radius:10px;padding:15px;}
+.purpose-card h3{font-size:15px;color:#18336b;margin-bottom:6px;}
+.purpose-card p{font-size:12px;color:#667085;line-height:1.7;}
+.badge{display:inline-block;background:#eaf1fe;color:#2e4780;border:1px solid #cedffe;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;margin-bottom:8px;}
+.recommend{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin-top:12px;}
+.rec-card{background:#fffaf2;border:1px solid #ffe1bd;border-radius:10px;padding:15px;}
+.rec-card h4{color:#804126;font-size:14px;margin-bottom:8px;}
+.rec-card p{font-size:12px;color:#66584c;line-height:1.7;}
+.footer-note{font-size:11px;color:#9aa2b1;line-height:1.7;border-top:1px solid #e8ecf4;margin-top:28px;padding-top:12px;}
+@media(max-width:768px){body{padding:14px;}.content{padding:22px;}.header{padding:28px 24px;}.bar-label{width:72px!important;font-size:11px;}.bar-info{width:66px;}.bar-hint{display:none;}table{font-size:11px;display:block;overflow-x:auto;white-space:nowrap;}}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header">
+<h1>科研影像案例库分析总结</h1>
+<div class="subtitle"><span>6,131个入库案例</span><span>6类重点来源组</span><span>三轴主类分析</span>基于当前 SQLite 案例库 approved 样本；用于汇报科研影像研究目的、案例库现状与长兴海洋实验室改进方向。</div>
+</div>
+<div class="content">
+
+<section class="exec">
+<h2>Executive Summary</h2>
+<ul>
+<li><b>案例库已经能支持“现状判断”和“来源组对比”。</b> 当前入库样本覆盖交大校内、国内高校、国外高校、国际研究机构/期刊、企业和长兴海洋实验室等来源，适合用于观察不同机构科研影像表达的整体倾向。</li>
+<li><b>现阶段应重点讲功能和技术，不宜过度展开媒介细分。</b> 数据显示媒介维度高度集中于静图，这更反映当前采集条件，而不一定代表科研传播全貌；功能维度和技术维度更适合作为主要分析口径。</li>
+<li><b>三类研究目的可以串起报告主线。</b> 学术交流重证据，公众传播重理解，产业转化重应用；案例库的价值在于帮助判断不同来源更偏向记录、解释、传播还是展示。</li>
+<li><b>长兴海洋实验室的改进方向很清晰。</b> 在保留现场记录能力的基础上，补充机制解释图、科研数据图和应用场景图，可更好支撑学术交流、公众传播和产业转化。</li>
+</ul>
+</section>
+
+<div class="stats">
+<div class="stat-card s1"><div class="num">6,131</div><div class="label">入库案例总数<br><small>approved 样本</small></div></div>
+<div class="stat-card s2"><div class="num">7</div><div class="label">来源组覆盖<br><small>含其他来源</small></div></div>
+<div class="stat-card s3"><div class="num">113</div><div class="label">长兴样本<br><small>ime.sjtu.edu.cn</small></div></div>
+<div class="stat-card s4"><div class="num">传播</div><div class="label">功能主轴<br><small>46.2%</small></div></div>
+<div class="stat-card s5"><div class="num">拍摄</div><div class="label">技术主轴<br><small>49.2%</small></div></div>
+</div>
+
+<h2 class="section-title">一、研究目的：从“收集图片”转向“判断影像如何服务科研目标”</h2>
+<div class="section-desc">本研究不把科研影像视为孤立图片，而是把它放回科研传播任务中理解：同一张图可能用于证明实验、解释机制、帮助公众理解，或展示成果的应用价值。</div>
+<div class="purpose-grid">
+<div class="purpose-card"><span class="badge">学术交流</span><h3>重证据</h3><p>关注影像是否能保存实验过程、解释结构机制、呈现数据结果，为论文、项目汇报和同行交流提供证据支撑。</p></div>
+<div class="purpose-card"><span class="badge">公众传播</span><h3>重理解</h3><p>关注影像是否能降低理解门槛，把抽象科研问题转化为公众可以观看、记忆和转述的内容。</p></div>
+<div class="purpose-card"><span class="badge">产业转化</span><h3>重应用</h3><p>关注影像是否能展示技术能力、设备场景和应用价值，把科研成果连接到行业需求和解决方案。</p></div>
+</div>
+<h3 class="sub-title">目的视角下的功能结构</h3>
+<div class="note">该视角由功能维度聚合得到：学术交流包含记录、解释、数据；公众传播对应传播；产业转化包含展示、交互。它是汇报解释框架，不替代原始分类。</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:150px">学术交流：证据与解释</div>
+  <div class="bar-track"><div class="bar-fill" style="width:87.13%;background:#4e79a7;">2,470</div></div>
+  <div class="bar-info">2,470<br><small>40.3%</small></div>
+  <div class="bar-hint">由功能维度聚合</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:150px">公众传播：理解与记忆</div>
+  <div class="bar-track"><div class="bar-fill" style="width:100.00%;background:#f28e2b;">2,835</div></div>
+  <div class="bar-info">2,835<br><small>46.2%</small></div>
+  <div class="bar-hint">由功能维度聚合</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:150px">产业转化：应用与展示</div>
+  <div class="bar-track"><div class="bar-fill" style="width:29.14%;background:#e15759;">826</div></div>
+  <div class="bar-info">826<br><small>13.5%</small></div>
+  <div class="bar-hint">由功能维度聚合</div>
+</div>
+
+<h2 class="section-title">二、案例库现状：已形成多来源参照系</h2>
+<div class="section-desc">案例库目前已经不只是单一学校图片集合，而是覆盖高校、国际研究、企业与长兴实验室的比较样本。它的主要价值是看清不同来源在影像用途和生产方式上的倾向。</div>
+<div class="source-grid"><div class="source-card" style="border-top-color:#4e79a7">
+  <div class="source-top"><strong>长兴海洋实验室</strong><span>113例</span></div>
+  <div class="source-line">功能主轴：<b>记录</b> <small>73.5%</small></div>
+  <div class="source-line">技术主轴：<b>拍摄</b> <small>82.3%</small></div>
+  <div class="source-line">媒介主轴：<b>静图</b> <small>100.0%</small></div>
+</div>
+<div class="source-card" style="border-top-color:#f28e2b">
+  <div class="source-top"><strong>交大工科/校内科研</strong><span>207例</span></div>
+  <div class="source-line">功能主轴：<b>记录</b> <small>48.8%</small></div>
+  <div class="source-line">技术主轴：<b>拍摄</b> <small>69.6%</small></div>
+  <div class="source-line">媒介主轴：<b>静图</b> <small>91.8%</small></div>
+</div>
+<div class="source-card" style="border-top-color:#e15759">
+  <div class="source-top"><strong>国内高校/科研机构</strong><span>396例</span></div>
+  <div class="source-line">功能主轴：<b>解释</b> <small>46.2%</small></div>
+  <div class="source-line">技术主轴：<b>拍摄</b> <small>50.8%</small></div>
+  <div class="source-line">媒介主轴：<b>静图</b> <small>97.2%</small></div>
+</div>
+<div class="source-card" style="border-top-color:#76b7b2">
+  <div class="source-top"><strong>国外高校</strong><span>1,353例</span></div>
+  <div class="source-line">功能主轴：<b>传播</b> <small>41.0%</small></div>
+  <div class="source-line">技术主轴：<b>拍摄</b> <small>80.6%</small></div>
+  <div class="source-line">媒介主轴：<b>静图</b> <small>99.6%</small></div>
+</div>
+<div class="source-card" style="border-top-color:#59a14f">
+  <div class="source-top"><strong>国际研究机构/期刊</strong><span>2,699例</span></div>
+  <div class="source-line">功能主轴：<b>传播</b> <small>69.0%</small></div>
+  <div class="source-line">技术主轴：<b>拍摄</b> <small>32.6%</small></div>
+  <div class="source-line">媒介主轴：<b>静图</b> <small>99.1%</small></div>
+</div>
+<div class="source-card" style="border-top-color:#edc948">
+  <div class="source-top"><strong>头部企业/产业案例</strong><span>1,044例</span></div>
+  <div class="source-line">功能主轴：<b>展示</b> <small>45.1%</small></div>
+  <div class="source-line">技术主轴：<b>拍摄</b> <small>44.0%</small></div>
+  <div class="source-line">媒介主轴：<b>静图</b> <small>99.1%</small></div>
+</div>
+<div class="source-card" style="border-top-color:#b07aa1">
+  <div class="source-top"><strong>其他来源</strong><span>319例</span></div>
+  <div class="source-line">功能主轴：<b>传播</b> <small>36.1%</small></div>
+  <div class="source-line">技术主轴：<b>拍摄</b> <small>46.1%</small></div>
+  <div class="source-line">媒介主轴：<b>静图</b> <small>94.7%</small></div>
+</div></div>
+
+<h3 class="sub-title">来源组样本分布</h3>
+<div class="note">这里展示的是当前入库样本规模。样本量不等是案例库现状的一部分；做公平比较时，可使用界面中的“均衡样本”口径。</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:132px">长兴海洋实验室</div>
+  <div class="bar-track"><div class="bar-fill" style="width:4.19%;background:#4e79a7;">113</div></div>
+  <div class="bar-info">113<br><small>1.8%</small></div>
+  <div class="bar-hint">当前案例库真实覆盖</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:132px">交大工科/校内科研</div>
+  <div class="bar-track"><div class="bar-fill" style="width:7.67%;background:#f28e2b;">207</div></div>
+  <div class="bar-info">207<br><small>3.4%</small></div>
+  <div class="bar-hint">当前案例库真实覆盖</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:132px">国内高校/科研机构</div>
+  <div class="bar-track"><div class="bar-fill" style="width:14.67%;background:#e15759;">396</div></div>
+  <div class="bar-info">396<br><small>6.5%</small></div>
+  <div class="bar-hint">当前案例库真实覆盖</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:132px">国外高校</div>
+  <div class="bar-track"><div class="bar-fill" style="width:50.13%;background:#76b7b2;">1,353</div></div>
+  <div class="bar-info">1,353<br><small>22.1%</small></div>
+  <div class="bar-hint">当前案例库真实覆盖</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:132px">国际研究机构/期刊</div>
+  <div class="bar-track"><div class="bar-fill" style="width:100.00%;background:#59a14f;">2,699</div></div>
+  <div class="bar-info">2,699<br><small>44.0%</small></div>
+  <div class="bar-hint">当前案例库真实覆盖</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:132px">头部企业/产业案例</div>
+  <div class="bar-track"><div class="bar-fill" style="width:38.68%;background:#edc948;">1,044</div></div>
+  <div class="bar-info">1,044<br><small>17.0%</small></div>
+  <div class="bar-hint">当前案例库真实覆盖</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:132px">其他来源</div>
+  <div class="bar-track"><div class="bar-fill" style="width:11.82%;background:#b07aa1;">319</div></div>
+  <div class="bar-info">319<br><small>5.2%</small></div>
+  <div class="bar-hint">当前案例库真实覆盖</div>
+</div>
+
+<h2 class="section-title">三、三轴主类发现：主类可以讲，细分谨慎用</h2>
+<div class="section-desc">为了避免暴露细分标注仍在优化的问题，报告建议只把三轴主类作为核心证据；细分标签用于案例解释和内部诊断，不作为最终结论的主要依据。</div>
+<h3 class="sub-title">功能维度：影像“用来做什么”</h3>
+<div class="finding"><h4>最集中在「传播」（46.2%），其次是「记录」（21.4%）。</h4><p>功能维度是最适合汇报的核心轴，因为它能直接对应“学术交流、公众传播、产业转化”三类目标。当前案例库整体更容易看到传播、记录和解释之间的结构差异。</p></div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">传播</div>
+  <div class="bar-track"><div class="bar-fill" style="width:100.00%;background:#4e79a7;">2,835</div></div>
+  <div class="bar-info">2,835<br><small>46.2%</small></div>
+  <div class="bar-hint">面向公众/品牌/科普</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">记录</div>
+  <div class="bar-track"><div class="bar-fill" style="width:46.28%;background:#f28e2b;">1,312</div></div>
+  <div class="bar-info">1,312<br><small>21.4%</small></div>
+  <div class="bar-hint">保存事实与过程</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">解释</div>
+  <div class="bar-track"><div class="bar-fill" style="width:38.84%;background:#e15759;">1,101</div></div>
+  <div class="bar-info">1,101<br><small>18.0%</small></div>
+  <div class="bar-hint">说明结构机制</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">展示</div>
+  <div class="bar-track"><div class="bar-fill" style="width:29.10%;background:#76b7b2;">825</div></div>
+  <div class="bar-info">825<br><small>13.5%</small></div>
+  <div class="bar-hint">呈现成果与空间</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">数据</div>
+  <div class="bar-track"><div class="bar-fill" style="width:2.01%;background:#59a14f;">57</div></div>
+  <div class="bar-info">57<br><small>0.9%</small></div>
+  <div class="bar-hint">呈现分析结果</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">交互</div>
+  <div class="bar-track"><div class="bar-fill" style="width:2.00%;background:#edc948;">1</div></div>
+  <div class="bar-info">1<br><small>0.0%</small></div>
+  <div class="bar-hint">支持操作探索</div>
+</div>
+
+<h3 class="sub-title">技术维度：影像“如何生产出来”</h3>
+<div class="finding"><h4>最集中在「拍摄」（49.2%），其次是「绘设」（20.6%）。</h4><p>技术维度可以用来判断影像生产能力：拍摄代表现实采集能力，绘设代表视觉解释能力，渲染和数据可视化则更接近科研成果转译和工程表达能力。</p></div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">拍摄</div>
+  <div class="bar-track"><div class="bar-fill" style="width:100.00%;background:#4e79a7;">3,015</div></div>
+  <div class="bar-info">3,015<br><small>49.2%</small></div>
+  <div class="bar-hint">相机/摄像/现场采集</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">绘设</div>
+  <div class="bar-track"><div class="bar-fill" style="width:41.92%;background:#f28e2b;">1,264</div></div>
+  <div class="bar-info">1,264<br><small>20.6%</small></div>
+  <div class="bar-hint">插画/图标/信息设计</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">渲染</div>
+  <div class="bar-track"><div class="bar-fill" style="width:31.51%;background:#e15759;">950</div></div>
+  <div class="bar-info">950<br><small>15.5%</small></div>
+  <div class="bar-hint">3D/仿真/工程模型</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">成像</div>
+  <div class="bar-track"><div class="bar-fill" style="width:20.30%;background:#76b7b2;">612</div></div>
+  <div class="bar-info">612<br><small>10.0%</small></div>
+  <div class="bar-hint">显微/医学/遥感等专业成像</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">数据</div>
+  <div class="bar-track"><div class="bar-fill" style="width:8.39%;background:#59a14f;">253</div></div>
+  <div class="bar-info">253<br><small>4.1%</small></div>
+  <div class="bar-hint">图表/地图/数据可视化</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">生成</div>
+  <div class="bar-track"><div class="bar-fill" style="width:2.00%;background:#edc948;">37</div></div>
+  <div class="bar-info">37<br><small>0.6%</small></div>
+  <div class="bar-hint">AI/算法生成或增强</div>
+</div>
+
+<h3 class="sub-title">媒介维度：目前仅作辅助说明</h3>
+<div class="finding"><h4>最集中在「静图」（98.6%），其次是「图组」（0.8%）。</h4><p>媒介维度高度集中于静图，主要受当前采集来源和网页图片形态影响。视频、交互和实体媒介仍需要后续专项补采，因此不建议在汇报中把媒介维度作为最重要结论。</p></div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">静图</div>
+  <div class="bar-track"><div class="bar-fill" style="width:100.00%;background:#4e79a7;">6,046</div></div>
+  <div class="bar-info">6,046<br><small>98.6%</small></div>
+  <div class="bar-hint">当前采集形态</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">图组</div>
+  <div class="bar-track"><div class="bar-fill" style="width:2.00%;background:#f28e2b;">46</div></div>
+  <div class="bar-info">46<br><small>0.8%</small></div>
+  <div class="bar-hint">当前采集形态</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">动图</div>
+  <div class="bar-track"><div class="bar-fill" style="width:2.00%;background:#e15759;">20</div></div>
+  <div class="bar-info">20<br><small>0.3%</small></div>
+  <div class="bar-hint">当前采集形态</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">视频</div>
+  <div class="bar-track"><div class="bar-fill" style="width:2.00%;background:#76b7b2;">18</div></div>
+  <div class="bar-info">18<br><small>0.3%</small></div>
+  <div class="bar-hint">当前采集形态</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">交互</div>
+  <div class="bar-track"><div class="bar-fill" style="width:2.00%;background:#59a14f;">1</div></div>
+  <div class="bar-info">1<br><small>0.0%</small></div>
+  <div class="bar-hint">当前采集形态</div>
+</div>
+
+<h2 class="section-title">四、来源组对比：用少量指标讲清差异</h2>
+<div class="section-desc">为了让汇报清晰，建议不展示全部标签，而是围绕“功能主轴”和“技术主轴”比较重点来源组。这样既能保留数据依据，也不会让听众陷入细碎分类。</div>
+<table><thead><tr><th>来源组</th><th>样本</th><th>功能主轴</th><th>记录</th><th>解释</th><th>传播</th><th>展示</th><th>技术主轴</th><th>拍摄</th><th>绘设</th><th>渲染</th></tr></thead><tbody><tr><td>长兴海洋实验室</td><td>113</td><td>记录</td><td>73.5%</td><td>9.7%</td><td>8.0%</td><td>8.0%</td><td>拍摄</td><td>82.3%</td><td>14.2%</td><td>1.8%</td></tr><tr><td>交大工科/校内科研</td><td>207</td><td>记录</td><td>48.8%</td><td>14.5%</td><td>20.3%</td><td>10.1%</td><td>拍摄</td><td>69.6%</td><td>18.4%</td><td>0.5%</td></tr><tr><td>国内高校/科研机构</td><td>396</td><td>解释</td><td>35.1%</td><td>46.2%</td><td>7.1%</td><td>10.4%</td><td>拍摄</td><td>50.8%</td><td>26.5%</td><td>2.0%</td></tr><tr><td>国外高校</td><td>1,353</td><td>传播</td><td>36.4%</td><td>16.2%</td><td>41.0%</td><td>6.3%</td><td>拍摄</td><td>80.6%</td><td>11.7%</td><td>4.3%</td></tr><tr><td>国际研究机构/期刊</td><td>2,699</td><td>传播</td><td>13.9%</td><td>10.0%</td><td>69.0%</td><td>6.0%</td><td>拍摄</td><td>32.6%</td><td>25.2%</td><td>19.9%</td></tr><tr><td>头部企业/产业案例</td><td>1,044</td><td>展示</td><td>5.3%</td><td>27.3%</td><td>21.6%</td><td>45.1%</td><td>拍摄</td><td>44.0%</td><td>14.9%</td><td>30.7%</td></tr></tbody></table>
+<div class="finding"><h4>对比阅读方式</h4><p>交大和长兴更适合被理解为“科研活动与现场记录”的基础样本；国外高校和国际研究机构可以作为解释型、传播型表达参照；企业案例适合作为产业转化和应用场景表达参照。</p></div>
+
+<h2 class="section-title">五、长兴海洋实验室：从记录能力走向解释、数据与应用表达</h2>
+<div class="section-desc">长兴样本用于把案例库分析落到具体对象。这里不强调每个案例标签是否完全准确，而是看整体影像建设方向。</div>
+<h3 class="sub-title">长兴样本的当前结构</h3>
+<div class="note">长兴样本来自 ime.sjtu.edu.cn 相关入库案例。下方展示功能和技术主类，用于判断当前表达重心。</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">记录</div>
+  <div class="bar-track"><div class="bar-fill" style="width:100.00%;background:#4e79a7;">83</div></div>
+  <div class="bar-info">83<br><small>73.5%</small></div>
+  <div class="bar-hint">功能主类</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">解释</div>
+  <div class="bar-track"><div class="bar-fill" style="width:13.25%;background:#f28e2b;">11</div></div>
+  <div class="bar-info">11<br><small>9.7%</small></div>
+  <div class="bar-hint">功能主类</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">展示</div>
+  <div class="bar-track"><div class="bar-fill" style="width:10.84%;background:#e15759;">9</div></div>
+  <div class="bar-info">9<br><small>8.0%</small></div>
+  <div class="bar-hint">功能主类</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">传播</div>
+  <div class="bar-track"><div class="bar-fill" style="width:10.84%;background:#76b7b2;">9</div></div>
+  <div class="bar-info">9<br><small>8.0%</small></div>
+  <div class="bar-hint">功能主类</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">数据</div>
+  <div class="bar-track"><div class="bar-fill" style="width:2.00%;background:#59a14f;">1</div></div>
+  <div class="bar-info">1<br><small>0.9%</small></div>
+  <div class="bar-hint">功能主类</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">拍摄</div>
+  <div class="bar-track"><div class="bar-fill" style="width:100.00%;background:#4e79a7;">93</div></div>
+  <div class="bar-info">93<br><small>82.3%</small></div>
+  <div class="bar-hint">技术主类</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">绘设</div>
+  <div class="bar-track"><div class="bar-fill" style="width:17.20%;background:#f28e2b;">16</div></div>
+  <div class="bar-info">16<br><small>14.2%</small></div>
+  <div class="bar-hint">技术主类</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">渲染</div>
+  <div class="bar-track"><div class="bar-fill" style="width:2.15%;background:#e15759;">2</div></div>
+  <div class="bar-info">2<br><small>1.8%</small></div>
+  <div class="bar-hint">技术主类</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">数据</div>
+  <div class="bar-track"><div class="bar-fill" style="width:2.00%;background:#76b7b2;">1</div></div>
+  <div class="bar-info">1<br><small>0.9%</small></div>
+  <div class="bar-hint">技术主类</div>
+</div>
+<div class="bar-row">
+  <div class="bar-label" style="width:90px">成像</div>
+  <div class="bar-track"><div class="bar-fill" style="width:2.00%;background:#59a14f;">1</div></div>
+  <div class="bar-info">1<br><small>0.9%</small></div>
+  <div class="bar-hint">技术主类</div>
+</div>
+<div class="recommend">
+<div class="rec-card"><h4>1. 补解释型影像</h4><p>围绕海洋装备、实验流程、观测系统和关键技术原理，补充机制图、流程图、结构剖面图，服务学术交流和公众理解。</p></div>
+<div class="rec-card"><h4>2. 补数据型影像</h4><p>把观测结果、模型模拟、趋势变化和实验结果做成可读的数据图，增强科研证据表达。</p></div>
+<div class="rec-card"><h4>3. 补应用型影像</h4><p>把实验室能力放入海洋工程、产业应用、区域发展和装备场景中展示，增强产业转化表达。</p></div>
+</div>
+
+<h2 class="section-title">六、建议汇报流程</h2>
+<div class="section-desc">这份案例库不需要被讲成一个复杂的数据平台，更适合被讲成“研究目的清晰、样本覆盖成形、能支持对标、能指导长兴改进”的分析工具。</div>
+<div class="finding"><h4>推荐叙事顺序</h4><p>先讲三类目的：学术交流重证据、公众传播重理解、产业转化重应用；再讲案例库已经覆盖多类来源；随后用功能和技术两个主轴展示现状；最后落到长兴海洋实验室的影像建设建议。</p></div>
+<div class="finding"><h4>展示策略</h4><p>主报告只展示主类和 Top 3 结构。细分标签保留在展开页或案例页中，用于解释代表案例，不作为主结论。这能兼顾严谨性和汇报观感。</p></div>
+
+<div class="footer-note">数据来源：本地 SQLite 案例库 VisualCase 表，筛选 reviewStatus = approved。生成时间：2026-06-17 15:09。说明：本报告用于阶段性研究汇报，分类结论按主类呈现；细分标签仍建议继续人工抽检和迭代。</div>
+</div></div></body></html>

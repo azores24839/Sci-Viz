@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Background,
   Controls,
+  PanOnScrollMode,
   ReactFlow,
   applyNodeChanges,
   type NodeChange,
 } from '@xyflow/react';
+import type { ProjectGoal } from '@studio/contracts';
 import type { WorkflowNodeState, WorkflowTemplate } from '@studio/workflow-core';
 import { toFlowElements, type StudioFlowNode } from './adapter';
 import { WorkflowNodeCard } from './WorkflowNodeCard';
@@ -15,11 +17,18 @@ interface WorkflowCanvasProps {
   states: WorkflowNodeState[];
   selectedNodeId: string;
   onSelectNode: (nodeId: string) => void;
+  onConfirmNode: (nodeId: string) => void;
+  onReviseNode: (nodeId: string, instruction: string) => void;
+  primaryPurposeId: ProjectGoal;
+  secondaryPurposeId: ProjectGoal | '';
+  purposeOptions: Array<{ id: ProjectGoal; label: string; description: string }>;
+  onSetPrimaryPurpose: (purposeId: ProjectGoal) => void;
+  onSetSecondaryPurpose: (purposeId: ProjectGoal | '') => void;
 }
 
 const nodeTypes = { workflow: WorkflowNodeCard };
 
-export function WorkflowCanvas({ template, states, selectedNodeId, onSelectNode }: WorkflowCanvasProps) {
+export function WorkflowCanvas({ template, states, selectedNodeId, onSelectNode, onConfirmNode, onReviseNode, primaryPurposeId, secondaryPurposeId, purposeOptions, onSetPrimaryPurpose, onSetSecondaryPurpose }: WorkflowCanvasProps) {
   const initial = useMemo(() => toFlowElements(template, states), [template, states]);
   const [nodes, setNodes] = useState<StudioFlowNode[]>(initial.nodes);
   const [locked, setLocked] = useState(false);
@@ -46,8 +55,31 @@ export function WorkflowCanvas({ template, states, selectedNodeId, onSelectNode 
   return (
     <div className={`workflow-canvas${locked ? ' is-locked' : ''}`} aria-label="科研影像工作流画布">
       <ReactFlow
-        nodes={nodes.map((node) => ({ ...node, selected: node.id === selectedNodeId, draggable: !locked }))}
+        nodes={nodes.map((node) => ({
+          ...node,
+          data: {
+            ...node.data,
+            onConfirm: () => onConfirmNode(node.id),
+            onRevise: () => onReviseNode(node.id, ''),
+            primaryPurposeId,
+            secondaryPurposeId,
+            purposeOptions,
+            onSetPrimaryPurpose,
+            onSetSecondaryPurpose,
+          },
+          selected: node.id === selectedNodeId,
+          draggable: !locked,
+          dragHandle: '.node-drag-handle',
+        }))}
         edges={selectedEdges}
+        defaultEdgeOptions={{
+          style: {
+            stroke: '#b7bdc1',
+            strokeWidth: 1.65,
+            strokeLinecap: 'round',
+            strokeLinejoin: 'round',
+          },
+        }}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onNodeClick={(_, node) => onSelectNode(node.id)}
@@ -55,8 +87,12 @@ export function WorkflowCanvas({ template, states, selectedNodeId, onSelectNode 
         deleteKeyCode={null}
         elementsSelectable={!locked}
         panOnDrag={!locked}
-        zoomOnScroll={!locked}
-        defaultViewport={{ x: -72, y: 74, zoom: 0.72 }}
+        panOnScroll={!locked}
+        panOnScrollMode={PanOnScrollMode.Free}
+        zoomActivationKeyCode="Meta"
+        zoomOnScroll={false}
+        zoomOnPinch={!locked}
+        defaultViewport={{ x: 18, y: 42, zoom: 1 }}
         minZoom={0.35}
         maxZoom={1.2}
         proOptions={{ hideAttribution: true }}

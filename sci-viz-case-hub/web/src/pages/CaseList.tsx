@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import type { VisualCase, Pagination, CrawlSource } from '../types';
-import { REVIEW_STATUS_LABELS, MEDIA_TYPES, CONTENT_TYPES, DISCIPLINES, TECHNICAL_METHODS, DISTRIBUTION_MEDIUMS, CAPTURE_TYPE_LABELS, CATEGORY_LABELS } from '../types';
+import { REVIEW_STATUS_LABELS, MEDIA_TYPES, CONTENT_TYPES, DISCIPLINES, TECHNICAL_METHODS, DISTRIBUTION_MEDIUMS, FUNCTIONAL_PURPOSES, CAPTURE_TYPE_LABELS, CATEGORY_LABELS } from '../types';
 import { theme } from '../theme';
 
 const STATUS_FILTERS: Array<{ key: string; label: string }> = [
@@ -27,6 +27,7 @@ const FILTER_PARAM_KEYS = [
   'discipline',
   'technical_method',
   'distribution_medium',
+  'functional_purpose',
   'capture_type',
   'ocr_status',
   'ai_status',
@@ -731,6 +732,13 @@ export default function CaseList() {
           <option value="">全部传播媒介</option>
           {DISTRIBUTION_MEDIUMS.map(t => {
             const count = facetCounts.distributionMedium?.[t];
+            return <option key={t} value={t}>{t}{count !== undefined ? ` (${count})` : ''}</option>;
+          })}
+        </select>
+        <select value={filters.functional_purpose || ''} onChange={(e) => setFilter('functional_purpose', e.target.value)} style={{ ...selectStyle, height: 38, maxWidth: 'none' }}>
+          <option value="">全部功能维度</option>
+          {FUNCTIONAL_PURPOSES.map(t => {
+            const count = facetCounts.functionalPurpose?.[t];
             return <option key={t} value={t}>{t}{count !== undefined ? ` (${count})` : ''}</option>;
           })}
         </select>

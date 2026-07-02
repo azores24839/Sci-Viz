@@ -341,6 +341,18 @@ export const SJTU_COLLEGE_SOURCES: SJTUSourceConfig[] = [
     strategyHint: '实验室新闻/科研进展栏目有高水平论文配图新闻；合作交流有国际会议照片',
     notes: '微生物/合成生物学；全国重点实验室',
   },
+  {
+    name: '上海交大-长兴海洋实验室',
+    url: 'https://ime.sjtu.edu.cn',
+    sourceType: 'national_lab_news',
+    category: 'SJTU-NATLAB',
+    crawlTier: 'A',
+    crawlStatus: 'active_static',
+    adapterType: 'static_html',
+    visualValue: '科研设备实拍、海洋工程装备图、工程样机照片、实验室现场照片、学者肖像、成果宣传海报',
+    strategyHint: '典型成果栏目有图像网格展示工程样机/设备；首页banner有科研场景大幅图片；新闻文章多链接微信公号，直接图片较少',
+    notes: '海洋装备/船舶工程/深海技术；长兴岛基地',
+  },
 ];
 
 /**

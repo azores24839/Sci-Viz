@@ -41,9 +41,20 @@ export const api = {
     return request<InsightSummary>(`/insights/summary?${qs}`);
   },
 
-  getComparison(school?: string, dimension = 'functionalPurpose') {
+  getComparison(school?: string, dimension = 'functionalPurpose', sampleMode: 'live' | 'balanced' = 'live', focusGroups: string[] = []) {
     const params: Record<string, string> = { dimension };
     if (school) params.school = school;
+    if (sampleMode !== 'live') params.sampleMode = sampleMode;
+    if (focusGroups.length > 0) params.focusGroups = focusGroups.join(',');
+    const qs = new URLSearchParams(params).toString();
+    return request<ComparisonData>(`/insights/comparison?${qs}`);
+  },
+
+  getComparisonDrilldown(dimension: string, parentDimension: string, parentValue: string, school?: string, sampleMode: 'live' | 'balanced' = 'live', focusGroups: string[] = []) {
+    const params: Record<string, string> = { dimension, parentDimension, parentValue };
+    if (school) params.school = school;
+    if (sampleMode !== 'live') params.sampleMode = sampleMode;
+    if (focusGroups.length > 0) params.focusGroups = focusGroups.join(',');
     const qs = new URLSearchParams(params).toString();
     return request<ComparisonData>(`/insights/comparison?${qs}`);
   },

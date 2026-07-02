@@ -47,7 +47,9 @@ type CrossMatrix = {
 type FilterKey = 'sourceDomain' | 'sourceName' | 'enterpriseCompany' | 'mediaType' | 'contentType' | 'discipline' | 'technicalMethod' | 'composition' | 'colorTone' | 'functionalPurpose' | 'distributionMedium' | 'reviewStatus';
 
 type DimensionKey = 'mediaType' | 'contentType' | 'discipline' | 'technicalMethod' | 'composition' | 'colorTone' | 'functionalPurpose' | 'distributionMedium';
-type ComparisonDimensionKey = 'functionalPurpose' | 'distributionMedium' | 'technicalMethod';
+type ComparisonDimensionKey = 'functionalPurpose' | 'distributionMedium' | 'technicalMethod' | 'contentSubType' | 'mediaSubType' | 'contentType';
+type ComparisonParentDimensionKey = 'functionalPurpose' | 'distributionMedium' | 'technicalMethod';
+type ComparisonSampleMode = 'live' | 'balanced';
 
 const DIMENSION_LABELS: Record<DimensionKey, string> = {
   mediaType: '呈现方式',
@@ -64,6 +66,9 @@ const COMPARISON_DIMENSION_LABELS: Record<ComparisonDimensionKey, string> = {
   functionalPurpose: '功能维度',
   distributionMedium: '媒介维度',
   technicalMethod: '技术维度',
+  contentSubType: '功能细分',
+  mediaSubType: '技术细分',
+  contentType: '内容主题',
 };
 
 const DIMENSION_KEYS: DimensionKey[] = ['mediaType', 'contentType', 'discipline', 'technicalMethod', 'composition', 'colorTone', 'functionalPurpose', 'distributionMedium'];
@@ -116,6 +121,15 @@ function sourceDomainFromUrl(url: string): string {
   }
 }
 
+function sourceHintWhere(name: string): Prisma.VisualCaseWhereInput {
+  return {
+    OR: [
+      { userHint: name },
+      { userHint: { startsWith: `${name} /` } },
+    ],
+  };
+}
+
 function isUsefulLabel(label: string): boolean {
   return label !== UNKNOWN_LABEL && label !== '不确定';
 }
@@ -143,32 +157,48 @@ async function makeSourceNameWhere(sourceNames: string[]): Promise<Prisma.Visual
     select: { name: true, url: true },
   });
   const sourceByName = new Map(sources.map(source => [source.name, source]));
-
-  const titleCounts = new Map<string, number>();
-  await Promise.all(sourceNames.map(async (name) => {
-    titleCounts.set(name, await prisma.visualCase.count({
-      where: { caseTitle: { contains: name } },
-    }));
-  }));
+  const domainCounts = new Map<string, number>();
+  const enabledSources = await prisma.crawlSource.findMany({
+    where: { enabled: true },
+    select: { url: true },
+  });
+  for (const source of enabledSources) {
+    const domain = sourceDomainFromUrl(source.url);
+    if (!domain) continue;
+    domainCounts.set(domain, (domainCounts.get(domain) || 0) + 1);
+  }
 
   const clauses: Prisma.VisualCaseWhereInput[] = [];
   for (const name of sourceNames) {
     const source = sourceByName.get(name);
     const domain = source ? sourceDomainFromUrl(source.url) : '';
-    const userHintCount = await prisma.visualCase.count({ where: { userHint: { contains: name } } });
+    const hintWhere = sourceHintWhere(name);
+    const userHintCount = await prisma.visualCase.count({ where: hintWhere });
     if (userHintCount > 0) {
-      clauses.push({ userHint: { contains: name } });
+      clauses.push(hintWhere);
       continue;
     }
 
-    const titleCount = titleCounts.get(name) || 0;
+    if (source?.url) {
+      const urlWhere: Prisma.VisualCaseWhereInput = { sourceUrl: { startsWith: source.url } };
+      const urlCount = await prisma.visualCase.count({ where: urlWhere });
+      if (urlCount > 0) {
+        clauses.push(urlWhere);
+        continue;
+      }
+    }
 
+    const titleWhere: Prisma.VisualCaseWhereInput = {
+      OR: [
+        { caseTitle: name },
+        { caseTitle: { startsWith: `${name} /` } },
+      ],
+    };
+    const titleCount = await prisma.visualCase.count({ where: titleWhere });
     if (titleCount > 0) {
-      clauses.push({ caseTitle: { contains: name } });
-    } else if (domain) {
+      clauses.push(titleWhere);
+    } else if (domain && (domainCounts.get(domain) || 0) === 1) {
       clauses.push({ sourceDomain: domain });
-    } else {
-      clauses.push({ caseTitle: { contains: name } });
     }
   }
 
@@ -234,18 +264,13 @@ async function makeSourceNameOptions(sources: Array<{ name: string; url: string 
       .map(source => [source.name, source]),
   ).values()];
 
-  const domainCounts = await prisma.visualCase.groupBy({
-    by: ['sourceDomain'],
-    _count: { id: true },
-  });
-  const domainCountMap = new Map(domainCounts.map(item => [item.sourceDomain, item._count.id]));
-
   const pairs = await Promise.all(
     uniqueSources.map(async (source) => {
-      const titleCount = await prisma.visualCase.count({ where: { caseTitle: { contains: source.name } } });
+      const sourceWhere = await makeSourceNameWhere([source.name]);
+      const count = sourceWhere ? await prisma.visualCase.count({ where: sourceWhere }) : 0;
       return {
         label: source.name,
-        count: titleCount > 0 ? titleCount : (domainCountMap.get(source.domain) || 0),
+        count,
       };
     }),
   );
@@ -648,13 +673,20 @@ const COMPARISON_GROUPS: Record<string, { id: string; label: string; domains: st
     label: '国内顶尖高校',
     domains: [],
   },
+  overseasUniversity: {
+    id: 'overseasUniversity',
+    label: '国外高校',
+    domains: [
+      'news.mit.edu',
+      'news.harvard.edu', 'www.harvard.edu', 'harvard.edu',
+      'news.stanford.edu', 'engineering.stanford.edu',
+    ],
+  },
   international: {
     id: 'international',
     label: '国际研究',
     domains: [
       'www.nature.com', 'nature.com',
-      'news.mit.edu', 'news.harvard.edu',
-      'news.stanford.edu', 'engineering.stanford.edu',
       'newscenter.lbl.gov', 'www.mpg.de', 'images.nasa.gov',
       'public.tableau.com',
     ],
@@ -666,6 +698,7 @@ const COMPARISON_GROUPS: Record<string, { id: string; label: string; domains: st
       'www.kongsberg.com', 'www.arup.com', 'www.autodesk.com',
       'www.siemens-energy.com', 'www.rolls-royce.com', 'www.cat.com',
       'www.huawei.com', 'www.qualcomm.com', 'developer.nvidia.com', 'www.nvidia.com',
+      'www.nvidia.cn', 'nvidia.cn',
       'new.abb.com', 'www.se.com', 'www.eaton.com',
       'bostondynamics.com', 'www.fanucamerica.com',
       'research.google', 'www.microsoft.com', 'aiotlabs.microsoft.com',
@@ -680,6 +713,7 @@ const COMPARISON_GROUPS: Record<string, { id: string; label: string; domains: st
       'physicsworld.com', 'optics.org', 'semiengineering.com',
       'www.medicaldesignandoutsourcing.com',
       'www.waterworld.com', 'www.watertechonline.com',
+      'www.tesla.com', 'www.spacex.com', 'www.starlink.com',
     ],
   },
 };
@@ -699,7 +733,7 @@ const SJTU_SCHOOLS = [
   { id: 'aero', label: '航空航天学院', discipline: '工程', domains: ['www.aero.sjtu.edu.cn', 'news.sjtu.edu.cn'] },
 ];
 
-type ComparisonGroupId = 'ime' | 'sjtu' | 'domestic' | 'international' | 'enterprise';
+type ComparisonGroupId = 'ime' | 'sjtu' | 'domestic' | 'overseasUniversity' | 'international' | 'enterprise';
 
 function includesAny(text: string, patterns: RegExp[]): boolean {
   return patterns.some(pattern => pattern.test(text));
@@ -774,9 +808,88 @@ function inferTechnicalMethod(c: Pick<VisualCase, 'mediaType' | 'contentType' | 
   return '未标注';
 }
 
+const TECHNICAL_SUBTYPE_BY_METHOD: Record<string, string[]> = {
+  拍摄: ['纪实摄影', '个人肖像', '群体肖像', '过程摄影', '航拍', '设备/现场摄影', '未细分拍摄'],
+  成像: ['光学显微', '电子显微', '医学影像', '遥感成像', '热成像', '未细分成像'],
+  绘设: ['科学插画', '图标设计', '版面设计/信息图', '机制示意', '未细分绘设'],
+  数据: ['统计图表', '地图', '网络图', '科学数据可视化', '未细分数据'],
+  渲染: ['3D产品渲染', '3D机制图', '3D场景渲染', '3D数据可视化', '未细分渲染'],
+  生成: ['AI生成图像', '算法增强', '风格迁移', '未细分生成'],
+};
+
+function normalizeTechnicalSubType(c: Pick<VisualCase, 'mediaType' | 'mediaSubType' | 'contentType' | 'technicalMethod' | 'contextText' | 'caseTitle' | 'pageTitle' | 'sourceUrl' | 'functionalPurpose' | 'distributionMedium'>): string {
+  const method = inferTechnicalMethod(c);
+  const allowed = TECHNICAL_SUBTYPE_BY_METHOD[method] || [];
+  const current = usefulComparisonValue(c.mediaSubType || '');
+  if (current && allowed.includes(current)) return current;
+
+  const text = comparisonText(c);
+
+  if (method === '拍摄') {
+    if (/航拍|无人机|drone|aerial/i.test(text)) return '航拍';
+    if (/实验过程|操作过程|流程记录|过程|procedure|process/i.test(text)) return '过程摄影';
+    if (/群体|团队|合影|多人|group|team/i.test(text)) return '群体肖像';
+    if (/人物|研究人员|科学家|肖像|portrait|profile|headshot|researcher|scientist/i.test(text)) return '个人肖像';
+    if (/设备|仪器|装置|实验室|现场|空间|facility|lab|equipment|site/i.test(text)) return '设备/现场摄影';
+    if (/纪实|记录|新闻|documentary|news photo/i.test(text)) return '纪实摄影';
+    return '未细分拍摄';
+  }
+
+  if (method === '成像') {
+    if (/SEM|TEM|电镜|电子显微|electron microscopy/i.test(text)) return '电子显微';
+    if (/显微|光学显微|microscopy|microscope/i.test(text)) return '光学显微';
+    if (/医学影像|MRI|CT|X光|超声|medical imaging|radiology/i.test(text)) return '医学影像';
+    if (/遥感|卫星|remote sensing|satellite/i.test(text)) return '遥感成像';
+    if (/热成像|thermal|infrared/i.test(text)) return '热成像';
+    return '未细分成像';
+  }
+
+  if (method === '绘设') {
+    if (/图标|icon/i.test(text)) return '图标设计';
+    if (/信息图|版面|排版|infographic|layout/i.test(text)) return '版面设计/信息图';
+    if (/机制|结构|流程|示意|diagram|schematic/i.test(text)) return '机制示意';
+    if (/插画|illustration|手绘|绘制/i.test(text)) return '科学插画';
+    return '未细分绘设';
+  }
+
+  if (method === '数据') {
+    if (/地图|map|geospatial|GIS/i.test(text)) return '地图';
+    if (/网络|关系|network|graph/i.test(text)) return '网络图';
+    if (/统计|图表|曲线|柱状|折线|chart|plot|trend/i.test(text)) return '统计图表';
+    if (/数据|可视化|visualization|model|模型/i.test(text)) return '科学数据可视化';
+    return '未细分数据';
+  }
+
+  if (method === '渲染') {
+    if (/产品|样机|product|device|prototype/i.test(text)) return '3D产品渲染';
+    if (/数据|可视化|visualization/i.test(text)) return '3D数据可视化';
+    if (/场景|空间|environment|scene/i.test(text)) return '3D场景渲染';
+    if (/机制|结构|剖面|模型|simulation|仿真/i.test(text)) return '3D机制图';
+    return '未细分渲染';
+  }
+
+  if (method === '生成') {
+    if (/风格迁移|style transfer/i.test(text)) return '风格迁移';
+    if (/增强|upscale|denoise|enhance/i.test(text)) return '算法增强';
+    if (/\bAI\b|AIGC|生成|diffusion|generative/i.test(text)) return 'AI生成图像';
+    return '未细分生成';
+  }
+
+  return '未标注';
+}
+
 function comparisonDimensionValue(c: VisualCase, dimension: ComparisonDimensionKey): string {
   if (dimension === 'functionalPurpose') return normalizeFunctionalDimension(c);
   if (dimension === 'distributionMedium') return normalizeMediumDimension(c);
+  if (dimension === 'contentSubType') {
+    return usefulComparisonValue(c.contentSubType || '') || usefulComparisonValue(c.contentType || '') || '未标注';
+  }
+  if (dimension === 'mediaSubType') {
+    return normalizeTechnicalSubType(c);
+  }
+  if (dimension === 'contentType') {
+    return usefulComparisonValue(c.contentType || '') || '未标注';
+  }
   return inferTechnicalMethod(c);
 }
 
@@ -913,11 +1026,46 @@ function pickEnterpriseSamples(cases: any[], limit: number): any[] {
   return result;
 }
 
+function pickStratifiedCases(cases: any[], limit: number, dimension: ComparisonDimensionKey): any[] {
+  if (limit <= 0 || cases.length <= limit) return cases;
+
+  const buckets = new Map<string, any[]>();
+  for (const c of cases) {
+    const key = comparisonDimensionValue(c as VisualCase, dimension);
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key)!.push(c);
+  }
+
+  const bucketOrder = [...buckets.entries()]
+    .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], 'zh-CN'))
+    .map(([key]) => key);
+
+  const result: any[] = [];
+  while (result.length < limit) {
+    let added = false;
+    for (const key of bucketOrder) {
+      const bucket = buckets.get(key);
+      if (!bucket || bucket.length === 0) continue;
+      result.push(bucket.shift()!);
+      added = true;
+      if (result.length >= limit) break;
+    }
+    if (!added) break;
+  }
+
+  return result;
+}
+
 insightsRouter.get('/insights/comparison', async (req: Request, res: Response) => {
   try {
     const school = toTrimmedString(req.query.school as string, 100) || '';
     const discipline = toTrimmedString(req.query.discipline as string, 200) || '';
     const dimension = toTrimmedString(req.query.dimension as string, 200) || 'functionalPurpose';
+    const parentDimension = toTrimmedString(req.query.parentDimension as string, 200) || '';
+    const parentValue = toTrimmedString(req.query.parentValue as string, 200) || '';
+    const sampleModeParam = toTrimmedString(req.query.sampleMode as string, 40) || 'live';
+    const focusGroupsParam = toTrimmedString(req.query.focusGroups as string, 200) || '';
+    const sampleMode: ComparisonSampleMode = sampleModeParam === 'balanced' ? 'balanced' : 'live';
 
     let effectiveDiscipline = discipline;
     let schoolLabel = '';
@@ -936,18 +1084,25 @@ insightsRouter.get('/insights/comparison', async (req: Request, res: Response) =
       }
     }
 
-    const validDimensions: ComparisonDimensionKey[] = ['functionalPurpose', 'distributionMedium', 'technicalMethod'];
+    const validDimensions: ComparisonDimensionKey[] = ['functionalPurpose', 'distributionMedium', 'technicalMethod', 'contentSubType', 'mediaSubType', 'contentType'];
     const dimKey: ComparisonDimensionKey = validDimensions.includes(dimension as ComparisonDimensionKey) ? (dimension as ComparisonDimensionKey) : 'functionalPurpose';
     const dimLabel = COMPARISON_DIMENSION_LABELS[dimKey] || dimension;
+    const validParentDimensions: ComparisonParentDimensionKey[] = ['functionalPurpose', 'distributionMedium', 'technicalMethod'];
+    const parentDimKey = validParentDimensions.includes(parentDimension as ComparisonParentDimensionKey)
+      ? parentDimension as ComparisonParentDimensionKey
+      : '';
 
     const where: Prisma.VisualCaseWhereInput = effectiveDiscipline
       ? { discipline: effectiveDiscipline, reviewStatus: 'approved' }
       : { reviewStatus: 'approved' };
 
-    const cases = await prisma.visualCase.findMany({
+    const rawCases = await prisma.visualCase.findMany({
       where,
       select: { id: true, sourceDomain: true, sourceUrl: true, pageTitle: true, caseTitle: true, contextText: true, captureType: true, userHint: true, mediaType: true, contentType: true, technicalMethod: true, discipline: true, functionalPurpose: true, distributionMedium: true, mediaSubType: true, contentSubType: true, thumbnailPath: true, imagePath: true, imageUrl: true, rating: true },
     });
+    const cases = parentDimKey && parentValue
+      ? rawCases.filter((c: any) => comparisonDimensionValue(c as VisualCase, parentDimKey) === parentValue)
+      : rawCases;
 
     const SJTU_DOMAINS = new Set(sjtuDomains);
 
@@ -962,18 +1117,40 @@ insightsRouter.get('/insights/comparison', async (req: Request, res: Response) =
     COMPARISON_GROUPS.domestic.domains = [...domesticBaseDomains];
 
     const SAMPLES_PER_GROUP = 18;
-
-    const groups = Object.values(COMPARISON_GROUPS).map((group) => {
+    const groupedCases = Object.values(COMPARISON_GROUPS).map((group) => {
       const domainSet = group.id === 'sjtu' ? SJTU_DOMAINS : new Set(group.domains);
       const groupCases = cases
         .filter((c: any) => group.id === 'enterprise'
           ? String(c.userHint || '').includes('/ enterprise') || domainSet.has(c.sourceDomain)
           : domainSet.has(c.sourceDomain))
         .sort((a: any, b: any) => group.id === 'enterprise' ? scoreEnterpriseSample(b) - scoreEnterpriseSample(a) : (b.rating || 0) - (a.rating || 0));
-      const total = groupCases.length;
+      return { group, groupCases };
+    });
+
+    const focusGroupIds = new Set(
+      focusGroupsParam
+        .split(',')
+        .map(id => id.trim())
+        .filter(id => Boolean(id) && Object.prototype.hasOwnProperty.call(COMPARISON_GROUPS, id)),
+    );
+    const sampleBaseGroups = focusGroupIds.size > 0
+      ? groupedCases.filter(item => focusGroupIds.has(item.group.id))
+      : groupedCases;
+    const nonzeroGroupTotals = sampleBaseGroups.map(item => item.groupCases.length).filter(total => total > 0);
+    const balancedSampleSize = sampleMode === 'balanced' && nonzeroGroupTotals.length > 1
+      ? Math.min(...nonzeroGroupTotals)
+      : 0;
+    const effectiveSampleMode: ComparisonSampleMode = sampleMode === 'balanced' && balancedSampleSize > 0 ? 'balanced' : 'live';
+
+    const groups = groupedCases.map(({ group, groupCases }) => {
+      const rawTotal = groupCases.length;
+      const analysisCases = effectiveSampleMode === 'balanced'
+        ? pickStratifiedCases(groupCases, balancedSampleSize, dimKey)
+        : groupCases;
+      const total = analysisCases.length;
 
       const countMap = new Map<string, number>();
-      for (const c of groupCases) {
+      for (const c of analysisCases) {
         const val = comparisonDimensionValue(c as VisualCase, dimKey);
         countMap.set(val, (countMap.get(val) || 0) + 1);
       }
@@ -986,34 +1163,9 @@ insightsRouter.get('/insights/comparison', async (req: Request, res: Response) =
           percentage: total > 0 ? Math.round((count / total) * 1000) / 10 : 0,
         }));
 
-      const sampled = group.id === 'enterprise'
-        ? pickEnterpriseSamples(groupCases, SAMPLES_PER_GROUP)
-        : total <= SAMPLES_PER_GROUP
-        ? groupCases
-        : (() => {
-            const buckets = new Map<string, any[]>();
-            for (const c of groupCases) {
-              const val = comparisonDimensionValue(c as VisualCase, dimKey);
-              if (!buckets.has(val)) buckets.set(val, []);
-              buckets.get(val)!.push(c);
-            }
-            const bucketOrder = [...buckets.entries()]
-              .sort((a, b) => b[1].length - a[1].length)
-              .map(([key]) => key);
-            const result: any[] = [];
-            while (result.length < SAMPLES_PER_GROUP) {
-              let added = false;
-              for (const key of bucketOrder) {
-                const bucket = buckets.get(key);
-                if (!bucket || bucket.length === 0) continue;
-                result.push(bucket.shift()!);
-                added = true;
-                if (result.length >= SAMPLES_PER_GROUP) break;
-              }
-              if (!added) break;
-            }
-            return result;
-          })();
+      const sampled = group.id === 'enterprise' && effectiveSampleMode === 'live'
+        ? pickEnterpriseSamples(analysisCases, SAMPLES_PER_GROUP)
+        : pickStratifiedCases(analysisCases, SAMPLES_PER_GROUP, dimKey);
 
       const samples = sampled.map((c: any) => ({
         id: c.id,
@@ -1038,6 +1190,7 @@ insightsRouter.get('/insights/comparison', async (req: Request, res: Response) =
         sourceDomains: group.id === 'enterprise'
           ? [...new Set(groupCases.map((c: any) => c.sourceDomain).filter(Boolean))]
           : group.id === 'sjtu' ? [...SJTU_DOMAINS] : group.domains,
+        rawTotal,
         total,
         distribution,
         samples,
@@ -1100,6 +1253,10 @@ insightsRouter.get('/insights/comparison', async (req: Request, res: Response) =
         school: school || undefined,
         dimension: dimKey,
         dimensionLabel: dimLabel,
+        parentDimension: parentDimKey || undefined,
+        parentValue: parentDimKey ? parentValue : undefined,
+        sampleMode: effectiveSampleMode,
+        balancedSampleSize: effectiveSampleMode === 'balanced' ? balancedSampleSize : undefined,
         groups,
         findings,
         subtypeCross: subtypeCross.rows.length > 0 ? subtypeCross : null,
