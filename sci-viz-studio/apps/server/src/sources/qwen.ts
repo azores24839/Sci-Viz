@@ -16,6 +16,10 @@ function config(env: NodeJS.ProcessEnv) {
   };
 }
 
+export function isQwenConfigured(env: NodeJS.ProcessEnv) {
+  return Boolean(config(env).key);
+}
+
 export async function summarizeWithQwen(params: {
   env: NodeJS.ProcessEnv;
   kind: SourceKind;

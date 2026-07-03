@@ -2,7 +2,7 @@
 
 科研静图拍摄策划工作台。当前阶段提供版本化固定流程、React Flow 节点画布、四个 Agent 插槽、长兴海洋实验室演示数据和案例参考图；后端可通过 DeepSeek 生成阶段草案。
 
-资料输入现支持 PDF、DOCX、PNG/JPG、粘贴文字和公开网页。文档与网页在服务端提取正文，图片及扫描 PDF 使用 Qwen OCR，并保留原文、OCR、图片描述和 AI 摘要。每个浏览器测试会话使用独立项目资料池。
+资料输入现支持 PDF、DOCX、PNG/JPG、粘贴文字和公开网页。文档与网页在服务端提取正文，图片及扫描 PDF 使用 Qwen OCR，并保留原文、OCR、图片描述和 AI 摘要。线上用 Clerk 邮箱+密码注册登录，每个用户的项目、资料和用量相互隔离。
 
 ## 启动
 
@@ -65,6 +65,20 @@ QWEN_VISION_MODEL=qwen3.6-plus
 
 2026-07-02 冒烟测试中，现有 OpenRouter key 能到达 Qwen 接口，但返回 429（额度或速率受限）。正式邀请测试用户前，需要补充可用额度或配置可用的 DashScope key。
 
+## 账号与测试额度
+
+本地默认 `AUTH_MODE=mock`，无需注册即可开发。线上必须使用 Clerk，在 Clerk 后台开启 Email + Password，然后配置：
+
+```dotenv
+VITE_CLERK_PUBLISHABLE_KEY=pk_live_xxx
+CLERK_SECRET_KEY=sk_live_xxx
+AUTH_PROJECT_SECRET=一个独立的长随机字符串
+```
+
+生产环境如果缺少 Clerk 或项目隔离密钥，API 会拒绝启动。默认每位用户最多 50 份资料、500 MB 存储、每日 50 次 AI 任务，可通过 `USER_STORAGE_LIMIT_MB`、`USER_DAILY_AI_LIMIT` 和 `API_RATE_LIMIT_PER_MINUTE` 调整。
+
+外部审核链接在生产环境必须配置 `REVIEW_TOKEN_SECRET`，并通过 `PUBLIC_WEB_URL` 生成分享地址。Token 原文只在创建时返回，服务端仅保存不可逆哈希；审核意见只进入待处理区，不会直接覆盖正式方案。更换密钥会使已有审核链接立即失效。
+
 ## 阿里云测试部署
 
 生产基线是 ECS + 私有 OSS + PostgreSQL。复制 `deploy/.env.example` 为 `deploy/.env`，填入域名、数据库密码、DashScope 与 OSS 配置后运行：
@@ -73,9 +87,9 @@ QWEN_VISION_MODEL=qwen3.6-plus
 docker compose --env-file deploy/.env up -d --build
 ```
 
-浏览器通过签名 URL 直传 OSS，50 MB 文件不经过 API 服务器。API 与解析队列运行在 ECS；PostgreSQL 保存资料和任务状态。公开测试前仍应在域名入口增加登录或邀请码，当前随机测试项目 ID 只用于隔离浏览器会话，不是正式账号权限系统。
+浏览器通过签名 URL 直传 OSS，50 MB 文件不经过 API 服务器。API 与解析队列运行在 ECS；PostgreSQL 保存用户资料、任务状态与每日用量。Clerk 会验证每个 API 请求，服务端会再校验项目和资料归属。
 
-OSS Bucket 必须保持私有，并配置只允许测试域名执行 `PUT`、`GET`、`HEAD` 的 CORS 规则；不要开放公共读权限。ECS 与 OSS 应选择同一区域。当前 `docker-compose.yml` 适合 20 人左右的封闭测试，正式公开上线前还需加入账号认证、限流、病毒扫描、监控告警和自动备份演练。
+OSS Bucket 必须保持私有，并配置只允许测试域名执行 `PUT`、`GET`、`HEAD` 的 CORS 规则；不要开放公共读权限。ECS 与 OSS 应选择同一区域。当前 `docker-compose.yml` 适合 20 人左右的封闭测试；账号认证和基础限流已加入，真正公开上线前仍需病毒扫描、监控告警和自动备份演练。
 
 ## 架构边界
 

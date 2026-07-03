@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import type { AgentMessage, AgentProfile, ProjectGoal, SourceDocument } from '@studio/contracts';
+import type { AgentJob, AgentMessage, AgentProfile, ProjectGoal, SourceDocument } from '@studio/contracts';
 import type { WorkflowNodeDefinition, WorkflowNodeState } from '@studio/workflow-core';
 import { parseMdToCards } from './parseMarkdownToCards';
 import { SourceManager } from '../sources/SourceManager';
+import { AgentJobStatus } from '../agents/AgentJobStatus';
 
 interface PurposeOption {
   id: ProjectGoal;
@@ -57,7 +58,12 @@ export function AgentContextPanel({
   onSetSecondaryPurpose,
   projectId,
   sourceCanProceed,
+  benchmarkCanProceed,
   onSourcesChange,
+  activeJob,
+  activeJobStatus,
+  activeJobError,
+  onRetryJob,
 }: {
   agent: AgentProfile;
   node: WorkflowNodeDefinition;
@@ -75,7 +81,12 @@ export function AgentContextPanel({
   onSetSecondaryPurpose: (purposeId: ProjectGoal | '') => void;
   projectId: string;
   sourceCanProceed: boolean;
+  benchmarkCanProceed: boolean;
   onSourcesChange: (sources: SourceDocument[]) => void;
+  activeJob: AgentJob | null;
+  activeJobStatus: 'IDLE' | 'LOADING' | 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+  activeJobError: string | null;
+  onRetryJob: () => void;
 }) {
   const [avatarFailed, setAvatarFailed] = useState(false);
   const awaitingHuman = state.status === 'AWAITING_HUMAN';
@@ -83,6 +94,7 @@ export function AgentContextPanel({
   const completed = state.status === 'COMPLETED';
   const showPurposeChoices = node.id === 'goal-output-selection' && awaitingHuman;
   const isSourceIntake = node.id === 'source-intake';
+  const isBenchmark = node.id === 'case-benchmark';
   const promptDisabled = !awaitingHuman || isSourceIntake;
 
   return <aside className="agent-panel" aria-label={isSourceIntake ? '资料上传面板' : `${agent.name}工作面板`}>
@@ -119,6 +131,19 @@ export function AgentContextPanel({
             ? <ArtifactOutline md={state.artifactBody} />
             : <div className="artifact-body">等待上一步完成后，系统会自动启动这个节点。</div>}
       </section>}
+      {!isSourceIntake && (running || state.status === 'FAILED') && (
+        <section className="agent-runtime-card" aria-label="AI 任务进度">
+          <AgentJobStatus
+            job={activeJob}
+            status={activeJobStatus === 'IDLE' ? 'LOADING' : activeJobStatus}
+            onRetry={onRetryJob}
+            {...(activeJob ? { sourceCount: activeJob.request.upstreamArtifacts.filter((item) => item.nodeId.startsWith('source:')).length } : {})}
+            revision={state.revision}
+            {...(state.planLabel ? { planLabel: state.planLabel } : {})}
+          />
+          {activeJobError && <p className="agent-job-error" role="alert">{activeJobError}，系统会继续尝试恢复进度。</p>}
+        </section>
+      )}
       {showPurposeChoices && <section className="decision-card" aria-label="目标与产物选择">
         <div className="decision-card-header">
           <strong>传播目标</strong>
@@ -161,7 +186,7 @@ export function AgentContextPanel({
           <strong>{isSourceIntake ? '资料上传' : '阶段确认'}</strong>
           <p>{isSourceIntake ? '上传完毕后进入视觉现状诊断。' : showPurposeChoices ? '确认后，科研策展人会根据目标和拍摄静图口径进入案例对标。' : '如果这一步方向没问题，确认后系统会自动启动下一个节点；如果要改，写一句修改意见即可生成下一版。'}</p>
         </div>
-        <button type="button" className="confirm-button" onClick={onConfirm} disabled={isSourceIntake && !sourceCanProceed}>{isSourceIntake ? sourceCanProceed ? '使用所选资料，进入诊断' : '至少选择一份已解析资料' : '确认，进入下一步'}</button>
+        <button type="button" className="confirm-button" onClick={onConfirm} disabled={(isSourceIntake && !sourceCanProceed) || (isBenchmark && !benchmarkCanProceed)}>{isSourceIntake ? sourceCanProceed ? '使用所选资料，进入诊断' : '至少选择一份已解析资料' : isBenchmark && !benchmarkCanProceed ? '至少选择 3 个对标案例' : '确认，进入下一步'}</button>
       </section>}
     </div>
     <form className="prompt-box" onSubmit={(event) => {

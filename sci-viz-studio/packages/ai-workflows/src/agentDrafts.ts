@@ -4,6 +4,7 @@ import { photoPlannerPrompt } from './prompts/productionDirector';
 import { sourceAnalystPrompt } from './prompts/projectProducer';
 import { researchCuratorPrompt } from './prompts/researchCurator';
 import { scienceReviewerPrompt } from './prompts/visualStrategist';
+import { aiReferencePrompt } from './prompts/aiReference';
 
 const prompts = {
   SOURCE_ANALYST: sourceAnalystPrompt,
@@ -12,8 +13,38 @@ const prompts = {
   PHOTO_PLANNER: photoPlannerPrompt,
 } satisfies Record<AgentRole, { version: string; instructions: string }>;
 
+const taskPrompts: Record<string, { version: string; instructions: string }> = {
+  GENERATE_AI_REFERENCES: aiReferencePrompt,
+};
+
 export function getPromptForAgent(role: AgentRole) {
   return prompts[role];
+}
+
+export function parseImagePrompts(body: string): string[] {
+  const matches = body.matchAll(/\[IMAGE_PROMPT\]\s*([\s\S]*?)\s*\[\/IMAGE_PROMPT\]/g);
+  return Array.from(matches, (m) => m[1]!.trim()).filter(Boolean);
+}
+
+export function buildEvidence(body: string, request: AgentDraftRequest) {
+  const sourceIds = request.upstreamArtifacts.filter((item) => item.nodeId.startsWith('source:')).map((item) => item.nodeId.slice(7));
+  return body.split('\n').map((line) => line.trim()).filter((line) => /^[-*]\s+/.test(line)).map((line) => {
+    const statement = line.replace(/^[-*]\s+/, '').slice(0, 2000);
+    const pending = /待确认|不确定|需要确认|需确认/.test(statement);
+    return {
+      statement,
+      basis: pending || sourceIds.length === 0 ? 'PENDING_CONFIRMATION' as const : 'SOURCE' as const,
+      sourceIds: pending ? [] : sourceIds,
+      confidence: pending ? 'LOW' as const : 'MEDIUM' as const,
+    };
+  });
+}
+
+function buildStructured(request: AgentDraftRequest, evidence: ReturnType<typeof buildEvidence>, blockerCount: number) {
+  if (request.agentRole === 'SOURCE_ANALYST') return { role: 'SOURCE_ANALYST' as const, observations: evidence, gaps: evidence.filter((item) => item.basis === 'PENDING_CONFIRMATION').map((item) => item.statement) };
+  if (request.agentRole === 'SCIENCE_REVIEWER') return { role: 'SCIENCE_REVIEWER' as const, reviewItems: evidence, unresolvedBlockers: blockerCount };
+  if (request.agentRole === 'RESEARCH_CURATOR') return { role: 'RESEARCH_CURATOR' as const, recommendations: evidence, selectionRationale: evidence.map((item) => item.statement) };
+  return { role: 'PHOTO_PLANNER' as const, directions: evidence, executionNotes: evidence.map((item) => item.statement) };
 }
 
 export function buildAgentUserPrompt(request: AgentDraftRequest): string {
@@ -100,11 +131,16 @@ export function createMockAgentDraft(request: AgentDraftRequest): AgentDraftResp
     ].join('\n'),
   };
 
+  const body = bodyByRole[request.agentRole];
+  const evidence = buildEvidence(body, request);
+  const blockerCount = request.agentRole === 'SCIENCE_REVIEWER' ? 2 : 0;
   return {
     label: `${request.outputLabel} v${request.revision}`,
-    body: bodyByRole[request.agentRole],
-    blockerCount: request.agentRole === 'SCIENCE_REVIEWER' ? 2 : 0,
+    body,
+    blockerCount,
     provider: 'mock',
+    evidence,
+    structured: buildStructured(request, evidence, blockerCount),
   };
 }
 
@@ -114,17 +150,21 @@ export async function generateAgentDraft(
 ): Promise<AgentDraftResponse> {
   if (!gateway) return createMockAgentDraft(request);
 
-  const prompt = getPromptForAgent(request.agentRole);
+  const prompt = taskPrompts[request.task] ?? getPromptForAgent(request.agentRole);
   const body = await gateway.generateText({
     systemPrompt: prompt.instructions,
     userPrompt: buildAgentUserPrompt(request),
     context: { projectId: request.projectId, promptVersion: prompt.version },
   });
 
+  const evidence = buildEvidence(body, request);
+  const blockerCount = request.agentRole === 'SCIENCE_REVIEWER' && body.includes('待确认') ? 1 : 0;
   return {
     label: `${request.outputLabel} v${request.revision}`,
     body,
-    blockerCount: request.agentRole === 'SCIENCE_REVIEWER' && body.includes('待确认') ? 1 : 0,
+    blockerCount,
     provider: 'deepseek',
+    evidence,
+    structured: buildStructured(request, evidence, blockerCount),
   };
 }

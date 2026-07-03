@@ -4,6 +4,8 @@ import type { ProjectGoal } from '@studio/contracts';
 import type { StudioFlowNode } from './adapter';
 import { getNodePreviewTone, summarizeNodeContent } from './nodePreview';
 import { parseMdToCards, type MdCard } from './parseMarkdownToCards';
+import { BenchmarkPanel } from '../benchmarks/BenchmarkPanel';
+import { PlanEditor } from '../plans/PlanEditor';
 
 const statusLabel = {
   LOCKED: '等待上一步',
@@ -408,7 +410,9 @@ export function WorkflowNodeCard({ data, selected }: NodeProps<StudioFlowNode>) 
           : !isSourceIntake ? <div className="node-visual" aria-hidden="true"><span className="node-glyph">{glyph[definition.kind]}</span></div> : null}
       </div>
       {chart ? <NodeInsightChart chart={chart} /> : evidence.length > 0 ? <NodeEvidenceStrip items={evidence} /> : null}
-      {definition.id === 'case-benchmark' ? <CaseBenchmarkGallery /> : null}
+      {definition.id === 'case-benchmark' && data.projectId ? <BenchmarkPanel projectId={data.projectId} {...(data.onBenchmarkSelectionChange ? { onSelectionChange: data.onBenchmarkSelectionChange } : {})} /> : null}
+      {definition.id === 'case-benchmark' && !data.projectId ? <CaseBenchmarkGallery /> : null}
+      {definition.id === 'photo-plan' && data.projectId ? <PlanEditor projectId={data.projectId} /> : null}
       {isSourceIntake ? <section className="source-node-summary"><strong>{state.summary}</strong><span>在右侧资料台账中上传、解析并选择本轮资料。</span></section> : null}
       {waiting
         ? <div className="node-waiting">
@@ -428,6 +432,18 @@ export function WorkflowNodeCard({ data, selected }: NodeProps<StudioFlowNode>) 
             <VisualDiagnosisArtifact md={state.artifactBody} />
           ) : !isSourceIntake && state.artifactBody ? (
             <div className="node-analysis-body">
+              {state.images && state.images.length > 0 && (
+                <section className="ai-reference-gallery" aria-label="AI 参考图">
+                  <div className="ai-reference-grid">
+                    {state.images.map((image, index) => (
+                      <figure key={index}>
+                        <img src={image.url} alt={image.prompt} loading="lazy" />
+                        <figcaption>{image.prompt}</figcaption>
+                      </figure>
+                    ))}
+                  </div>
+                </section>
+              )}
               <DiagnosisSection title={state.artifactLabel ?? definition.outputLabel} cards={parseMdToCards(state.artifactBody).filter((card) => card.content)} />
             </div>
           ) : !isSourceIntake && (

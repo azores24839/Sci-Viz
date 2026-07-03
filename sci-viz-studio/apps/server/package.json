@@ -10,7 +10,9 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@clerk/backend": "^3.10.0",
     "@fastify/multipart": "^10.0.0",
+    "@fastify/rate-limit": "^11.1.0",
     "@studio/ai-workflows": "*",
     "@studio/contracts": "*",
     "@studio/workflow-core": "*",

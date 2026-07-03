@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { agentMessages, agentProfiles, changxingProject } from '@studio/fixtures';
 import {
   completeNodeDraft,
@@ -11,12 +11,13 @@ import {
   type WorkflowNodeDefinition,
   type WorkflowNodeState,
 } from '@studio/workflow-core';
-import type { AgentDraftRequest, AgentDraftResponse, AgentRole, AgentTask, ProjectGoal, SourceDocument } from '@studio/contracts';
+import type { AgentDraftRequest, AgentRole, AgentTask, ProjectGoal, ProjectWorkflow, SourceDocument } from '@studio/contracts';
 import { WorkflowCanvas } from '../features/workflow-canvas/WorkflowCanvas';
 import { WorkflowFallbackList } from '../features/workflow-canvas/WorkflowFallbackList';
 import { AgentContextPanel } from '../features/workflow-canvas/AgentContextPanel';
 import { usableSelectedSources } from '../features/sources/sourceUtils';
-import { API_BASE_URL } from '../api/client';
+import { apiFetch } from '../api/client';
+import { useAgentJob } from '../features/agents/useAgentJob';
 
 const nodeAgent: Record<string, AgentRole> = {
   'source-intake': 'SOURCE_ANALYST',
@@ -134,64 +135,6 @@ function collectUpstreamArtifacts(states: WorkflowNodeState[]) {
     }));
 }
 
-async function requestAgentDraft(
-  projectId: string,
-  node: WorkflowNodeDefinition,
-  state: WorkflowNodeState,
-  states: WorkflowNodeState[],
-  sources: SourceDocument[],
-): Promise<AgentDraftResponse> {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 25000);
-  const request: AgentDraftRequest = {
-    projectId,
-    projectName: changxingProject.name,
-    nodeId: node.id,
-    nodeLabel: node.label,
-    agentRole: nodeAgent[node.id] ?? 'SOURCE_ANALYST',
-    task: nodeTask[node.id] ?? 'DIAGNOSE_VISUAL_STATE',
-    inputLabel: node.inputLabel,
-    outputLabel: node.outputLabel,
-    planLabel: state.planLabel ?? 'Plan A',
-    revision: state.revision,
-    ...(state.summary.startsWith('收到修改意见：') ? { revisionInstruction: state.summary.replace('收到修改意见：', '') } : {}),
-    upstreamArtifacts: [
-      ...collectUpstreamArtifacts(states),
-      ...usableSelectedSources(sources).map((source) => ({
-        nodeId: `source:${source.id}`,
-        label: `资料：${source.title}`,
-        body: [source.aiSummary, source.imageDescription, source.ocrText, source.extractedText, source.rawText].filter(Boolean).join('\n\n').slice(0, 16_000),
-      })),
-    ],
-  };
-
-  try {
-    const response = await fetch(`${API_BASE_URL}/agent-drafts`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-      signal: controller.signal,
-    });
-
-    const payload = await response.json() as {
-      success: boolean;
-      data?: AgentDraftResponse;
-      error?: { code: string; message: string };
-    };
-
-    if (!response.ok || !payload.success || !payload.data) {
-      throw new Error(payload.error?.message ?? `AGENT_DRAFT_REQUEST_FAILED:${response.status}`);
-    }
-
-    return payload.data;
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('AI_DRAFT_TIMEOUT');
-    throw error;
-  } finally {
-    window.clearTimeout(timeout);
-  }
-}
-
 function createInitialStudioStates(): WorkflowNodeState[] {
   return createDirectorWorkflowStates(researchPhotoWorkflowV1).map((state) => {
     if (state.nodeId !== 'source-intake') return state;
@@ -211,16 +154,12 @@ function createInitialStudioStates(): WorkflowNodeState[] {
   });
 }
 
-export function Studio() {
-  const [projectId] = useState(() => {
-    const key = 'sci-ai-studio-test-project';
-    const existing = window.localStorage.getItem(key);
-    if (existing) return existing;
-    const created = `${changxingProject.id}-${window.crypto.randomUUID()}`;
-    window.localStorage.setItem(key, created);
-    return created;
-  });
+export function Studio({ projectId }: { projectId: string }) {
   const [states, setStates] = useState<WorkflowNodeState[]>(createInitialStudioStates);
+  const [workflowLoaded, setWorkflowLoaded] = useState(false);
+  const [workflowRevision, setWorkflowRevision] = useState(0);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const persistedJobIds = useRef(new Set<string>());
   const currentNodeId = getCurrentDirectorNodeId(researchPhotoWorkflowV1, states);
   const [selectedNodeId, setSelectedNodeId] = useState(currentNodeId);
   const [revisionText, setRevisionText] = useState('');
@@ -228,7 +167,56 @@ export function Studio() {
   const [primaryPurposeId, setPrimaryPurposeId] = useState<ProjectGoal>('INDUSTRY_COLLABORATION');
   const [secondaryPurposeId, setSecondaryPurposeId] = useState<ProjectGoal | ''>('PUBLIC_COMMUNICATION');
   const [sources, setSources] = useState<SourceDocument[]>([]);
+  const [benchmarkSelectionCount, setBenchmarkSelectionCount] = useState(0);
   const usableSources = usableSelectedSources(sources);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadWorkflow = async () => {
+      try {
+        const response = await apiFetch(`/projects/${projectId}/workflow`);
+        const payload = await response.json() as { success: boolean; data?: ProjectWorkflow };
+        if (cancelled || !response.ok || !payload.data) return;
+        const restored = payload.data.states.map((state) => state.nodeId === 'source-intake' && state.status === 'READY'
+          ? { ...state, status: 'AWAITING_HUMAN' as const, progress: 50, summary: '请添加并选择至少一份已解析资料' }
+          : state) as WorkflowNodeState[];
+        setStates(restored); setWorkflowRevision(payload.data.revision);
+        setPrimaryPurposeId(payload.data.primaryGoal ?? 'INDUSTRY_COLLABORATION');
+        setSecondaryPurposeId(payload.data.secondaryGoal ?? '');
+      } finally {
+        if (!cancelled) setWorkflowLoaded(true);
+      }
+    };
+    void loadWorkflow();
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!workflowLoaded || workflowRevision < 1) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        const response = await apiFetch(`/projects/${projectId}/workflow`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ states, primaryGoal: primaryPurposeId, ...(secondaryPurposeId ? { secondaryGoal: secondaryPurposeId } : {}), expectedRevision: workflowRevision }),
+        });
+        const payload = await response.json() as { success: boolean; data?: ProjectWorkflow };
+        if (response.ok && payload.data) setWorkflowRevision(payload.data.revision);
+        if (response.status === 409) {
+          const latest = await apiFetch(`/projects/${projectId}/workflow`); const latestPayload = await latest.json() as { data?: ProjectWorkflow };
+          if (latestPayload.data) {
+            const retry = await apiFetch(`/projects/${projectId}/workflow`, {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ states, primaryGoal: primaryPurposeId, ...(secondaryPurposeId ? { secondaryGoal: secondaryPurposeId } : {}), expectedRevision: latestPayload.data.revision }),
+            });
+            const retried = await retry.json() as { data?: ProjectWorkflow };
+            if (retry.ok && retried.data) setWorkflowRevision(retried.data.revision);
+          }
+        }
+      } catch { /* keep the local state; the next change retries persistence */ }
+    }, 500);
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+  }, [states, primaryPurposeId, secondaryPurposeId, workflowLoaded, projectId]);
 
   useEffect(() => {
     if (currentNodeId) setSelectedNodeId(currentNodeId);
@@ -238,7 +226,7 @@ export function Studio() {
     let cancelled = false;
     const loadProvider = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/config/ai`);
+        const response = await apiFetch('/config/ai');
         const payload = await response.json() as { success: boolean; data?: { provider: 'mock' | 'deepseek'; configured: boolean } };
         if (cancelled) return;
         setAiProviderLabel(payload.data?.provider === 'deepseek' ? 'DeepSeek AI' : 'Mock AI');
@@ -280,11 +268,36 @@ export function Studio() {
   const currentState = states.find((state) => state.nodeId === currentNodeId);
   const currentStatus = currentState?.status;
   const currentRevision = currentState?.revision;
+  const activeDraft = useMemo<AgentDraftRequest>(() => ({
+    projectId,
+    projectName: changxingProject.name,
+    nodeId: currentNode?.id ?? 'idle',
+    nodeLabel: currentNode?.label ?? '等待中',
+    agentRole: nodeAgent[currentNode?.id ?? ''] ?? 'SOURCE_ANALYST',
+    task: nodeTask[currentNode?.id ?? ''] ?? 'DIAGNOSE_VISUAL_STATE',
+    inputLabel: currentNode?.inputLabel ?? '资料',
+    outputLabel: currentNode?.outputLabel ?? '结果',
+    planLabel: currentState?.planLabel ?? 'Plan A',
+    revision: currentState?.revision ?? 1,
+    ...(currentState?.lastUserInstruction ? { revisionInstruction: currentState.lastUserInstruction } : {}),
+    upstreamArtifacts: [
+      ...collectUpstreamArtifacts(states).filter((item) => item.nodeId !== currentNode?.id),
+      ...usableSelectedSources(sources).map((source) => ({
+        nodeId: `source:${source.id}`,
+        label: `资料：${source.title}`,
+        body: [source.aiSummary, source.imageDescription, source.ocrText, source.extractedText, source.rawText].filter(Boolean).join('\n\n').slice(0, 16_000),
+      })),
+    ],
+  }), [projectId, currentNode?.id, currentNode?.label, currentNode?.inputLabel, currentNode?.outputLabel, currentState?.planLabel, currentState?.revision, currentState?.lastUserInstruction, states, sources]);
+  const automated = currentNode?.kind === 'AGENT' || currentNode?.kind === 'OUTPUT';
+  const agentEnabled = workflowLoaded && automated && (currentStatus === 'RUNNING' || currentStatus === 'FAILED');
+  const activeJobKey = `${projectId}:${currentNode?.id ?? 'idle'}:v${currentRevision ?? 1}`;
+  const activeAgentJob = useAgentJob({ draft: activeDraft, idempotencyKey: activeJobKey, enabled: agentEnabled });
 
   useEffect(() => {
     if (!currentNode || currentStatus !== 'READY') return;
 
-    if (currentNode.kind === 'HUMAN_GATE') {
+    if (currentNode.kind !== 'AGENT' && currentNode.kind !== 'OUTPUT') {
       setStates((value) => value.map((state) => state.nodeId === currentNode.id
         ? {
             ...state,
@@ -301,45 +314,26 @@ export function Studio() {
   }, [currentNode, currentStatus]);
 
   useEffect(() => {
+    if (currentNode && currentStatus === 'FAILED' && (activeAgentJob.status === 'QUEUED' || activeAgentJob.status === 'RUNNING')) {
+      setStates((value) => markNodeRunning(value, currentNode.id));
+      return;
+    }
     if (!currentNode || currentStatus !== 'RUNNING') return;
-
-    let cancelled = false;
-
-    const generate = async () => {
-      try {
-        const draft = await requestAgentDraft(projectId, currentNode, currentState!, states, sources);
-        if (cancelled) return;
-        setStates((value) => {
-          const latest = value.find((state) => state.nodeId === currentNode.id);
-          if (!latest || latest.status !== 'RUNNING') return value;
-          return completeNodeDraft(value, currentNode.id, {
-            label: draft.label,
-            body: draft.body,
-            blockerCount: draft.blockerCount,
-          });
-        });
-      } catch {
-        if (cancelled) return;
-        setStates((value) => {
-          const latest = value.find((state) => state.nodeId === currentNode.id);
-          if (!latest || latest.status !== 'RUNNING') return value;
-          const fallback = createDemoArtifact(currentNode, latest);
-          return completeNodeDraft(value, currentNode.id, {
-            ...fallback,
-            body: fallback.body,
-            blockerCount: fallback.blockerCount,
-          });
+    if (activeAgentJob.status === 'COMPLETED' && activeAgentJob.job?.result) {
+      const result = activeAgentJob.job.result;
+      setStates((value) => completeNodeDraft(value, currentNode.id, { label: result.label, body: result.body, blockerCount: result.blockerCount, ...(result.images ? { images: result.images } : {}) }));
+      if (!persistedJobIds.current.has(activeAgentJob.job.id)) {
+        persistedJobIds.current.add(activeAgentJob.job.id);
+        void apiFetch(`/projects/${projectId}/artifacts`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nodeId: currentNode.id, label: result.label, body: result.body, blockerCount: result.blockerCount, createdBy: 'AGENT' }),
         });
       }
-    };
-
-    const timer = window.setTimeout(() => void generate(), 450);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [currentNode, currentState, currentStatus, currentRevision, states, sources, projectId]);
+    }
+    if (activeAgentJob.status === 'FAILED') {
+      setStates((value) => value.map((state) => state.nodeId === currentNode.id ? { ...state, status: 'FAILED', progress: 0, summary: activeAgentJob.job?.error?.message ?? activeAgentJob.error ?? 'AI 任务失败，请查看原因后重试。', updatedAt: new Date().toISOString() } : state));
+    }
+  }, [activeAgentJob.status, activeAgentJob.job, activeAgentJob.error, currentNode, currentStatus, projectId]);
 
   const selectedNode = researchPhotoWorkflowV1.nodes.find((node) => node.id === selectedNodeId) ?? researchPhotoWorkflowV1.nodes[0]!;
   const selectedState = states.find((state) => state.nodeId === selectedNode.id) ?? states[0]!;
@@ -359,6 +353,7 @@ export function Studio() {
 
   const confirmSelectedNode = () => {
     if (selectedNode.id === 'source-intake' && usableSources.length === 0) return;
+    if (selectedNode.id === 'case-benchmark' && benchmarkSelectionCount < 3) return;
     setStates((value) => confirmNodeAndQueueNext(researchPhotoWorkflowV1, value, selectedNode.id));
     setRevisionText('');
   };
@@ -378,11 +373,14 @@ export function Studio() {
     <main className="studio-body">
       <section className="canvas-panel" aria-label="项目工作流">
         <WorkflowCanvas
+          projectId={projectId}
           template={researchPhotoWorkflowV1}
           states={states}
           selectedNodeId={selectedNodeId}
           onSelectNode={setSelectedNodeId}
           onConfirmNode={(nodeId) => {
+            if (nodeId === 'source-intake' && usableSources.length === 0) return;
+            if (nodeId === 'case-benchmark' && benchmarkSelectionCount < 3) return;
             setSelectedNodeId(nodeId);
             setStates((value) => confirmNodeAndQueueNext(researchPhotoWorkflowV1, value, nodeId));
             setRevisionText('');
@@ -397,6 +395,7 @@ export function Studio() {
           purposeOptions={shootingPurposeOptions}
           onSetPrimaryPurpose={setPrimaryPurpose}
           onSetSecondaryPurpose={setSecondaryPurpose}
+          onBenchmarkSelectionChange={setBenchmarkSelectionCount}
         />
         <WorkflowFallbackList template={researchPhotoWorkflowV1} states={states} selectedNodeId={selectedNodeId} onSelectNode={setSelectedNodeId} />
       </section>
@@ -417,6 +416,11 @@ export function Studio() {
         onSetSecondaryPurpose={setSecondaryPurpose}
         projectId={projectId}
         sourceCanProceed={usableSources.length > 0}
+        benchmarkCanProceed={benchmarkSelectionCount >= 3}
+        activeJob={selectedNode.id === currentNode?.id ? activeAgentJob.job : null}
+        activeJobStatus={selectedNode.id === currentNode?.id ? activeAgentJob.status : 'IDLE'}
+        activeJobError={selectedNode.id === currentNode?.id ? activeAgentJob.error : null}
+        onRetryJob={() => { void activeAgentJob.retry(); }}
         onSourcesChange={(nextSources) => {
           setSources(nextSources);
           const selected = usableSelectedSources(nextSources);

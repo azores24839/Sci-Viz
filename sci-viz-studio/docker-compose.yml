@@ -21,9 +21,17 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
+      AUTH_MODE: clerk
+      AUTH_PROJECT_SECRET: ${AUTH_PROJECT_SECRET}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
+      CLERK_JWT_KEY: ${CLERK_JWT_KEY:-}
       PORT: 3011
       PUBLIC_API_URL: ${PUBLIC_API_URL}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+      API_RATE_LIMIT_PER_MINUTE: ${API_RATE_LIMIT_PER_MINUTE:-120}
+      USER_STORAGE_LIMIT_MB: ${USER_STORAGE_LIMIT_MB:-500}
+      USER_SOURCE_LIMIT: ${USER_SOURCE_LIMIT:-50}
+      USER_DAILY_AI_LIMIT: ${USER_DAILY_AI_LIMIT:-50}
       DATABASE_URL: postgres://studio:${POSTGRES_PASSWORD}@postgres:5432/studio
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
       DASHSCOPE_API_URL: ${DASHSCOPE_API_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
@@ -32,6 +40,9 @@ services:
       OPENROUTER_API_URL: ${OPENROUTER_API_URL:-https://openrouter.ai/api/v1/chat/completions}
       OPENROUTER_QWEN_MODEL: ${OPENROUTER_QWEN_MODEL:-qwen/qwen2.5-vl-72b-instruct}
       SOURCE_WORKER_CONCURRENCY: ${SOURCE_WORKER_CONCURRENCY:-2}
+      AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-2}
+      CASE_HUB_API_URL: ${CASE_HUB_API_URL:-}
+      CASE_HUB_STUDIO_KEY: ${CASE_HUB_STUDIO_KEY:-}
       PDF_OCR_MAX_PAGES: ${PDF_OCR_MAX_PAGES:-12}
       OSS_REGION: ${OSS_REGION}
       OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID}
@@ -45,6 +56,8 @@ services:
     build:
       context: .
       dockerfile: deploy/Dockerfile.web
+      args:
+        VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY}
     restart: unless-stopped
     ports:
       - "80:80"

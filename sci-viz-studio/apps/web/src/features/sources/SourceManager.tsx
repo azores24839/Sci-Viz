@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SourceDocument } from '@studio/contracts';
-import { API_BASE_URL } from '../../api/client';
-
-const API = API_BASE_URL;
+import { apiFetch, notifyUsageChanged } from '../../api/client';
 const statusCopy: Record<SourceDocument['status'], string> = {
   UPLOADING: '上传中', QUEUED: '等待解析', PARSING: '提取内容', SUMMARIZING: 'AI 总结', READY: '已就绪', READY_WITHOUT_SUMMARY: '摘要待重试', FAILED: '需要处理',
 };
@@ -26,7 +24,7 @@ export function SourceManager({ projectId, onSourcesChange }: { projectId: strin
   const fileInput = useRef<HTMLInputElement>(null);
 
   const load = async () => {
-    const payload = await readPayload<{ success: true; data: SourceDocument[] }>(await fetch(`${API}/projects/${projectId}/sources`));
+    const payload = await readPayload<{ success: true; data: SourceDocument[] }>(await apiFetch(`/projects/${projectId}/sources`));
     setSources(payload.data); onSourcesChange(payload.data);
     setActiveId((current) => current && payload.data.some((item) => item.id === current) ? current : payload.data[0]?.id);
   };
@@ -47,17 +45,17 @@ export function SourceManager({ projectId, onSourcesChange }: { projectId: strin
       for (const file of Array.from(files)) {
         const extension = file.name.split('.').pop()?.toLowerCase();
         const mimeType = file.type || (extension === 'pdf' ? 'application/pdf' : extension === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : extension === 'png' ? 'image/png' : 'image/jpeg');
-        const init = await readPayload<{ success: true; data: { source: SourceDocument; storageMode: 'local' | 'oss'; uploadUrl?: string } }>(await fetch(`${API}/source-uploads`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, fileName: file.name, mimeType, sizeBytes: file.size }) }));
+        const init = await readPayload<{ success: true; data: { source: SourceDocument; storageMode: 'local' | 'oss'; uploadUrl?: string } }>(await apiFetch('/source-uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, fileName: file.name, mimeType, sizeBytes: file.size }) }));
         if (init.data.storageMode === 'oss' && init.data.uploadUrl) {
           const uploaded = await fetch(init.data.uploadUrl, { method: 'PUT', headers: { 'Content-Type': mimeType }, body: file });
           if (!uploaded.ok) throw new Error(`“${file.name}”上传到 OSS 失败。`);
-          await readPayload(await fetch(`${API}/source-uploads/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, sourceId: init.data.source.id }) }));
+          await readPayload(await apiFetch('/source-uploads/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, sourceId: init.data.source.id }) }));
         } else {
           const form = new FormData(); form.append('projectId', projectId); form.append('sourceId', init.data.source.id); form.append('file', file.type ? file : new File([file], file.name, { type: mimeType }));
-          await readPayload(await fetch(`${API}/source-uploads/local`, { method: 'POST', body: form }));
+          await readPayload(await apiFetch('/source-uploads/local', { method: 'POST', body: form }));
         }
       }
-      await load();
+      await load(); notifyUsageChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : '上传失败'); }
     finally { setBusy(false); if (fileInput.current) fileInput.current.value = ''; }
   };
@@ -65,23 +63,23 @@ export function SourceManager({ projectId, onSourcesChange }: { projectId: strin
   const createText = async () => {
     if (!textBody.trim()) return;
     setBusy(true); setError('');
-    try { await readPayload(await fetch(`${API}/sources/text`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, title: textTitle || undefined, text: textBody }) })); setTextTitle(''); setTextBody(''); await load(); }
+    try { await readPayload(await apiFetch('/sources/text', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, title: textTitle || undefined, text: textBody }) })); setTextTitle(''); setTextBody(''); await load(); notifyUsageChanged(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : '文字资料保存失败'); } finally { setBusy(false); }
   };
 
   const createWeb = async () => {
     if (!url.trim()) return;
     setBusy(true); setError('');
-    try { await readPayload(await fetch(`${API}/sources/web`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, url }) })); setUrl(''); await load(); }
+    try { await readPayload(await apiFetch('/sources/web', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, url }) })); setUrl(''); await load(); notifyUsageChanged(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : '网页资料添加失败'); } finally { setBusy(false); }
   };
 
   const toggle = async (source: SourceDocument) => {
-    try { await readPayload(await fetch(`${API}/sources/${source.id}/selection`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selected: !source.selected }) })); await load(); }
+    try { await readPayload(await apiFetch(`/sources/${source.id}/selection`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selected: !source.selected }) })); await load(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : '选择状态更新失败'); }
   };
-  const retry = async (source: SourceDocument) => { try { await readPayload(await fetch(`${API}/sources/${source.id}/retry`, { method: 'POST' })); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : '重试失败'); } };
-  const remove = async (source: SourceDocument) => { if (!window.confirm(`删除“${source.title}”？原文件和解析结果都会被移除。`)) return; try { await fetch(`${API}/sources/${source.id}`, { method: 'DELETE' }); await load(); } catch { setError('删除失败'); } };
+  const retry = async (source: SourceDocument) => { try { await readPayload(await apiFetch(`/sources/${source.id}/retry`, { method: 'POST' })); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : '重试失败'); } };
+  const remove = async (source: SourceDocument) => { if (!window.confirm(`删除“${source.title}”？原文件和解析结果都会被移除。`)) return; try { await apiFetch(`/sources/${source.id}`, { method: 'DELETE' }); await load(); notifyUsageChanged(); } catch { setError('删除失败'); } };
 
   return <div className="source-manager">
     <div className="source-mode-tabs" role="tablist" aria-label="添加资料方式">

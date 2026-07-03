@@ -4,7 +4,8 @@ import type { SourceDocument } from '@studio/contracts';
 import type { ObjectStorage } from './storage.js';
 import type { SourceRepository } from './repository.js';
 import { fetchWebSource } from './webFetcher.js';
-import { summarizeWithQwen } from './qwen.js';
+import { isQwenConfigured, summarizeWithQwen } from './qwen.js';
+import type { UsageLimiter } from '../usage.js';
 
 const MAX_TEXT = 50_000;
 const clipped = (text: string) => ({ text: text.slice(0, MAX_TEXT), truncated: text.length > MAX_TEXT });
@@ -13,7 +14,7 @@ export class SourceProcessor {
   private running = 0;
   private pending: string[] = [];
   private scheduled = new Set<string>();
-  constructor(private repo: SourceRepository, private storage: ObjectStorage, private env: NodeJS.ProcessEnv, private concurrency = 2) {}
+  constructor(private repo: SourceRepository, private storage: ObjectStorage, private env: NodeJS.ProcessEnv, private concurrency = 2, private usage?: UsageLimiter) {}
 
   async resume() { for (const source of await this.repo.listPending()) this.enqueue(source.id); }
   enqueue(id: string) { if (this.scheduled.has(id)) return; this.scheduled.add(id); this.pending.push(id); this.pump(); }
@@ -33,7 +34,10 @@ export class SourceProcessor {
         ? { mimeType: current.mimeType ?? 'image/jpeg', buffer: await this.storage.get(current.objectKey) }
         : undefined;
       let result;
-      try { result = await summarizeWithQwen({ env: this.env, kind: current.kind, title: current.title, text, ...(image ? { image } : {}) }); }
+      try {
+        if (isQwenConfigured(this.env)) await this.usage?.consume(current.ownerUserId ?? current.projectId);
+        result = await summarizeWithQwen({ env: this.env, kind: current.kind, title: current.title, text, ...(image ? { image } : {}) });
+      }
       catch (error) { console.warn('[sources] Qwen summary failed', error); }
       const completed: SourceDocument = {
         ...current,
@@ -79,6 +83,7 @@ export class SourceProcessor {
             const screenshots = await parser.getScreenshot({ first: pagesToRead, scale: 1.4, imageBuffer: true });
             const pageTexts: string[] = [];
             for (const page of screenshots.pages) {
+              if (isQwenConfigured(this.env)) await this.usage?.consume(source.ownerUserId ?? source.projectId);
               const ocr = await summarizeWithQwen({
                 env: this.env,
                 kind: 'IMAGE',

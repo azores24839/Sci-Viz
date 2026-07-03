@@ -49,6 +49,7 @@ export interface WorkflowNodeState {
   summary: string;
   artifactLabel?: string;
   artifactBody?: string;
+  images?: Array<{ url: string; prompt: string }>;
   revision: number;
   planLabel?: string;
   lastUserInstruction?: string;

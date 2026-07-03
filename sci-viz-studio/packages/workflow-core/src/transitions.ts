@@ -93,7 +93,7 @@ export function markNodeRunning(states: WorkflowNodeState[], nodeId: string): Wo
 export function completeNodeDraft(
   states: WorkflowNodeState[],
   nodeId: string,
-  artifact: { label: string; body: string; blockerCount?: number },
+  artifact: { label: string; body: string; blockerCount?: number; images?: Array<{ url: string; prompt: string }> },
 ): WorkflowNodeState[] {
   return states.map((state) => state.nodeId === nodeId
     ? {
@@ -104,6 +104,7 @@ export function completeNodeDraft(
         summary: '草案已生成，等待你确认',
         artifactLabel: artifact.label,
         artifactBody: artifact.body,
+        ...(artifact.images ? { images: artifact.images } : {}),
         updatedAt: nowIso(),
       }
     : state);

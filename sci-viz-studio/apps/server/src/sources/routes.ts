@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { fileTypeFromBuffer } from 'file-type';
 import {
   CompleteUploadRequestSchema,
@@ -15,7 +15,6 @@ import type { ObjectStorage } from './storage.js';
 import type { SourceProcessor } from './processor.js';
 import { canonicalizeUrl } from './webFetcher.js';
 
-const MAX_FILES_PER_PROJECT = 50;
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const allowed = new Map<string, SourceKind>([
   ['application/pdf', 'PDF'],
@@ -34,24 +33,30 @@ async function withPreview(source: SourceDocument, storage: ObjectStorage) {
   return publicSource(source, preview);
 }
 
-async function assertCapacity(repo: SourceRepository, projectId: string) {
-  if ((await repo.list(projectId)).length >= MAX_FILES_PER_PROJECT) throw new Error('SOURCE_LIMIT_REACHED');
+async function assertCapacity(repo: SourceRepository, projectId: string, additionalBytes = 0, maxStorageBytes = 500 * 1024 * 1024, maxSources = 50) {
+  const sources = await repo.list(projectId);
+  if (sources.length >= maxSources) throw new Error('SOURCE_LIMIT_REACHED');
+  if (sources.reduce((total, source) => total + (source.sizeBytes ?? 0), 0) + additionalBytes > maxStorageBytes) throw new Error('USER_STORAGE_QUOTA_EXCEEDED');
 }
 
-export async function registerSourceRoutes(app: FastifyInstance, deps: { repo: SourceRepository; storage: ObjectStorage; processor: SourceProcessor }) {
-  const { repo, storage, processor } = deps;
+export async function registerSourceRoutes(app: FastifyInstance, deps: { repo: SourceRepository; storage: ObjectStorage; processor: SourceProcessor; ownsProject: (userId: string, projectId: string) => Promise<boolean>; maxStorageBytes?: number; maxSources?: number }) {
+  const { repo, storage, processor, ownsProject } = deps;
+  const owns = (request: { authUserId: string }, projectId: string) => ownsProject(request.authUserId, projectId);
+  const notFound = (reply: FastifyReply) => reply.code(404).send({ success: false, error: { code: 'PROJECT_NOT_FOUND', message: '项目不存在。' } });
 
-  app.get('/api/v1/projects/:projectId/sources', async (request) => {
+  app.get('/api/v1/projects/:projectId/sources', async (request, reply) => {
     const { projectId } = request.params as { projectId: string };
+    if (!await owns(request, projectId)) return notFound(reply);
     return { success: true, data: await Promise.all((await repo.list(projectId)).map((source) => withPreview(source, storage))) };
   });
 
   app.post('/api/v1/sources/text', async (request, reply) => {
     const parsed = CreateTextSourceRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ success: false, error: { code: 'INVALID_TEXT_SOURCE', message: '文字资料不能为空。' } });
-    try { await assertCapacity(repo, parsed.data.projectId); } catch { return reply.code(409).send({ success: false, error: { code: 'SOURCE_LIMIT_REACHED', message: '每个项目最多添加 50 份资料。' } }); }
+    if (!await owns(request, parsed.data.projectId)) return notFound(reply);
+    try { await assertCapacity(repo, parsed.data.projectId, 0, deps.maxStorageBytes, deps.maxSources); } catch { return reply.code(429).send({ success: false, error: { code: 'USER_QUOTA_EXCEEDED', message: '资料数量或存储额度已用完。' } }); }
     const stamp = now();
-    const source: SourceDocument = { id: randomUUID(), projectId: parsed.data.projectId, kind: 'TEXT', status: 'QUEUED', selected: true, title: parsed.data.title?.trim() || `文字资料 ${new Date().toLocaleDateString('zh-CN')}`, rawText: parsed.data.text, truncated: false, createdAt: stamp, updatedAt: stamp };
+    const source: SourceDocument = { id: randomUUID(), projectId: parsed.data.projectId, ownerUserId: request.authUserId, kind: 'TEXT', status: 'QUEUED', selected: true, title: parsed.data.title?.trim() || `文字资料 ${new Date().toLocaleDateString('zh-CN')}`, rawText: parsed.data.text, truncated: false, createdAt: stamp, updatedAt: stamp };
     await repo.save(source); processor.enqueue(source.id);
     return reply.code(201).send({ success: true, data: publicSource(source) });
   });
@@ -59,11 +64,12 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: { repo: S
   app.post('/api/v1/sources/web', async (request, reply) => {
     const parsed = CreateWebSourceRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ success: false, error: { code: 'INVALID_WEB_SOURCE', message: '请输入有效的公开网页地址。' } });
-    try { await assertCapacity(repo, parsed.data.projectId); } catch { return reply.code(409).send({ success: false, error: { code: 'SOURCE_LIMIT_REACHED', message: '每个项目最多添加 50 份资料。' } }); }
+    if (!await owns(request, parsed.data.projectId)) return notFound(reply);
+    try { await assertCapacity(repo, parsed.data.projectId, 0, deps.maxStorageBytes, deps.maxSources); } catch { return reply.code(429).send({ success: false, error: { code: 'USER_QUOTA_EXCEEDED', message: '资料数量或存储额度已用完。' } }); }
     const canonicalUrl = canonicalizeUrl(parsed.data.url);
     if ((await repo.list(parsed.data.projectId)).some((item) => item.canonicalUrl === canonicalUrl)) return reply.code(409).send({ success: false, error: { code: 'SOURCE_DUPLICATE_URL', message: '这个网页已经添加过。' } });
     const stamp = now();
-    const source: SourceDocument = { id: randomUUID(), projectId: parsed.data.projectId, kind: 'WEB', status: 'QUEUED', selected: true, title: new URL(parsed.data.url).hostname, sourceUrl: parsed.data.url, canonicalUrl, truncated: false, createdAt: stamp, updatedAt: stamp };
+    const source: SourceDocument = { id: randomUUID(), projectId: parsed.data.projectId, ownerUserId: request.authUserId, kind: 'WEB', status: 'QUEUED', selected: true, title: new URL(parsed.data.url).hostname, sourceUrl: parsed.data.url, canonicalUrl, truncated: false, createdAt: stamp, updatedAt: stamp };
     await repo.save(source); processor.enqueue(source.id);
     return reply.code(201).send({ success: true, data: publicSource(source) });
   });
@@ -71,12 +77,13 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: { repo: S
   app.post('/api/v1/source-uploads', async (request, reply) => {
     const parsed = CreateUploadRequestSchema.safeParse(request.body);
     if (!parsed.success || !allowed.has(parsed.data?.mimeType ?? '')) return reply.code(400).send({ success: false, error: { code: 'UNSUPPORTED_FILE', message: '仅支持 PDF、DOCX、PNG 和 JPG。' } });
-    try { await assertCapacity(repo, parsed.data.projectId); } catch { return reply.code(409).send({ success: false, error: { code: 'SOURCE_LIMIT_REACHED', message: '每个项目最多添加 50 份资料。' } }); }
+    if (!await owns(request, parsed.data.projectId)) return notFound(reply);
+    try { await assertCapacity(repo, parsed.data.projectId, parsed.data.sizeBytes, deps.maxStorageBytes, deps.maxSources); } catch { return reply.code(429).send({ success: false, error: { code: 'USER_QUOTA_EXCEEDED', message: '资料数量或存储额度已用完。' } }); }
     const id = randomUUID();
     const extension = parsed.data.fileName.split('.').pop()?.replace(/[^a-z0-9]/gi, '').toLowerCase() || 'bin';
-    const objectKey = `projects/${parsed.data.projectId}/sources/${id}/original.${extension}`;
+    const objectKey = `users/${request.authUserId}/projects/${parsed.data.projectId}/sources/${id}/original.${extension}`;
     const stamp = now();
-    const source: SourceDocument = { id, projectId: parsed.data.projectId, kind: allowed.get(parsed.data.mimeType)!, status: 'UPLOADING', selected: true, title: parsed.data.fileName.replace(/\.[^.]+$/, ''), originalName: parsed.data.fileName, mimeType: parsed.data.mimeType, sizeBytes: parsed.data.sizeBytes, objectKey, truncated: false, createdAt: stamp, updatedAt: stamp };
+    const source: SourceDocument = { id, projectId: parsed.data.projectId, ownerUserId: request.authUserId, kind: allowed.get(parsed.data.mimeType)!, status: 'UPLOADING', selected: true, title: parsed.data.fileName.replace(/\.[^.]+$/, ''), originalName: parsed.data.fileName, mimeType: parsed.data.mimeType, sizeBytes: parsed.data.sizeBytes, objectKey, truncated: false, createdAt: stamp, updatedAt: stamp };
     await repo.save(source);
     const uploadUrl = await storage.signedPutUrl(objectKey, parsed.data.mimeType);
     return reply.code(201).send({ success: true, data: { source: publicSource(source), storageMode: storage.mode, uploadUrl } });
@@ -88,6 +95,7 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: { repo: S
     const projectId = file?.fields.projectId && 'value' in file.fields.projectId ? String(file.fields.projectId.value) : '';
     const sourceId = file?.fields.sourceId && 'value' in file.fields.sourceId ? String(file.fields.sourceId.value) : '';
     if (!file || !projectId || !sourceId) return reply.code(400).send({ success: false, error: { code: 'INVALID_UPLOAD', message: '缺少文件或项目标识。' } });
+    if (!await owns(request, projectId)) return notFound(reply);
     const pendingSource = await repo.get(sourceId);
     if (!pendingSource || pendingSource.projectId !== projectId || pendingSource.status !== 'UPLOADING' || !pendingSource.objectKey) return reply.code(404).send({ success: false, error: { code: 'SOURCE_NOT_FOUND', message: '没有找到待上传的资料记录。' } });
     const buffer = await file.toBuffer();
@@ -109,6 +117,7 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: { repo: S
   app.post('/api/v1/source-uploads/complete', async (request, reply) => {
     const parsed = CompleteUploadRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ success: false, error: { code: 'INVALID_UPLOAD_COMPLETION', message: '上传确认信息无效。' } });
+    if (!await owns(request, parsed.data.projectId)) return notFound(reply);
     const source = await repo.get(parsed.data.sourceId);
     if (!source || source.projectId !== parsed.data.projectId || !source.objectKey) return reply.code(404).send({ success: false, error: { code: 'SOURCE_NOT_FOUND', message: '没有找到待确认的资料。' } });
     const buffer = await storage.get(source.objectKey);
@@ -129,18 +138,21 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: { repo: S
   app.patch('/api/v1/sources/:id/selection', async (request, reply) => {
     const parsed = UpdateSourceSelectionRequestSchema.safeParse(request.body); const { id } = request.params as { id: string }; const source = await repo.get(id);
     if (!parsed.success || !source) return reply.code(404).send({ success: false, error: { code: 'SOURCE_NOT_FOUND', message: '资料不存在。' } });
+    if (!await owns(request, source.projectId)) return notFound(reply);
     const updated = { ...source, selected: parsed.data.selected, updatedAt: now() }; await repo.save(updated); return { success: true, data: await withPreview(updated, storage) };
   });
 
   app.post('/api/v1/sources/:id/retry', async (request, reply) => {
     const { id } = request.params as { id: string }; const source = await repo.get(id);
     if (!source) return reply.code(404).send({ success: false, error: { code: 'SOURCE_NOT_FOUND', message: '资料不存在。' } });
+    if (!await owns(request, source.projectId)) return notFound(reply);
     const queued = { ...source, status: 'QUEUED' as const, updatedAt: now() }; await repo.save(queued); processor.enqueue(id); return { success: true, data: await withPreview(queued, storage) };
   });
 
   app.delete('/api/v1/sources/:id', async (request, reply) => {
     const { id } = request.params as { id: string }; const source = await repo.get(id);
     if (!source) return reply.code(404).send({ success: false, error: { code: 'SOURCE_NOT_FOUND', message: '资料不存在。' } });
+    if (!await owns(request, source.projectId)) return notFound(reply);
     if (source.objectKey) await storage.remove(source.objectKey); await repo.remove(id); return reply.code(204).send();
   });
 

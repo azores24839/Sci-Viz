@@ -17,6 +17,7 @@ import { poolRouter } from './routes/pool.js';
 import { collectionRouter } from './routes/collection.js';
 import { processingRouter } from './routes/processing.js';
 import { insightsRouter } from './routes/insights.js';
+import { studioRouter } from './routes/studio.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -67,6 +68,7 @@ if (process.argv.includes('--seed-videos')) {
   });
 
   app.use('/api/auth', authRouter);
+  app.use('/api/studio', studioRouter);
   app.use('/api', authMiddleware);
   app.use('/api', capturesRouter);
   app.use('/api', casesRouter);

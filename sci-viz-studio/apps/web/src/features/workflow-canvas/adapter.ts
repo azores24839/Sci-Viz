@@ -5,6 +5,7 @@ import type { WorkflowNodeDefinition, WorkflowNodeState, WorkflowTemplate } from
 export interface StudioNodeData extends Record<string, unknown> {
   definition: WorkflowNodeDefinition;
   state: WorkflowNodeState;
+  projectId?: string;
   onConfirm?: () => void;
   onRevise?: () => void;
   primaryPurposeId?: ProjectGoal;
@@ -12,6 +13,7 @@ export interface StudioNodeData extends Record<string, unknown> {
   purposeOptions?: Array<{ id: ProjectGoal; label: string; description: string }>;
   onSetPrimaryPurpose?: (purposeId: ProjectGoal) => void;
   onSetSecondaryPurpose?: (purposeId: ProjectGoal | '') => void;
+  onBenchmarkSelectionChange?: (count: number) => void;
 }
 
 export type StudioFlowNode = Node<StudioNodeData, 'workflow'>;

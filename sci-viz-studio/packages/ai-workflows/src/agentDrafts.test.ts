@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentDraftRequest } from '@studio/contracts';
-import { buildAgentUserPrompt, createMockAgentDraft, generateAgentDraft, getPromptForAgent } from './agentDrafts';
+import { buildAgentUserPrompt, buildEvidence, createMockAgentDraft, generateAgentDraft, getPromptForAgent } from './agentDrafts';
 import type { ModelGateway } from './modelGateway';
 
 const request: AgentDraftRequest = {
@@ -53,6 +53,8 @@ describe('agent draft generation', () => {
       body: '真实模型草案',
       blockerCount: 0,
       provider: 'deepseek',
+      evidence: [],
+      structured: { role: 'SOURCE_ANALYST', observations: [], gaps: [] },
     });
   });
 
@@ -61,5 +63,18 @@ describe('agent draft generation', () => {
       label: '视觉现状诊断 v2',
       provider: 'mock',
     });
+  });
+
+  it('marks unsupported conclusions as pending instead of confirmed facts', () => {
+    const evidence = buildEvidence('- 已确认结论\n- 设备状态待确认', request);
+    expect(evidence).toEqual([
+      expect.objectContaining({ statement: '已确认结论', basis: 'PENDING_CONFIRMATION' }),
+      expect.objectContaining({ statement: '设备状态待确认', basis: 'PENDING_CONFIRMATION' }),
+    ]);
+  });
+
+  it('uses selected source ids as the basis for supported conclusions', () => {
+    const withSource = { ...request, upstreamArtifacts: [{ nodeId: 'source:source-1', label: '资料', body: '内容' }] };
+    expect(buildEvidence('- 资料中的结论', withSource)[0]).toMatchObject({ basis: 'SOURCE', sourceIds: ['source-1'] });
   });
 });

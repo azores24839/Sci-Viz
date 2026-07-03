@@ -13,6 +13,7 @@ import { toFlowElements, type StudioFlowNode } from './adapter';
 import { WorkflowNodeCard } from './WorkflowNodeCard';
 
 interface WorkflowCanvasProps {
+  projectId: string;
   template: WorkflowTemplate;
   states: WorkflowNodeState[];
   selectedNodeId: string;
@@ -24,11 +25,12 @@ interface WorkflowCanvasProps {
   purposeOptions: Array<{ id: ProjectGoal; label: string; description: string }>;
   onSetPrimaryPurpose: (purposeId: ProjectGoal) => void;
   onSetSecondaryPurpose: (purposeId: ProjectGoal | '') => void;
+  onBenchmarkSelectionChange: (count: number) => void;
 }
 
 const nodeTypes = { workflow: WorkflowNodeCard };
 
-export function WorkflowCanvas({ template, states, selectedNodeId, onSelectNode, onConfirmNode, onReviseNode, primaryPurposeId, secondaryPurposeId, purposeOptions, onSetPrimaryPurpose, onSetSecondaryPurpose }: WorkflowCanvasProps) {
+export function WorkflowCanvas({ projectId, template, states, selectedNodeId, onSelectNode, onConfirmNode, onReviseNode, primaryPurposeId, secondaryPurposeId, purposeOptions, onSetPrimaryPurpose, onSetSecondaryPurpose, onBenchmarkSelectionChange }: WorkflowCanvasProps) {
   const initial = useMemo(() => toFlowElements(template, states), [template, states]);
   const [nodes, setNodes] = useState<StudioFlowNode[]>(initial.nodes);
   const [locked, setLocked] = useState(false);
@@ -59,6 +61,7 @@ export function WorkflowCanvas({ template, states, selectedNodeId, onSelectNode,
           ...node,
           data: {
             ...node.data,
+            projectId,
             onConfirm: () => onConfirmNode(node.id),
             onRevise: () => onReviseNode(node.id, ''),
             primaryPurposeId,
@@ -66,6 +69,7 @@ export function WorkflowCanvas({ template, states, selectedNodeId, onSelectNode,
             purposeOptions,
             onSetPrimaryPurpose,
             onSetSecondaryPurpose,
+            onBenchmarkSelectionChange,
           },
           selected: node.id === selectedNodeId,
           draggable: !locked,
