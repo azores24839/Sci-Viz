@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
-  CreateReviewLinkRequestSchema, SubmitReviewResponseRequestSchema,
+  CreateReviewLinkRequestSchema, SubmitReviewResponseRequestSchema, UpdateReviewResponseStatusRequestSchema,
   type PlanReadiness, type PublicReviewSnapshot, type ReviewLink, type ReviewResponse,
 } from '@studio/contracts';
 import type { PlanRepository } from '../plans/repository.js';
@@ -59,6 +59,15 @@ export async function registerReviewRoutes(app: FastifyInstance, deps: { reviews
   app.get('/api/v1/projects/:id/review-responses', async (request, reply) => {
     const projectId = (request.params as { id: string }).id; if (!await owns(deps.workspace, request, projectId)) return missingProject(reply);
     return { success: true, data: { responses: await deps.reviews.listResponses(projectId), audit: await deps.reviews.listAudit(projectId) } };
+  });
+
+  app.patch('/api/v1/projects/:id/review-responses/:responseId', async (request, reply) => {
+    const { id: projectId, responseId } = request.params as { id: string; responseId: string };
+    if (!await owns(deps.workspace, request, projectId)) return missingProject(reply);
+    const parsed = UpdateReviewResponseStatusRequestSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ success: false, error: { code: 'INVALID_REVIEW_STATUS', message: '处理状态无效。' } });
+    const updated = await deps.reviews.updateResponseStatus(responseId, projectId, parsed.data.status);
+    return updated ? { success: true, data: updated } : reply.code(404).send({ success: false, error: { code: 'REVIEW_RESPONSE_NOT_FOUND', message: '审核意见不存在。' } });
   });
 
   app.get('/api/v1/review/:token', async (request, reply) => {

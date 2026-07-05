@@ -19,7 +19,7 @@ const request: AgentDraftRequest = {
 
 describe('agent draft generation', () => {
   it('selects a stable prompt for each agent role', () => {
-    expect(getPromptForAgent('SOURCE_ANALYST').version).toBe('source-analyst-v2');
+    expect(getPromptForAgent('SOURCE_ANALYST').version).toBe('source-analyst-v3');
   });
 
   it('builds a prompt with upstream artifacts and version context', () => {
@@ -41,7 +41,14 @@ describe('agent draft generation', () => {
       async generateText(args) {
         expect(args.systemPrompt).toContain('资料分析师');
         expect(args.userPrompt).toContain('视觉现状诊断');
-        return '真实模型草案';
+        return JSON.stringify({
+          conclusion: '当前没有图片资料，无法评估现有照片的构图、色调和画面质量。',
+          overview: '共 1 份文字资料，来源为项目说明。',
+          confirmed: ['研究对象已经明确。'],
+          gaps: ['缺少现场图片。'],
+          risks: ['公开范围待确认。'],
+          basis: ['项目说明'],
+        });
       },
       async generateStructured() {
         throw new Error('not used');
@@ -50,11 +57,11 @@ describe('agent draft generation', () => {
 
     await expect(generateAgentDraft(gateway, request)).resolves.toEqual({
       label: '视觉现状诊断 v1',
-      body: '真实模型草案',
+      body: expect.stringContaining('一句话结论：当前没有图片资料'),
       blockerCount: 0,
       provider: 'deepseek',
-      evidence: [],
-      structured: { role: 'SOURCE_ANALYST', observations: [], gaps: [] },
+      evidence: expect.any(Array),
+      structured: expect.objectContaining({ role: 'SOURCE_ANALYST' }),
     });
   });
 

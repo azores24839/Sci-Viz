@@ -50,6 +50,7 @@ export interface WorkflowNodeState {
   artifactLabel?: string;
   artifactBody?: string;
   images?: Array<{ url: string; prompt: string }>;
+  evidence?: Array<{ statement: string; basis: 'SOURCE' | 'PENDING_CONFIRMATION' | 'USER_SUPPLIED'; sourceIds: string[]; confidence: 'HIGH' | 'MEDIUM' | 'LOW' }>;
   revision: number;
   planLabel?: string;
   lastUserInstruction?: string;

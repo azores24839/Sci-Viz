@@ -1,5 +1,12 @@
 import { z } from 'zod';
 
+export const AgentEvidenceSchema = z.object({
+  statement: z.string().trim().min(1).max(2000),
+  basis: z.enum(['SOURCE', 'PENDING_CONFIRMATION', 'USER_SUPPLIED']),
+  sourceIds: z.array(z.string()).default([]),
+  confidence: z.enum(['HIGH', 'MEDIUM', 'LOW']),
+});
+
 export const AgentRoleSchema = z.enum([
   'SOURCE_ANALYST',
   'SCIENCE_REVIEWER',
@@ -77,6 +84,7 @@ export const PersistedWorkflowNodeStateSchema = z.object({
   artifactLabel: z.string().optional(),
   artifactBody: z.string().optional(),
   images: z.array(z.object({ url: z.string(), prompt: z.string() })).optional(),
+  evidence: z.array(AgentEvidenceSchema).optional(),
   revision: z.number().int().positive(),
   planLabel: z.string().optional(),
   lastUserInstruction: z.string().optional(),
@@ -225,8 +233,9 @@ export const SubmitReviewResponseRequestSchema = z.object({
 });
 export const ReviewResponseSchema = SubmitReviewResponseRequestSchema.extend({
   id: z.string().uuid(), reviewLinkId: z.string().uuid(), projectId: z.string().uuid(),
-  status: z.literal('PENDING'), submittedAt: z.string(),
+  status: z.enum(['PENDING', 'ADOPTED', 'IGNORED', 'PROCESSED']), submittedAt: z.string(),
 });
+export const UpdateReviewResponseStatusRequestSchema = z.object({ status: z.enum(['ADOPTED', 'IGNORED', 'PROCESSED']) });
 
 export const CaptureItemSchema = z.object({
   shotCardId: z.string().uuid(), projectId: z.string().uuid(), status: z.enum(['TODO', 'CAPTURED', 'RESHOOT']),
@@ -303,6 +312,54 @@ export const CompleteUploadRequestSchema = z.object({
 
 export const UpdateSourceSelectionRequestSchema = z.object({ selected: z.boolean() });
 
+export const ResearchModeSchema = z.enum(['FAST', 'DEEP']);
+export const ResearchTaskStatusSchema = z.enum(['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED']);
+
+export const ResearchCandidateSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string().trim().min(1).max(500),
+  url: z.string().url(),
+  domain: z.string().trim().min(1).max(255),
+  snippet: z.string().max(6000),
+  score: z.number().min(0).max(1),
+  sourceType: z.enum(['OFFICIAL', 'PAPER', 'NEWS', 'INSTITUTION', 'OTHER']),
+  publishedAt: z.string().optional(),
+});
+
+export const ResearchReportSchema = z.object({
+  summary: z.string().max(20_000),
+  keyFindings: z.array(z.string().max(2000)).max(20),
+  conflicts: z.array(z.string().max(2000)).max(20),
+  openQuestions: z.array(z.string().max(2000)).max(20),
+  limitations: z.array(z.string().max(2000)).max(20),
+});
+
+export const ResearchTaskSchema = z.object({
+  id: z.string().uuid(),
+  projectId: z.string().uuid(),
+  ownerUserId: z.string().min(1),
+  mode: ResearchModeSchema,
+  query: z.string().trim().min(2).max(1000),
+  status: ResearchTaskStatusSchema,
+  candidates: z.array(ResearchCandidateSchema).max(20).default([]),
+  report: ResearchReportSchema.optional(),
+  provider: z.literal('tavily').optional(),
+  error: z.object({ code: z.string(), message: z.string(), retryable: z.boolean() }).optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  completedAt: z.string().optional(),
+});
+
+export const CreateResearchTaskRequestSchema = z.object({
+  projectId: z.string().uuid(),
+  mode: ResearchModeSchema,
+  query: z.string().trim().min(2).max(1000),
+});
+
+export const AdoptResearchCandidatesRequestSchema = z.object({
+  candidateIds: z.array(z.string().uuid()).min(1).max(20),
+});
+
 export const AgentProfileSchema = z.object({
   role: AgentRoleSchema,
   name: z.string(),
@@ -339,12 +396,6 @@ export const AgentDraftRequestSchema = z.object({
   upstreamArtifacts: z.array(AgentDraftArtifactSchema),
 });
 
-export const AgentEvidenceSchema = z.object({
-  statement: z.string().trim().min(1).max(2000),
-  basis: z.enum(['SOURCE', 'PENDING_CONFIRMATION', 'USER_SUPPLIED']),
-  sourceIds: z.array(z.string()).default([]),
-  confidence: z.enum(['HIGH', 'MEDIUM', 'LOW']),
-});
 export const AgentStructuredOutputSchema = z.discriminatedUnion('role', [
   z.object({ role: z.literal('SOURCE_ANALYST'), observations: z.array(AgentEvidenceSchema), gaps: z.array(z.string()) }),
   z.object({ role: z.literal('SCIENCE_REVIEWER'), reviewItems: z.array(AgentEvidenceSchema), unresolvedBlockers: z.number().int().nonnegative() }),
@@ -414,6 +465,10 @@ export type BenchmarkRecommendationResult = z.infer<typeof BenchmarkRecommendati
 export type SourceKind = z.infer<typeof SourceKindSchema>;
 export type SourceStatus = z.infer<typeof SourceStatusSchema>;
 export type SourceDocument = z.infer<typeof SourceDocumentSchema>;
+export type ResearchMode = z.infer<typeof ResearchModeSchema>;
+export type ResearchCandidate = z.infer<typeof ResearchCandidateSchema>;
+export type ResearchReport = z.infer<typeof ResearchReportSchema>;
+export type ResearchTask = z.infer<typeof ResearchTaskSchema>;
 export type CreateTextSourceRequest = z.infer<typeof CreateTextSourceRequestSchema>;
 export type CreateWebSourceRequest = z.infer<typeof CreateWebSourceRequestSchema>;
 export type CreateUploadRequest = z.infer<typeof CreateUploadRequestSchema>;

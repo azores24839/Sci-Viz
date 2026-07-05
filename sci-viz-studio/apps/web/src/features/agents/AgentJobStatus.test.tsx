@@ -39,7 +39,7 @@ describe('AgentJobStatus', () => {
     expect(screen.getByText('您的任务已排队，完成后会自动显示结果。')).toBeTruthy();
   });
 
-  it('renders running state with attempt and sources', () => {
+  it('hides technical telemetry while a task is running', () => {
     render(
       <AgentJobStatus
         job={mockJob({ status: 'RUNNING', attempt: 2, startedAt: '2026-07-02T10:30:00.000Z' })}
@@ -50,9 +50,9 @@ describe('AgentJobStatus', () => {
       />
     );
     expect(screen.getByText('处理中')).toBeTruthy();
-    expect(screen.getByText('第 2/3 次尝试')).toBeTruthy();
-    expect(screen.getByText('使用 5 份资料')).toBeTruthy();
-    expect(screen.getByText('Plan B / v3')).toBeTruthy();
+    expect(screen.queryByText('第 2/3 次尝试')).toBeNull();
+    expect(screen.queryByText('使用 5 份资料')).toBeNull();
+    expect(screen.queryByText('Plan B / v3')).toBeNull();
   });
 
   it('renders completed state', () => {

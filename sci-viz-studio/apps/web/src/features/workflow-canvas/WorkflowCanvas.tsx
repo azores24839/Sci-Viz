@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   Controls,
@@ -6,6 +6,7 @@ import {
   ReactFlow,
   applyNodeChanges,
   type NodeChange,
+  type ReactFlowInstance,
 } from '@xyflow/react';
 import type { ProjectGoal } from '@studio/contracts';
 import type { WorkflowNodeState, WorkflowTemplate } from '@studio/workflow-core';
@@ -34,6 +35,8 @@ export function WorkflowCanvas({ projectId, template, states, selectedNodeId, on
   const initial = useMemo(() => toFlowElements(template, states), [template, states]);
   const [nodes, setNodes] = useState<StudioFlowNode[]>(initial.nodes);
   const [locked, setLocked] = useState(false);
+  const flowRef = useRef<ReactFlowInstance<StudioFlowNode> | null>(null);
+  const previousSelectionRef = useRef(selectedNodeId);
 
   useEffect(() => {
     setNodes((current) => {
@@ -44,6 +47,23 @@ export function WorkflowCanvas({ projectId, template, states, selectedNodeId, on
       }));
     });
   }, [initial.nodes]);
+
+  useEffect(() => {
+    if (previousSelectionRef.current === selectedNodeId) return;
+    previousSelectionRef.current = selectedNodeId;
+    const target = nodes.find((node) => node.id === selectedNodeId);
+    if (!target || !flowRef.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      void flowRef.current?.fitView({
+        nodes: [target],
+        padding: 0.18,
+        minZoom: 0.55,
+        maxZoom: 0.82,
+        duration: 260,
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedNodeId, nodes]);
 
   const onNodesChange = useCallback((changes: NodeChange<StudioFlowNode>[]) => {
     setNodes((current) => applyNodeChanges(changes, current));
@@ -57,6 +77,7 @@ export function WorkflowCanvas({ projectId, template, states, selectedNodeId, on
   return (
     <div className={`workflow-canvas${locked ? ' is-locked' : ''}`} aria-label="科研影像工作流画布">
       <ReactFlow
+        onInit={(instance) => { flowRef.current = instance as unknown as ReactFlowInstance<StudioFlowNode>; }}
         nodes={nodes.map((node) => ({
           ...node,
           data: {

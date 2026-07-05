@@ -61,4 +61,12 @@ describe('review routes', () => {
     expect((await app.inject({ method: 'POST', url: `/api/v1/review/${issued.token}/responses`, payload })).statusCode).toBe(409);
     const owner = await app.inject({ method: 'GET', url: `/api/v1/projects/${projectId}/review-responses` }); expect(owner.json().data.responses[0].status).toBe('PENDING'); expect(plan.content.risks[0]!.description).toBe('激光风险'); await app.close();
   });
+
+  it('lets only the project owner mark a suggestion as adopted', async () => {
+    const app = await createApp(); const issued = await issue(app); const submitted = await app.inject({ method: 'POST', url: `/api/v1/review/${issued.token}/responses`, payload: { reviewerName: '王老师', overallDecision: 'CHANGES_REQUESTED', items: [], generalComment: '建议增加样本特写' } });
+    const responseId = submitted.json().data.id;
+    const updated = await app.inject({ method: 'PATCH', url: `/api/v1/projects/${projectId}/review-responses/${responseId}`, payload: { status: 'ADOPTED' } });
+    expect(updated.statusCode).toBe(200); expect(updated.json().data.status).toBe('ADOPTED');
+    const owner = await app.inject({ method: 'GET', url: `/api/v1/projects/${projectId}/review-responses` }); expect(owner.json().data.responses[0].status).toBe('ADOPTED'); await app.close();
+  });
 });

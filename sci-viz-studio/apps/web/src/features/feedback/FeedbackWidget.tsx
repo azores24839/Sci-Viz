@@ -19,6 +19,8 @@ interface FeedbackContext {
 
 interface FeedbackWidgetProps {
   context: FeedbackContext;
+  triggerLabel?: string;
+  triggerClassName?: string;
 }
 
 function formatContext(context: FeedbackContext): string {
@@ -29,7 +31,7 @@ function formatContext(context: FeedbackContext): string {
   return parts.join('\n');
 }
 
-export function FeedbackWidget({ context }: FeedbackWidgetProps) {
+export function FeedbackWidget({ context, triggerLabel, triggerClassName }: FeedbackWidgetProps) {
   const [open, setOpen] = useState(false);
   const [category, setCategory] = useState<FeedbackCategory | null>(null);
   const [description, setDescription] = useState('');
@@ -88,12 +90,12 @@ export function FeedbackWidget({ context }: FeedbackWidgetProps) {
     <>
       <button
         type="button"
-        className="feedback-trigger"
+        className={triggerClassName ?? 'feedback-trigger'}
         onClick={() => { setOpen(true); reset(); }}
         aria-label="打开反馈"
         title="提交反馈"
       >
-        <span aria-hidden="true">?</span>
+        {triggerLabel ?? <span aria-hidden="true">?</span>}
       </button>
 
       {open && (

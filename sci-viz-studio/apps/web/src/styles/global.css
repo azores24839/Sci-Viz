@@ -30,12 +30,13 @@ body {
 .auth-brand p { max-width: 520px; margin: 0; color: #5f6570; font-size: 16px; line-height: 1.8; }
 .auth-card { display: grid; place-items: center; padding: 40px; border-left: 1px solid #e1ded8; background: #fff; }
 .studio-account-dock { position: fixed; top: 20px; right: 20px; z-index: 80; display: flex; align-items: center; gap: 8px; }
+body:has(.studio-shell) .studio-account-dock { display: none; }
 .usage-profile { position: relative; }
-.usage-profile-trigger { display: flex; align-items: center; gap: 7px; min-height: 34px; padding: 4px 10px 4px 5px; border: 1px solid #dedad4; border-radius: 999px; color: #34312e; background: rgb(255 255 255 / 94%); box-shadow: 0 8px 24px rgb(28 26 23 / 8%); cursor: pointer; font-size: 11px; font-weight: 760; letter-spacing: .02em; backdrop-filter: blur(14px); }
+.usage-profile-trigger { display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 3px 9px 3px 4px; border: 1px solid #dedad4; border-radius: 999px; color: #34312e; background: rgb(255 255 255 / 94%); box-shadow: none; cursor: pointer; font-size: 10px; font-weight: 760; letter-spacing: .02em; backdrop-filter: blur(14px); }
 .usage-profile-trigger:hover { border-color: #b9b3aa; }
 .usage-profile-trigger.is-warning { border-color: #d2a54d; }
 .usage-profile-trigger.is-danger { border-color: #bd665d; }
-.usage-profile-mark { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; color: #f9f8f5; background: #24231f; font-family: "SweiSpringTC", "Songti SC", serif; font-size: 11px; }
+.usage-profile-mark { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: #f9f8f5; background: #24231f; font-family: "SweiSpringTC", "Songti SC", serif; font-size: 10px; }
 .usage-profile-trigger.is-warning .usage-profile-mark { background: #a36c0f; }
 .usage-profile-trigger.is-danger .usage-profile-mark { background: #9d3f38; }
 .usage-popover { position: absolute; top: calc(100% + 10px); right: 0; width: min(340px, calc(100vw - 32px)); padding: 18px; border: 1px solid #dedad4; border-radius: 16px; color: #25231f; background: #fffefa; box-shadow: 0 24px 70px rgb(29 26 21 / 16%); }

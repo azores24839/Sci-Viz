@@ -2,17 +2,13 @@ import { useEffect } from 'react';
 import { useBenchmarkSelection } from './useBenchmarkSelection';
 import { BenchmarkCard } from './BenchmarkCard';
 
-interface BenchmarkPanelProps {
-  projectId: string;
-  minSelection?: number;
-  onSelectionChange?: (count: number) => void;
-}
+interface BenchmarkPanelProps { projectId: string; onSelectionChange?: (count: number) => void }
 
-export function BenchmarkPanel({ projectId, minSelection = 3, onSelectionChange }: BenchmarkPanelProps) {
-  const { recommendations, selectedIds, fallbackMessage, loadState, errorMessage, retryable, saving, toggle, retry } =
+export function BenchmarkPanel({ projectId, onSelectionChange }: BenchmarkPanelProps) {
+  const { recommendations, fallbackMessage, loadState, errorMessage, retryable, retry } =
     useBenchmarkSelection(projectId);
 
-  useEffect(() => { onSelectionChange?.(selectedIds.length); }, [onSelectionChange, selectedIds.length]);
+  useEffect(() => { onSelectionChange?.(recommendations.length); }, [onSelectionChange, recommendations.length]);
 
   if (loadState === 'loading') {
     return (
@@ -82,15 +78,9 @@ export function BenchmarkPanel({ projectId, minSelection = 3, onSelectionChange 
   return (
     <section className="benchmark-gallery" aria-label="对标案例">
       <div className="benchmark-gallery-header">
-        <strong>对标案例候选</strong>
-        <span>已选 {selectedIds.length} / 需至少 {minSelection} 个</span>
+        <strong>AI 推荐参考案例</strong>
+        <span>系统已按项目目标和匹配度自动排序，无需手动选择</span>
       </div>
-
-      {selectedIds.length < minSelection && (
-        <div className="benchmark-hint">
-          请至少选择 {minSelection} 个案例作为对标参考，才能进入下一步。
-        </div>
-      )}
 
       {fallbackMessage && (
         <div className="benchmark-fallback-msg">
@@ -110,21 +100,13 @@ export function BenchmarkPanel({ projectId, minSelection = 3, onSelectionChange 
           <BenchmarkCard
             key={rec.id}
             recommendation={rec}
-            selected={selectedIds.includes(rec.id)}
-            onToggle={() => toggle(rec.id)}
-            saving={saving}
+            selected
+            onToggle={() => {}}
+            saving={false}
+            readOnly
           />
         ))}
       </div>
-
-      {selectedIds.length > 0 && (
-        <div className="benchmark-selection-summary">
-          <span>
-            已选择 {selectedIds.length} 个对标案例
-            {selectedIds.length < minSelection ? `（还需 ${minSelection - selectedIds.length} 个）` : '，可以进入下一步'}
-          </span>
-        </div>
-      )}
     </section>
   );
 }

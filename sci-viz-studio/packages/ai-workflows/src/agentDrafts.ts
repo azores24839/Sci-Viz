@@ -1,4 +1,5 @@
 import type { AgentDraftRequest, AgentDraftResponse, AgentRole } from '@studio/contracts';
+import { z } from 'zod';
 import type { ModelGateway } from './modelGateway';
 import { photoPlannerPrompt } from './prompts/productionDirector';
 import { sourceAnalystPrompt } from './prompts/projectProducer';
@@ -16,6 +17,34 @@ const prompts = {
 const taskPrompts: Record<string, { version: string; instructions: string }> = {
   GENERATE_AI_REFERENCES: aiReferencePrompt,
 };
+
+const SourceDiagnosisSchema = z.object({
+  conclusion: z.string().trim().min(1).max(300),
+  overview: z.string().trim().min(1).max(500),
+  confirmed: z.array(z.string().trim().min(1).max(300)).max(3),
+  gaps: z.array(z.string().trim().min(1).max(300)).max(3),
+  risks: z.array(z.string().trim().min(1).max(300)).max(3),
+  basis: z.array(z.string().trim().min(1).max(300)).max(3),
+});
+
+type SourceDiagnosis = z.infer<typeof SourceDiagnosisSchema>;
+
+function parseSourceDiagnosis(raw: string): SourceDiagnosis {
+  const normalized = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  return SourceDiagnosisSchema.parse(JSON.parse(normalized));
+}
+
+function diagnosisBody(value: SourceDiagnosis) {
+  const join = (items: string[]) => items.length > 0 ? items.join('；') : '暂无';
+  return [
+    `- 一句话结论：${value.conclusion}`,
+    `- 资料概况：${value.overview}`,
+    `- 已确认信息：${join(value.confirmed)}`,
+    `- 关键缺口：${join(value.gaps)}`,
+    `- 风险与待确认：${join(value.risks)}`,
+    `- 分析依据：${join(value.basis)}`,
+  ].join('\n');
+}
 
 export function getPromptForAgent(role: AgentRole) {
   return prompts[role];
@@ -84,16 +113,16 @@ export function createMockAgentDraft(request: AgentDraftRequest): AgentDraftResp
         '- 目标缺口：补充工程应用、团队协作、关键操作、脱敏数据界面和人物尺度画面。',
         revisionNote,
       ].join('\n')
-    : [
-        heading,
-        '- 素材总览：当前以 Sci-Viz Case Hub mock 资料库作为测试资料源；样本包含静图结构、技术维度分布和对标案例缩略图。',
-        '- 功能维度结构：记录型约 72%，解释型约 12%，展示型约 9%，传播型约 5%，数据型约 2%；此处只描述现状结构，不判断传播目标。',
-        '- 技术维度结构：拍摄 50%，绘设 19.6%，渲染 16.1%，成像 9.7%，数据 3.9%，生成 0.7%。',
-        '- 内容对象结构：设备、实验过程、团队协作和人物肖像较多；应用场景、样品细节和脱敏数据界面不足。',
-        '- 画面质量诊断：远景记录偏多，景别层次、操作过程、尺度参照和统一色调需要补强。',
-        '- 风险标记：屏幕数据、设备铭牌、合作单位、人员面部和未公开实验细节待确认。',
-        revisionNote,
-      ].join('\n');
+    : diagnosisBody({
+        conclusion: request.upstreamArtifacts.some((item) => item.body.includes('[资料类型：IMAGE]'))
+          ? '已有图片资料，可进行初步视觉判断，但仍需结合拍摄背景确认。'
+          : '当前没有图片资料，无法评估现有照片的构图、色调和画面质量。',
+        overview: `本轮使用 ${request.upstreamArtifacts.filter((item) => item.nodeId.startsWith('source:')).length} 份项目资料。`,
+        confirmed: ['可以识别资料中明确写出的研究对象与公开信息。'],
+        gaps: ['缺少图片时，无法判断现有视觉素材的质量与风格。'],
+        risks: ['未公开实验信息、人员肖像和屏幕数据需要人工确认。'],
+        basis: request.upstreamArtifacts.filter((item) => item.nodeId.startsWith('source:')).slice(0, 3).map((item) => item.label),
+      });
   const curatorBody = request.nodeId === 'case-benchmark'
     ? [
         heading,
@@ -151,11 +180,14 @@ export async function generateAgentDraft(
   if (!gateway) return createMockAgentDraft(request);
 
   const prompt = taskPrompts[request.task] ?? getPromptForAgent(request.agentRole);
-  const body = await gateway.generateText({
+  const rawBody = await gateway.generateText({
     systemPrompt: prompt.instructions,
     userPrompt: buildAgentUserPrompt(request),
     context: { projectId: request.projectId, promptVersion: prompt.version },
   });
+  const body = request.nodeId === 'visual-diagnosis' && request.agentRole === 'SOURCE_ANALYST'
+    ? diagnosisBody(parseSourceDiagnosis(rawBody))
+    : rawBody;
 
   const evidence = buildEvidence(body, request);
   const blockerCount = request.agentRole === 'SCIENCE_REVIEWER' && body.includes('待确认') ? 1 : 0;

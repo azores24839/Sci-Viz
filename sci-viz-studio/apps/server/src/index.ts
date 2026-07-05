@@ -21,6 +21,9 @@ import { createPlanRepository } from './plans/repository.js';
 import { registerPlanRoutes } from './plans/routes.js';
 import { createReviewRepository } from './reviews/repository.js';
 import { registerReviewRoutes } from './reviews/routes.js';
+import { createResearchRepository } from './research/repository.js';
+import { ResearchProcessor } from './research/processor.js';
+import { registerResearchRoutes } from './research/routes.js';
 
 import { createFeedbackRepository } from './feedback.js';
 
@@ -35,7 +38,9 @@ const workspaceRepository = createWorkspaceRepository(process.env);
 const agentJobRepository = createAgentJobRepository(process.env);
 const planRepository = createPlanRepository(process.env);
 const reviewRepository = createReviewRepository(process.env);
+const researchRepository = createResearchRepository(process.env);
 const sourceProcessor = new SourceProcessor(sourceRepository, sourceStorage, process.env, Number(process.env.SOURCE_WORKER_CONCURRENCY ?? 2), usageLimiter);
+const researchProcessor = new ResearchProcessor(researchRepository, process.env, Number(process.env.RESEARCH_WORKER_CONCURRENCY ?? 1));
 const ownsProject = async (userId: string, projectId: string) => projectId === defaultProjectId(userId, process.env) || (await workspaceRepository.getProject(projectId))?.ownerUserId === userId;
 const agentJobProcessor = new AgentJobProcessor(agentJobRepository, async (draft) => {
   const provider = process.env.AI_PROVIDER ?? 'mock';
@@ -99,7 +104,9 @@ await registerAgentJobRoutes(app, { repo: agentJobRepository, processor: agentJo
 await registerBenchmarkRoutes(app, { workspace: workspaceRepository, env: process.env });
 await registerPlanRoutes(app, { plans: planRepository, workspace: workspaceRepository });
 await registerReviewRoutes(app, { reviews: reviewRepository, plans: planRepository, workspace: workspaceRepository, env: process.env });
+await registerResearchRoutes(app, { research: researchRepository, processor: researchProcessor, sources: sourceRepository, sourceProcessor, ownsProject, maxSources: Number(process.env.USER_SOURCE_LIMIT ?? 50) });
 await sourceProcessor.resume();
+await researchProcessor.resume();
 await agentJobProcessor.start();
 const feedbackRepository = createFeedbackRepository(process.env);
 

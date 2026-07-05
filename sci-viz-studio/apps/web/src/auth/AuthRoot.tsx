@@ -1,7 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { ClerkProvider, Show, SignIn, UserButton, useAuth } from '@clerk/react';
+import { ClerkFailed, ClerkLoaded, ClerkLoading, ClerkProvider, Show, SignIn, UserButton, useAuth } from '@clerk/react';
 import { setAuthTokenProvider } from '../api/client';
-import { UsageProfile } from './UsageProfile';
 
 const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
 
@@ -16,10 +15,25 @@ function SignInScreen() {
   return <main className="auth-screen"><section className="auth-brand"><span>研影</span><h1>把科研资料，变成可执行的影像方案。</h1><p>注册后，你上传的文件、解析结果和项目只对自己的账号可见。</p></section><section className="auth-card"><SignIn routing="hash" /></section></main>;
 }
 
+export function AccountIdentity() {
+  return publishableKey ? <UserButton /> : <span className="account-placeholder" aria-label="本地测试账号">本地</span>;
+}
+
+function AccountDock() {
+  return <div className="studio-account-dock"><AccountIdentity /></div>;
+}
+
 export function AuthRoot({ children }: { children: ReactNode }) {
-  if (!publishableKey) { setAuthTokenProvider(async () => null); return <>{children}<div className="studio-account-dock"><UsageProfile /></div></>; }
+  if (!publishableKey) { setAuthTokenProvider(async () => null); return <>{children}<AccountDock /></>; }
   return <ClerkProvider publishableKey={publishableKey} signInFallbackRedirectUrl="/" signUpFallbackRedirectUrl="/">
-    <Show when="signed-out"><SignInScreen /></Show>
-    <Show when="signed-in"><TokenBridge>{children}<div className="studio-account-dock"><UsageProfile /><UserButton /></div></TokenBridge></Show>
+    <ClerkLoading><main className="app-loading"><span>正在恢复登录状态…</span></main></ClerkLoading>
+    <ClerkFailed><main className="app-loading"><span>登录服务暂时无法连接，请稍后刷新。</span></main></ClerkFailed>
+    <ClerkLoaded>
+      <Show when="signed-out"><SignInScreen /></Show>
+      <Show when="signed-in">
+        <TokenBridge>{children}</TokenBridge>
+        <AccountDock />
+      </Show>
+    </ClerkLoaded>
   </ClerkProvider>;
 }

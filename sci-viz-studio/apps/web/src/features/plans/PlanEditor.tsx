@@ -63,6 +63,13 @@ export function PlanEditor({ projectId }: PlanEditorProps) {
 
   return (
     <div className="plan-editor">
+      <div className="plan-hierarchy" aria-label="摄影方案结构">
+        <button type="button" className={!showShotCards && !showChecklist ? 'is-active' : ''} onClick={() => { setShowShotCards(false); setShowChecklist(false); }}><strong>摄影策略</strong><span>整体表达什么</span></button>
+        <i aria-hidden="true">→</i>
+        <button type="button" className={showShotCards ? 'is-active' : ''} onClick={() => { setShowShotCards(true); setShowChecklist(false); }}><strong>画面卡</strong><span>具体拍什么</span></button>
+        <i aria-hidden="true">→</i>
+        <button type="button" className={showChecklist ? 'is-active' : ''} onClick={() => { setShowShotCards(false); setShowChecklist(true); }}><strong>现场清单</strong><span>拍摄当天打勾</span></button>
+      </div>
       <div className="plan-toolbar">
         <div className="plan-toolbar-left">
           <button

@@ -4,6 +4,7 @@ import type { ProjectGoal } from '@studio/contracts';
 import type { StudioFlowNode } from './adapter';
 import { getNodePreviewTone, summarizeNodeContent } from './nodePreview';
 import { parseMdToCards, type MdCard } from './parseMarkdownToCards';
+import { organizeVisualDiagnosis } from './visualDiagnosisContent';
 import { BenchmarkPanel } from '../benchmarks/BenchmarkPanel';
 import { PlanEditor } from '../plans/PlanEditor';
 
@@ -259,13 +260,19 @@ function DiagnosisSection({ title, cards }: { title: string; cards: MdCard[] }) 
 }
 
 function VisualDiagnosisArtifact({ md }: { md: string }) {
-  const groups = splitDiagnosisCards(parseMdToCards(md));
+  const content = organizeVisualDiagnosis(parseMdToCards(md));
 
-  return <div className="node-analysis-body">
-    <DiagnosisDashboard />
-    <DiagnosisObjectGallery />
-    <DiagnosisSection title="结构诊断" cards={groups.structure} />
-    <DiagnosisSection title="质量与风险" cards={groups.quality} />
+  return <div className="node-analysis-body diagnosis-node-summary">
+    <section className="diagnosis-context" aria-label="本次分析信息">
+      <strong>本次分析</strong>
+      <p>{content.context}</p>
+    </section>
+    <div className="diagnosis-node-sections">
+      {content.sections.slice(0, 3).map((section) => <section key={section.label}>
+        <h3>{section.label}</h3>
+        <p>{section.content}</p>
+      </section>)}
+    </div>
   </div>;
 }
 
@@ -413,7 +420,7 @@ export function WorkflowNodeCard({ data, selected }: NodeProps<StudioFlowNode>) 
       {definition.id === 'case-benchmark' && data.projectId ? <BenchmarkPanel projectId={data.projectId} {...(data.onBenchmarkSelectionChange ? { onSelectionChange: data.onBenchmarkSelectionChange } : {})} /> : null}
       {definition.id === 'case-benchmark' && !data.projectId ? <CaseBenchmarkGallery /> : null}
       {definition.id === 'photo-plan' && data.projectId ? <PlanEditor projectId={data.projectId} /> : null}
-      {isSourceIntake ? <section className="source-node-summary"><strong>{state.summary}</strong><span>在右侧资料台账中上传、解析并选择本轮资料。</span></section> : null}
+      {isSourceIntake ? <section className="source-node-summary"><strong>{state.summary}</strong><span>在右侧“已添加的资料”中上传、解析并选择本轮资料。</span></section> : null}
       {waiting
         ? <div className="node-waiting">
             <span className="status-dot locked" />

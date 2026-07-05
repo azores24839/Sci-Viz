@@ -4,7 +4,12 @@ import { Help } from './pages/Help';
 import { Projects } from './pages/Projects';
 import { ReviewPage } from './pages/ReviewPage';
 import { Studio } from './pages/Studio';
-import './styles/studio.css';
+import './styles/studio-core.css';
+import './styles/studio-benchmarks.css';
+import './styles/studio-projects.css';
+import './styles/studio-agents.css';
+import './styles/studio-plans.css';
+import './styles/studio-reviews.css';
 
 export function App() {
   return (
@@ -32,10 +37,7 @@ function StudioRoute() {
   const { projectId } = useParams<{ projectId: string }>();
   if (!projectId) return <main className="app-loading"><strong>无效的项目地址</strong><span>请从项目列表中选择一个项目。</span></main>;
   return (
-    <>
-      <Studio projectId={projectId} />
-      <FeedbackWidget context={{ page: '工作流画布', projectId }} />
-    </>
+    <Studio projectId={projectId} />
   );
 }
 

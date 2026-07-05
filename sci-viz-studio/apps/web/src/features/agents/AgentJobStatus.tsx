@@ -46,28 +46,6 @@ export function AgentJobStatus({ job, status, onRetry, sourceCount, revision, pl
       </div>
 
       <div className="agent-job-details">
-        {job?.startedAt && (
-          <span className="agent-job-detail">
-            开始时间：{new Date(job.startedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-          </span>
-        )}
-
-        {job && job.attempt > 0 && (
-          <span className="agent-job-detail">
-            第 {job.attempt}/{job.maxAttempts} 次尝试
-          </span>
-        )}
-
-        {sourceCount !== undefined && sourceCount > 0 && (
-          <span className="agent-job-detail">使用 {sourceCount} 份资料</span>
-        )}
-
-        {revision !== undefined && (
-          <span className="agent-job-detail">
-            {planLabel ? `${planLabel} / ` : ''}v{revision}
-          </span>
-        )}
-
         {errorMessage && (
           <p className="agent-job-error" role="alert">
             <span className="agent-job-error-code">{errorCode || 'ERROR'}</span>

@@ -13,6 +13,7 @@ export interface ReviewRepository {
   touchLink(id: string, accessedAt: string): Promise<void>;
   saveResponse(response: ReviewResponse): Promise<boolean>;
   listResponses(projectId: string): Promise<ReviewResponse[]>;
+  updateResponseStatus(id: string, projectId: string, status: ReviewResponse['status']): Promise<ReviewResponse | undefined>;
   addAudit(event: ReviewAuditEvent): Promise<void>;
   listAudit(projectId: string): Promise<ReviewAuditEvent[]>;
 }
@@ -33,6 +34,7 @@ export class FileReviewRepository implements ReviewRepository {
   touchLink(id: string, accessedAt: string) { return this.serial(async () => { const state = await this.read(); const index = state.links.findIndex((link) => link.id === id); if (index >= 0) { state.links[index] = { ...state.links[index]!, lastAccessedAt: accessedAt }; await this.write(state); } }); }
   saveResponse(response: ReviewResponse) { return this.serial(async () => { const state = await this.read(); if (state.responses.some((item) => item.reviewLinkId === response.reviewLinkId)) return false; state.responses.push(response); await this.write(state); return true; }); }
   listResponses(projectId: string) { return this.serial(async () => (await this.read()).responses.filter((item) => item.projectId === projectId).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))); }
+  updateResponseStatus(id: string, projectId: string, status: ReviewResponse['status']) { return this.serial(async () => { const state = await this.read(); const index = state.responses.findIndex((item) => item.id === id && item.projectId === projectId); if (index < 0) return undefined; state.responses[index] = { ...state.responses[index]!, status }; await this.write(state); return state.responses[index]; }); }
   addAudit(event: ReviewAuditEvent) { return this.serial(async () => { const state = await this.read(); state.audit.push(event); await this.write(state); }); }
   listAudit(projectId: string) { return this.serial(async () => (await this.read()).audit.filter((item) => item.projectId === projectId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))); }
 }
@@ -53,6 +55,7 @@ export class PostgresReviewRepository implements ReviewRepository {
   async touchLink(id: string, accessedAt: string) { await this.ready; await this.sql`update studio_review_link set document=jsonb_set(document, '{lastAccessedAt}', to_jsonb(${accessedAt}::text)) where id=${id}`; }
   async saveResponse(response: ReviewResponse) { await this.ready; const rows = await this.sql`insert into studio_review_response (id, review_link_id, project_id, document, submitted_at) values (${response.id}, ${response.reviewLinkId}, ${response.projectId}, ${this.sql.json(response)}, ${response.submittedAt}) on conflict(review_link_id) do nothing returning id`; return rows.length > 0; }
   async listResponses(projectId: string) { await this.ready; const rows = await this.sql`select document from studio_review_response where project_id=${projectId} order by submitted_at desc`; return rows.map((row) => row.document as ReviewResponse); }
+  async updateResponseStatus(id: string, projectId: string, status: ReviewResponse['status']) { await this.ready; const rows = await this.sql`update studio_review_response set document=jsonb_set(document, '{status}', to_jsonb(${status}::text)) where id=${id} and project_id=${projectId} returning document`; return rows[0]?.document as ReviewResponse | undefined; }
   async addAudit(event: ReviewAuditEvent) { await this.ready; await this.sql`insert into studio_review_audit (id, project_id, review_link_id, document, created_at) values (${event.id}, ${event.projectId}, ${event.reviewLinkId}, ${this.sql.json(JSON.parse(JSON.stringify(event)))}, ${event.createdAt})`; }
   async listAudit(projectId: string) { await this.ready; const rows = await this.sql`select document from studio_review_audit where project_id=${projectId} order by created_at desc`; return rows.map((row) => row.document as ReviewAuditEvent); }
 }

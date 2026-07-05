@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { cleanMarkdownText, parseMdToCards } from './parseMarkdownToCards';
 
 describe('markdown card parsing', () => {
+  it('normalizes bold field labels without exposing markdown symbols', () => {
+    expect(parseMdToCards('**资产数量：** 共 1 份可用资料。')).toEqual([
+      { label: '资产数量', content: '共 1 份可用资料。' },
+    ]);
+  });
+
   it('turns labeled list items into cards', () => {
     expect(parseMdToCards([
       '### Plan A · 目标配置',

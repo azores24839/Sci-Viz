@@ -99,6 +99,15 @@ export function ReviewLinkManager({ projectId }: ReviewLinkManagerProps) {
 
   const responsesForLink = (linkId: string) => responses.filter((r) => r.reviewLinkId === linkId);
 
+  const updateResponseStatus = async (responseId: string, status: 'ADOPTED' | 'IGNORED' | 'PROCESSED') => {
+    try {
+      const response = await apiFetch(`/projects/${projectId}/review-responses/${responseId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+      const payload = await response.json() as { success: boolean; data?: ReviewResponse; error?: { message?: string } };
+      if (!response.ok || !payload.data) throw new Error(payload.error?.message ?? '处理失败');
+      setResponses((current) => current.map((item) => item.id === responseId ? payload.data! : item));
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '处理审核意见失败。'); }
+  };
+
   if (loading) {
     return <div className="benchmark-loading"><div className="review-spinner" /><p>加载审核信息…</p></div>;
   }
@@ -178,6 +187,14 @@ export function ReviewLinkManager({ projectId }: ReviewLinkManagerProps) {
                       </span>
                     </div>
                     {resp.generalComment && <p className="review-response-comment">{resp.generalComment}</p>}
+                    <div className="review-response-resolution">
+                      <span>{resp.status === 'PENDING' ? '待处理' : resp.status === 'ADOPTED' ? '已采纳' : resp.status === 'IGNORED' ? '暂不采纳' : '已处理'}</span>
+                      {resp.status === 'PENDING' && <>
+                        <button type="button" onClick={() => void updateResponseStatus(resp.id, 'ADOPTED')}>采纳建议</button>
+                        <button type="button" onClick={() => void updateResponseStatus(resp.id, 'IGNORED')}>暂不采纳</button>
+                        <button type="button" onClick={() => void updateResponseStatus(resp.id, 'PROCESSED')}>标记已处理</button>
+                      </>}
+                    </div>
                     <time>{formatTime(resp.submittedAt)}</time>
                   </div>
                 ))}

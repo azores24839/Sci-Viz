@@ -18,9 +18,10 @@ interface BenchmarkCardProps {
   selected: boolean;
   onToggle: () => void;
   saving: boolean;
+  readOnly?: boolean;
 }
 
-export function BenchmarkCard({ recommendation, selected, onToggle, saving }: BenchmarkCardProps) {
+export function BenchmarkCard({ recommendation, selected, onToggle, saving, readOnly = false }: BenchmarkCardProps) {
   const [imgError, setImgError] = useState(false);
 
   return (
@@ -43,11 +44,11 @@ export function BenchmarkCard({ recommendation, selected, onToggle, saving }: Be
           <button
             type="button"
             className={`benchmark-select-btn${selected ? ' is-checked' : ''}`}
-            onClick={onToggle}
-            disabled={saving}
+            onClick={readOnly ? undefined : onToggle}
+            disabled={saving || readOnly}
             aria-pressed={selected}
           >
-            {selected ? '已选' : '选择'}
+            {readOnly ? 'AI 推荐' : selected ? '已选' : '选择'}
           </button>
         </div>
       </div>

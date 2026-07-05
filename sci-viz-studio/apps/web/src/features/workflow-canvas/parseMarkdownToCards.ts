@@ -36,6 +36,13 @@ export function parseMdToCards(md: string): MdCard[] {
     const line = rawLine.trim();
     if (!line) { flush(); continue; }
 
+    const boldField = line.match(/^\*\*(.+?)[：:]\*\*\s*(.+)$/);
+    if (boldField?.[1] && boldField[2]) {
+      flush();
+      cards.push({ label: cleanMarkdownText(boldField[1]), content: cleanMarkdownText(boldField[2]) });
+      continue;
+    }
+
     if (/^[-–—]{3,}$/.test(line)) continue;
     if (/^\|[\s\-:|]*\|$/.test(line)) {
       flush();
