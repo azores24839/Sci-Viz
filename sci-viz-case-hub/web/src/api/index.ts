@@ -1,6 +1,7 @@
 import type { ApiResponse, VisualCase, CrawlResponse, NetworkTestResponse, CrawlSource, CrawlJob, CollectionKpiProgress, InsightSummary, ComparisonData, ThreeAxisSpectrum } from '../types';
+import { apiBaseUrl } from '../baseUrl';
 
-const BASE = '/api';
+const BASE = apiBaseUrl;
 
 let onUnauthorized: (() => void) | null = null;
 export function setOnUnauthorized(fn: () => void) {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { api } from '../api';
+import { withBaseUrl } from '../baseUrl';
 import type { VisualCase, ReviewStatus } from '../types';
 import { REVIEW_STATUS_LABELS } from '../types';
 import { theme } from '../theme';
@@ -214,7 +215,7 @@ export default function ReviewPage() {
     setTimeout(() => taskListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
   };
 
-  const imageCandidates = (c: VisualCase) => [c.thumbnailPath, c.imagePath, c.imageUrl].filter(Boolean);
+  const imageCandidates = (c: VisualCase) => [c.thumbnailPath, c.imagePath, c.imageUrl].filter(Boolean).map(withBaseUrl);
 
   const handleImageError = (c: VisualCase) => (e: React.SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;

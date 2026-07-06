@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
+import { withBaseUrl } from '../baseUrl';
 import type { VisualCase, Pagination, CrawlSource } from '../types';
 import { REVIEW_STATUS_LABELS, MEDIA_TYPES, CONTENT_TYPES, DISCIPLINES, TECHNICAL_METHODS, DISTRIBUTION_MEDIUMS, FUNCTIONAL_PURPOSES, CAPTURE_TYPE_LABELS, CATEGORY_LABELS } from '../types';
 import { theme } from '../theme';
@@ -157,7 +158,7 @@ function makeCardTags(c: VisualCase): string[] {
 }
 
 function imageCandidates(c: VisualCase): string[] {
-  return [c.thumbnailPath, c.imagePath, c.imageUrl].filter(Boolean);
+  return [c.thumbnailPath, c.imagePath, c.imageUrl].filter(Boolean).map(withBaseUrl);
 }
 
 function sameImageUrl(currentSrc: string, candidate: string): boolean {
