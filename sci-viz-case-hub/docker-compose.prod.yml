@@ -1,0 +1,28 @@
+services:
+  sci-viz-hub:
+    image: ghcr.io/azores24839/sci-viz-case-hub:latest
+    container_name: sci-viz-hub
+    restart: unless-stopped
+    env_file:
+      - ${CASE_HUB_ENV_FILE:-.env}
+    ports:
+      - "${CASE_HUB_PORT:-3001}:3001"
+    volumes:
+      - sci-viz-db:/app/sci-viz-case-hub/server/prisma
+      - sci-viz-uploads:/app/sci-viz-case-hub/server/uploads
+      - sci-viz-journal-covers:/app/journal_covers
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3001/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  sci-viz-db:
+  sci-viz-uploads:
+  sci-viz-journal-covers:

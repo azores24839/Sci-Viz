@@ -272,7 +272,13 @@ async function main() {
       .filter(domain => !domain.endsWith('.sjtu.edu.cn')),
   );
 
-  const groups = Object.fromEntries(GROUP_ORDER.map(group => [group, []])) as Record<GroupId, CaseLite[]>;
+  const createEmptyGroups = (): Record<GroupId, CaseLite[]> =>
+    GROUP_ORDER.reduce((result, group) => {
+      result[group] = [];
+      return result;
+    }, {} as Record<GroupId, CaseLite[]>);
+
+  const groups = createEmptyGroups();
   for (const c of cases) {
     groups[classifyCase(c, domesticDomains)].push(c);
   }
@@ -302,7 +308,7 @@ async function main() {
 
   const effectRows = CORE_AXES.map(axis => {
     const full = cramersV(groups, axis, CORE_GROUPS);
-    const balancedGroups = Object.fromEntries(GROUP_ORDER.map(group => [group, []])) as Record<GroupId, CaseLite[]>;
+    const balancedGroups = createEmptyGroups();
     for (const c of standardBalanced) balancedGroups[classifyCase(c, domesticDomains)].push(c);
     const balanced = cramersV(balancedGroups, axis, CORE_GROUPS);
     return [

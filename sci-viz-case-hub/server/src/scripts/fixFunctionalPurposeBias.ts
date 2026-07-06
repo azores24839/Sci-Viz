@@ -23,7 +23,13 @@ async function main() {
 
   console.log(`Found ${lowConfBroadcast.length} low-confidence cases marked as '传播'`);
 
-  const reclassificationRules: Record<string, Record<string, string>> = {
+  type ReclassificationRule = {
+    default?: string;
+    rules?: Array<{ field: string; value: string; result: string }>;
+    distribution: Record<string, number>;
+  };
+
+  const reclassificationRules: Record<string, ReclassificationRule> = {
     '3D渲染': {
       'default': '35',
       'rules': [
@@ -113,7 +119,7 @@ async function main() {
     // Fallback: use distribution based on mediaType
     const rules = reclassificationRules[mt];
     if (rules && 'distribution' in rules) {
-      return inferFromDistribution((rules as any).distribution);
+      return inferFromDistribution(rules.distribution);
     }
 
     return '不确定';
