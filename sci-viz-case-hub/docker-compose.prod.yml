@@ -1,16 +1,46 @@
 services:
   sci-viz-hub:
-    image: ghcr.io/azores24839/sci-viz-case-hub:latest
+    image: ghcr.io/azores24839/sci-viz-case-hub:${CASE_HUB_IMAGE_TAG:-latest}
     container_name: sci-viz-hub
+    pull_policy: always
     restart: unless-stopped
+    init: true
+    stop_grace_period: 20s
     env_file:
       - ${CASE_HUB_ENV_FILE:-.env}
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      DATABASE_URL: file:./prisma/dev.db
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in the production .env file}
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS must be set in the production .env file}
     ports:
-      - "${CASE_HUB_PORT:-3001}:3001"
+      - "${CASE_HUB_BIND_IP:-127.0.0.1}:${CASE_HUB_PORT:-3001}:3001"
     volumes:
-      - sci-viz-db:/app/sci-viz-case-hub/server/prisma
-      - sci-viz-uploads:/app/sci-viz-case-hub/server/uploads
-      - sci-viz-journal-covers:/app/journal_covers
+      - type: bind
+        source: ${CASE_HUB_DATA_DIR:-./data}/prisma
+        target: /app/sci-viz-case-hub/server/prisma
+      - type: bind
+        source: ${CASE_HUB_DATA_DIR:-./data}/uploads
+        target: /app/sci-viz-case-hub/server/uploads
+      - type: bind
+        source: ${CASE_HUB_DATA_DIR:-./data}/journal_covers
+        target: /app/journal_covers
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    cpus: ${CASE_HUB_CPUS:-1.5}
+    mem_limit: ${CASE_HUB_MEMORY_LIMIT:-2g}
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     healthcheck:
       test:
         - CMD
@@ -21,8 +51,9 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    networks:
+      - case-hub
 
-volumes:
-  sci-viz-db:
-  sci-viz-uploads:
-  sci-viz-journal-covers:
+networks:
+  case-hub:
+    name: case-hub

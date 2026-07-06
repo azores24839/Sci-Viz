@@ -51,7 +51,9 @@ Settings → Secrets and variables → Actions → Variables
 ECS 需要预先安装 Docker 和 Docker Compose 插件。然后在服务器执行：
 
 ```bash
-sudo mkdir -p /opt/sci-viz-case-hub
+sudo mkdir -p /opt/sci-viz-case-hub/data/prisma
+sudo mkdir -p /opt/sci-viz-case-hub/data/uploads
+sudo mkdir -p /opt/sci-viz-case-hub/data/journal_covers
 cd /opt/sci-viz-case-hub
 sudo touch .env
 sudo chmod 600 .env
@@ -67,25 +69,54 @@ docker login ghcr.io -u azores24839
 
 密码位置粘贴 Token。Token 不要写进 Compose 文件。
 
-## 5. 临时访问
+生产 Compose 使用宿主机目录保存数据库和图片，便于查看、迁移与备份。首次运行前必须创建以上三个目录，否则 Docker 不会自动创建正确的目录结构。
 
-当前生产 Compose 默认映射端口 `3001`。阿里云安全组临时放行 TCP 3001 后，可访问：
+生产容器同时启用了：
+
+- 自动拉取最新镜像；
+- 健康检查与优雅停止；
+- 只读容器文件系统；
+- 禁止新增 Linux 权限；
+- CPU、内存和进程数限制；
+- Docker 日志轮转，避免日志占满磁盘；
+- 数据库、uploads 和期刊封面宿主机持久化。
+
+## 5. 临时访问与正式反向代理
+
+为避免 Node 服务直接暴露公网，生产配置默认只监听 ECS 本机的 `127.0.0.1:3001`。建议由宿主机 Nginx 转发：
 
 ```text
-http://139.196.209.165:3001
+公网 80/443 → Nginx → 127.0.0.1:3001
 ```
 
-正式域名上线后应使用 Nginx 和 HTTPS，只向公网开放 80/443，并关闭公网 3001。
+临时确实需要直接使用公网 IP 和 3001 端口时，可在服务器 `.env` 中暂时设置：
+
+```dotenv
+CASE_HUB_BIND_IP=0.0.0.0
+CORS_ORIGINS=http://139.196.209.165:3001
+```
+
+然后在阿里云安全组临时放行 TCP 3001。正式域名上线后改回 `127.0.0.1`，使用 Nginx 和 HTTPS，只向公网开放 80/443。
 
 ## 6. 持久数据
 
-以下内容保存在 Docker Volume，不会因更新镜像而消失：
+以下内容保存在 `/opt/sci-viz-case-hub/data`，不会因更新镜像而消失：
 
 - SQLite 数据库；
 - 本地 uploads；
 - journal covers。
 
 历史数据库和图片不会自动进入 Docker 镜像。正式上线前仍需单独迁移 SQLite，并按 OSS 迁移方案上传历史图片。
+
+建议每天备份：
+
+```text
+/opt/sci-viz-case-hub/data/prisma
+/opt/sci-viz-case-hub/data/uploads
+/opt/sci-viz-case-hub/.env
+```
+
+`.env` 备份必须加密或存放在受控位置。
 
 ## 7. 日常部署
 
