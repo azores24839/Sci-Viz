@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../api';
+import { withBaseUrl } from '../baseUrl';
 import type { VisualCase, ReviewStatus } from '../types';
 import { REVIEW_STATUS_LABELS, MEDIA_TYPES, CONTENT_TYPES, DISCIPLINES, TECHNICAL_METHODS, DISTRIBUTION_MEDIUMS, RATING_LABELS } from '../types';
 import { theme } from '../theme';
@@ -15,7 +16,7 @@ function normalizeContentTypeLabel(value: string): string {
 function imageCandidates(c: VisualCase): string[] {
   return [c.imagePath, c.thumbnailPath, c.imageUrl].filter((value, index, arr): value is string =>
     Boolean(value) && arr.indexOf(value) === index
-  );
+  ).map(withBaseUrl);
 }
 
 export default function CaseDetail() {
