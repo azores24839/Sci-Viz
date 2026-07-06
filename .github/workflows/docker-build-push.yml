@@ -1,13 +1,17 @@
-name: Build and Push Docker Image
+name: Build, Push and Deploy Case Hub
 
 on:
   push:
     branches:
       - main
+    paths:
+      - "sci-viz-case-hub/**"
+      - ".github/workflows/docker-build-push.yml"
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/sci-viz-hub
+  IMAGE_NAME: azores24839/sci-viz-case-hub
 
 jobs:
   build-and-push:
@@ -30,12 +34,59 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=,format=short
+            type=raw,value=latest
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: ./sci-viz-case-hub
           file: ./sci-viz-case-hub/Dockerfile
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    if: ${{ vars.CASE_HUB_SSH_HOST != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout deployment files
+        uses: actions/checkout@v4
+
+      - name: Copy production Compose file
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ vars.CASE_HUB_SSH_HOST }}
+          username: ${{ vars.CASE_HUB_SSH_USERNAME }}
+          key: ${{ secrets.CASE_HUB_SSH_PRIVATE_KEY }}
+          port: ${{ vars.CASE_HUB_SSH_PORT || '22' }}
+          source: "sci-viz-case-hub/docker-compose.prod.yml"
+          target: ${{ vars.CASE_HUB_COMPOSE_DIR }}
+          strip_components: 1
+
+      - name: Pull and restart Case Hub
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ vars.CASE_HUB_SSH_HOST }}
+          username: ${{ vars.CASE_HUB_SSH_USERNAME }}
+          key: ${{ secrets.CASE_HUB_SSH_PRIVATE_KEY }}
+          port: ${{ vars.CASE_HUB_SSH_PORT || '22' }}
+          script: |
+            set -eu
+            cd ${{ vars.CASE_HUB_COMPOSE_DIR }}
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            docker image prune -f
+            docker compose -f docker-compose.prod.yml ps
