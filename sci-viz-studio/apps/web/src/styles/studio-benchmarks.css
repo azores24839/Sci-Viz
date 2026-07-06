@@ -371,6 +371,12 @@
 .research-compose button, .research-adopt, .research-task-failure button { min-height: 32px; padding: 0 12px; border: 0; border-radius: 8px; color: #fff; background: #17191d; cursor: pointer; font-size: 10px; font-weight: 760; white-space: nowrap; }
 .research-compose button:disabled, .research-adopt:disabled { opacity: .42; cursor: not-allowed; }
 .research-task-list { display: grid; gap: 10px; }
+.research-used-sources { display: grid; gap: 8px; padding: 10px; border: 1px solid #ded9d2; border-radius: 12px; background: #f8f7f4; }
+.research-used-sources > strong { font-size: 10px; }
+.research-used-sources > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.research-used-sources a, .research-used-sources > div > span { display: grid; gap: 2px; max-width: 100%; padding: 6px 8px; border: 1px solid #e0dcd5; border-radius: 8px; color: #2f2e2a; background: #fff; font-size: 10px; text-decoration: none; }
+.research-used-sources a:hover { border-color: #aaa49c; }
+.research-used-sources small { overflow: hidden; color: #85817b; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .research-task { display: grid; gap: 10px; padding: 12px; border: 1px solid #e3dfd9; border-radius: 12px; background: #fff; }
 .research-task > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .research-task > header div { display: grid; gap: 4px; min-width: 0; }
@@ -385,7 +391,12 @@
 .research-report strong { font-size: 11px; }
 .research-report small { color: #77736e; font-size: 9px; line-height: 1.45; }
 .research-candidates { display: grid; gap: 6px; }
+.research-select-all { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 34px; padding: 4px 9px; color: #403e3a; cursor: pointer; }
+.research-select-all input { margin: 0; accent-color: #17191d; }
+.research-select-all span { font-size: 10px; font-weight: 760; }
+.research-select-all small { color: #77736e; font-size: 9px; }
 .research-candidates label { display: grid; grid-template-columns: 18px 42px minmax(0, 1fr) auto; align-items: start; gap: 8px; padding: 9px; border: 1px solid #ece8e2; border-radius: 9px; cursor: pointer; }
+.research-candidates label.research-select-all { grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; border: 0; border-radius: 0; }
 .research-candidates label.is-selected { border-color: #17191d; background: #f8f7f4; }
 .research-candidates input { margin: 2px 0 0; accent-color: #17191d; }
 .research-source-type { padding: 3px 4px; border-radius: 4px; color: #5f5d58; background: #efede9; font-size: 8px; font-weight: 740; text-align: center; }

@@ -18,6 +18,7 @@ interface WorkflowCanvasProps {
   template: WorkflowTemplate;
   states: WorkflowNodeState[];
   selectedNodeId: string;
+  focusRequestKey: number;
   onSelectNode: (nodeId: string) => void;
   onConfirmNode: (nodeId: string) => void;
   onReviseNode: (nodeId: string, instruction: string) => void;
@@ -30,13 +31,20 @@ interface WorkflowCanvasProps {
 }
 
 const nodeTypes = { workflow: WorkflowNodeCard };
+export const DEFAULT_WORKFLOW_VIEWPORT = { x: 28, y: 54, zoom: 0.72 };
 
-export function WorkflowCanvas({ projectId, template, states, selectedNodeId, onSelectNode, onConfirmNode, onReviseNode, primaryPurposeId, secondaryPurposeId, purposeOptions, onSetPrimaryPurpose, onSetSecondaryPurpose, onBenchmarkSelectionChange }: WorkflowCanvasProps) {
+export function preserveWorkflowNodes(next: StudioFlowNode[], expected: StudioFlowNode[]) {
+  if (expected.length === 0) return next;
+  const nextById = new Map(next.map((node) => [node.id, node]));
+  return expected.map((node) => nextById.get(node.id) ?? node);
+}
+
+export function WorkflowCanvas({ projectId, template, states, selectedNodeId, focusRequestKey, onSelectNode, onConfirmNode, onReviseNode, primaryPurposeId, secondaryPurposeId, purposeOptions, onSetPrimaryPurpose, onSetSecondaryPurpose, onBenchmarkSelectionChange }: WorkflowCanvasProps) {
   const initial = useMemo(() => toFlowElements(template, states), [template, states]);
   const [nodes, setNodes] = useState<StudioFlowNode[]>(initial.nodes);
   const [locked, setLocked] = useState(false);
   const flowRef = useRef<ReactFlowInstance<StudioFlowNode> | null>(null);
-  const previousSelectionRef = useRef(selectedNodeId);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setNodes((current) => {
@@ -48,26 +56,39 @@ export function WorkflowCanvas({ projectId, template, states, selectedNodeId, on
     });
   }, [initial.nodes]);
 
-  useEffect(() => {
-    if (previousSelectionRef.current === selectedNodeId) return;
-    previousSelectionRef.current = selectedNodeId;
+  const focusSelectedNode = useCallback((duration = 260) => {
     const target = nodes.find((node) => node.id === selectedNodeId);
     if (!target || !flowRef.current) return;
-    const frame = window.requestAnimationFrame(() => {
-      void flowRef.current?.fitView({
-        nodes: [target],
-        padding: 0.18,
-        minZoom: 0.55,
-        maxZoom: 0.82,
-        duration: 260,
-      });
+    void flowRef.current.fitView({
+      nodes: [target],
+      padding: 0.18,
+      minZoom: 0.55,
+      maxZoom: 0.82,
+      duration,
     });
+  }, [nodes, selectedNodeId]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => focusSelectedNode());
     return () => window.cancelAnimationFrame(frame);
-  }, [selectedNodeId, nodes]);
+  }, [selectedNodeId, focusRequestKey, focusSelectedNode]);
+
+  useEffect(() => {
+    const element = canvasRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    let hadSize = element.clientWidth > 0 && element.clientHeight > 0;
+    const observer = new ResizeObserver(([entry]) => {
+      const hasSize = Boolean(entry && entry.contentRect.width > 0 && entry.contentRect.height > 0);
+      if (hasSize && !hadSize) window.requestAnimationFrame(() => focusSelectedNode(0));
+      hadSize = hasSize;
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [focusSelectedNode]);
 
   const onNodesChange = useCallback((changes: NodeChange<StudioFlowNode>[]) => {
-    setNodes((current) => applyNodeChanges(changes, current));
-  }, []);
+    setNodes((current) => preserveWorkflowNodes(applyNodeChanges(changes, current), initial.nodes));
+  }, [initial.nodes]);
 
   const selectedEdges = initial.edges.map((edge) => {
     const isAdjacent = edge.target === selectedNodeId || edge.source === selectedNodeId;
@@ -75,9 +96,12 @@ export function WorkflowCanvas({ projectId, template, states, selectedNodeId, on
   });
 
   return (
-    <div className={`workflow-canvas${locked ? ' is-locked' : ''}`} aria-label="科研影像工作流画布">
+    <div ref={canvasRef} className={`workflow-canvas${locked ? ' is-locked' : ''}`} aria-label="科研影像工作流画布">
       <ReactFlow
-        onInit={(instance) => { flowRef.current = instance as unknown as ReactFlowInstance<StudioFlowNode>; }}
+        onInit={(instance) => {
+          flowRef.current = instance as unknown as ReactFlowInstance<StudioFlowNode>;
+          window.requestAnimationFrame(() => focusSelectedNode(0));
+        }}
         nodes={nodes.map((node) => ({
           ...node,
           data: {
@@ -117,7 +141,7 @@ export function WorkflowCanvas({ projectId, template, states, selectedNodeId, on
         zoomActivationKeyCode="Meta"
         zoomOnScroll={false}
         zoomOnPinch={!locked}
-        defaultViewport={{ x: 18, y: 42, zoom: 1 }}
+        defaultViewport={DEFAULT_WORKFLOW_VIEWPORT}
         minZoom={0.35}
         maxZoom={1.2}
         proOptions={{ hideAttribution: true }}

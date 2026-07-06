@@ -3,14 +3,14 @@ import type { AgentJobRepository } from './repository.js';
 
 export type AgentJobHandler = (request: AgentDraftRequest) => Promise<AgentDraftResponse>;
 
-function classify(error: unknown) {
+export function classifyAgentJobError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Agent task failed';
   const status = message.match(/\b(429|5\d\d)\b/)?.[1];
   if (status === '429') return { code: 'MODEL_RATE_LIMITED', message: '模型服务繁忙，任务将自动重试。', retryable: true };
   if (status?.startsWith('5')) return { code: 'MODEL_UNAVAILABLE', message: '模型服务暂时不可用，任务将自动重试。', retryable: true };
   if (/timeout|aborted/i.test(message)) return { code: 'MODEL_TIMEOUT', message: '模型处理超时，任务将自动重试。', retryable: true };
-  if (/AGENT_OUTPUT_INVALID/.test(message)) return { code: 'AGENT_OUTPUT_INVALID', message: 'AI 返回的内容不完整，没有写入正式结果。请调整输入后重新生成。', retryable: false };
-  return { code: 'AGENT_JOB_FAILED', message, retryable: false };
+  if (/AGENT_OUTPUT_INVALID|Unexpected token|not valid JSON|JSON at position|JSON input/i.test(message)) return { code: 'AGENT_OUTPUT_INVALID', message: '这次生成的内容格式不完整，系统会重新尝试。', retryable: true };
+  return { code: 'AGENT_JOB_FAILED', message: '这次没有生成可用结果，请稍后重新运行。', retryable: true };
 }
 
 export class AgentJobProcessor {
@@ -36,7 +36,7 @@ export class AgentJobProcessor {
       const stamp = new Date().toISOString();
       await this.repo.save({ ...job, status: 'COMPLETED', result: parsed.data, error: undefined, completedAt: stamp, updatedAt: stamp });
     } catch (cause) {
-      const error = classify(cause); const stamp = new Date(); const retry = error.retryable && job.attempt < job.maxAttempts;
+      const error = classifyAgentJobError(cause); const stamp = new Date(); const retry = error.retryable && job.attempt < job.maxAttempts;
       const failed: AgentJob = retry
         ? { ...job, status: 'QUEUED', error, availableAt: new Date(stamp.getTime() + Math.min(30_000, 1000 * 2 ** job.attempt)).toISOString(), updatedAt: stamp.toISOString() }
         : { ...job, status: 'FAILED', error, completedAt: stamp.toISOString(), updatedAt: stamp.toISOString() };

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import { withBaseUrl } from '../baseUrl';
 import { Card } from '../components';
 import type { ComparisonData, ComparisonDistributionItem, ComparisonGroup, ComparisonGroupId, ComparisonSample } from '../types';
 import { theme } from '../theme';
@@ -869,7 +870,7 @@ function CaseThumb({ sample }: { sample: ComparisonSample }) {
   if (!sample.thumbnail) {
     return <span style={{ width: 54, height: 54, borderRadius: 6, background: theme.colors.bgSubtle }} />;
   }
-  return <img src={sample.thumbnail} alt="" style={{ width: 54, height: 54, objectFit: 'cover', borderRadius: 6, background: theme.colors.bgSubtle }} />;
+  return <img src={withBaseUrl(sample.thumbnail)} alt="" style={{ width: 54, height: 54, objectFit: 'cover', borderRadius: 6, background: theme.colors.bgSubtle }} />;
 }
 
 function chartColor(index: number): string {

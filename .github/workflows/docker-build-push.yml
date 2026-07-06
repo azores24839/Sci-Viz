@@ -48,6 +48,8 @@ jobs:
         with:
           context: ./sci-viz-case-hub
           file: ./sci-viz-case-hub/Dockerfile
+          build-args: |
+            VITE_BASE_URL=/sciviz/
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

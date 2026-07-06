@@ -1,4 +1,5 @@
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '/api/v1').replace(/\/$/, '');
+const appBaseUrl = import.meta.env.BASE_URL.replace(/\/$/, '');
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? `${appBaseUrl}/api/v1`).replace(/\/$/, '');
 
 let tokenProvider: () => Promise<string | null> = async () => null;
 

@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { ProjectGoal, StudioProject } from '@studio/contracts';
 import { apiFetch } from '../api/client';
+import { ProjectStarter } from '../features/projects/ProjectStarter';
+import { FeedbackWidget } from '../features/feedback/FeedbackWidget';
+import { UsageProfile } from '../auth/UsageProfile';
 
 const projectGoalLabel: Record<ProjectGoal, string> = {
   ACADEMIC_COMMUNICATION: '学术传播',
@@ -9,13 +12,6 @@ const projectGoalLabel: Record<ProjectGoal, string> = {
   RECRUITING_BRAND: '招生/招聘/团队品牌',
   INDUSTRY_COLLABORATION: '产业转化/合作',
 };
-
-const goalOptions: Array<{ id: ProjectGoal; label: string }> = [
-  { id: 'ACADEMIC_COMMUNICATION', label: '学术传播' },
-  { id: 'PUBLIC_COMMUNICATION', label: '公众传播' },
-  { id: 'RECRUITING_BRAND', label: '招生/招聘/团队品牌' },
-  { id: 'INDUSTRY_COLLABORATION', label: '产业转化/合作' },
-];
 
 const statusLabel: Record<string, string> = {
   DRAFT: '草稿',
@@ -26,24 +22,6 @@ const statusLabel: Record<string, string> = {
 
 type PageState = 'loading' | 'empty' | 'error' | 'ready';
 
-interface NewProjectForm {
-  name: string;
-  teamType: string;
-  researchDirection: string;
-  primaryAudience: string;
-  primaryGoal: ProjectGoal | '';
-  secondaryGoal: ProjectGoal | '';
-}
-
-const emptyForm = (): NewProjectForm => ({
-  name: '',
-  teamType: '',
-  researchDirection: '',
-  primaryAudience: '',
-  primaryGoal: '',
-  secondaryGoal: '',
-});
-
 function formatTime(iso: string) {
   return new Date(iso).toLocaleDateString('zh-CN', {
     year: 'numeric',
@@ -52,129 +30,6 @@ function formatTime(iso: string) {
     hour: '2-digit',
     minute: '2-digit',
   });
-}
-
-function NewProjectModal({
-  onClose,
-  onSubmit,
-}: {
-  onClose: () => void;
-  onSubmit: (data: NewProjectForm) => Promise<void>;
-}) {
-  const [form, setForm] = useState<NewProjectForm>(emptyForm);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-
-  const canSubmit = form.name.trim().length > 0 && !submitting;
-
-  const handleSubmit = async () => {
-    if (!canSubmit) return;
-    setSubmitting(true);
-    setError('');
-    try {
-      await onSubmit(form);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '创建失败，请重试。');
-      setSubmitting(false);
-    }
-  };
-
-  const setField = <K extends keyof NewProjectForm>(key: K, value: NewProjectForm[K]) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  };
-
-  return (
-    <div className="project-modal-overlay" role="dialog" aria-label="新建项目" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="project-modal">
-        <div className="project-modal-head">
-          <h2>新建项目</h2>
-          <button type="button" className="project-modal-close" onClick={onClose} aria-label="关闭">&times;</button>
-        </div>
-        <form className="project-form" onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }}>
-          <label className="project-field">
-            <span>项目名称 <em>*</em></span>
-            <input
-              type="text"
-              value={form.name}
-              onChange={(e) => setField('name', e.target.value)}
-              placeholder="例如：微流控芯片成像方案"
-              maxLength={120}
-              autoFocus
-            />
-          </label>
-          <label className="project-field">
-            <span>团队类型</span>
-            <input
-              type="text"
-              value={form.teamType}
-              onChange={(e) => setField('teamType', e.target.value)}
-              placeholder="例如：高校实验室、企业研发中心"
-              maxLength={120}
-            />
-          </label>
-          <label className="project-field">
-            <span>研究方向</span>
-            <input
-              type="text"
-              value={form.researchDirection}
-              onChange={(e) => setField('researchDirection', e.target.value)}
-              placeholder="例如：生物医学工程、环境监测"
-              maxLength={300}
-            />
-          </label>
-          <label className="project-field">
-            <span>主要受众</span>
-            <input
-              type="text"
-              value={form.primaryAudience}
-              onChange={(e) => setField('primaryAudience', e.target.value)}
-              placeholder="例如：合作企业、期刊审稿人、公众"
-              maxLength={200}
-            />
-          </label>
-          <fieldset className="project-goal-group">
-            <legend>拍摄目标</legend>
-            <div className="project-goal-grid">
-              {goalOptions.map((goal) => (
-                <label
-                  key={goal.id}
-                  className={`project-goal-chip${form.primaryGoal === goal.id ? ' is-primary' : ''}${form.secondaryGoal === goal.id ? ' is-secondary' : ''}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={form.primaryGoal === goal.id || form.secondaryGoal === goal.id}
-                    onChange={() => {
-                      if (form.primaryGoal === goal.id) {
-                        setField('primaryGoal', form.secondaryGoal as ProjectGoal | '');
-                        setField('secondaryGoal', '');
-                      } else if (form.secondaryGoal === goal.id) {
-                        setField('secondaryGoal', '');
-                      } else if (!form.primaryGoal) {
-                        setField('primaryGoal', goal.id);
-                      } else {
-                        setField('secondaryGoal', goal.id);
-                      }
-                    }}
-                    className="sr-only"
-                  />
-                  <span className="project-goal-chip-label">{goal.label}</span>
-                  {form.primaryGoal === goal.id && <span className="project-goal-chip-badge">主目标</span>}
-                  {form.secondaryGoal === goal.id && <span className="project-goal-chip-badge">次目标</span>}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-          {error && <p className="project-form-error" role="alert">{error}</p>}
-          <div className="project-form-actions">
-            <button type="button" className="project-btn-secondary" onClick={onClose}>取消</button>
-            <button type="submit" className="project-btn-primary" disabled={!canSubmit}>
-              {submitting ? '创建中…' : '创建项目'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
 }
 
 function RenameModal({
@@ -233,7 +88,6 @@ export function Projects() {
   const [projects, setProjects] = useState<StudioProject[]>([]);
   const [pageState, setPageState] = useState<PageState>('loading');
   const [errorMessage, setErrorMessage] = useState('');
-  const [showNewModal, setShowNewModal] = useState(false);
   const [renamingProject, setRenamingProject] = useState<StudioProject | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -254,27 +108,6 @@ export function Projects() {
   }, []);
 
   useEffect(() => { void loadProjects(); }, [loadProjects]);
-
-  const createProject = async (form: NewProjectForm) => {
-    const response = await apiFetch('/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: form.name.trim(),
-        teamType: form.teamType.trim(),
-        researchDirection: form.researchDirection.trim(),
-        primaryAudience: form.primaryAudience.trim(),
-        ...(form.primaryGoal ? { primaryGoal: form.primaryGoal } : {}),
-        ...(form.secondaryGoal ? { secondaryGoal: form.secondaryGoal } : {}),
-      }),
-    });
-    if (!response.ok) {
-      const payload = await response.json() as { error?: { message: string } };
-      throw new Error(payload.error?.message ?? '创建项目失败。');
-    }
-    setShowNewModal(false);
-    await loadProjects();
-  };
 
   const renameProject = async (project: StudioProject, newName: string) => {
     const response = await apiFetch(`/projects/${project.id}`, {
@@ -309,23 +142,30 @@ export function Projects() {
 
   return (
     <div className="projects-shell">
-      <header className="projects-header">
+      <aside className="projects-sidebar" aria-label="首页导航">
         <div className="projects-brand">
-          <img className="projects-logo" src="/logo.png" alt="研影" />
-          <span>Sci AI Studio</span>
+          <img className="projects-logo" src={`${import.meta.env.BASE_URL}logo.png`} alt="研影" />
         </div>
-        <button
-          type="button"
-          className="project-btn-primary"
-          onClick={() => setShowNewModal(true)}
-          disabled={pageState === 'loading'}
-        >
-          + 新建项目
-        </button>
-        <Link to="/help" className="projects-help-link">帮助</Link>
-      </header>
+        <nav className="projects-nav">
+          <Link to="/" className="projects-nav-item is-active" aria-current="page">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l2-2h9v14h-17z" /></svg><span>所有项目</span>
+          </Link>
+          <div className="projects-nav-item projects-account-item">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.2" /><path d="M5.5 19c.6-4 2.8-6 6.5-6s5.9 2 6.5 6" /></svg><span>账户</span>
+          </div>
+        </nav>
+        <div className="projects-sidebar-bottom">
+          <FeedbackWidget context={{ page: '项目列表' }} triggerClassName="projects-nav-item projects-feedback-item" triggerLabel={<><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M9.7 9a2.5 2.5 0 0 1 4.8 1c0 2-2.5 2.1-2.5 4M12 17.5h.01" /></svg><span>问题反馈</span></>} />
+        </div>
+      </aside>
 
-      <main className="projects-body">
+      <div className="projects-main">
+        <div className="projects-usage"><UsageProfile /></div>
+        <main className="projects-body">
+        <ProjectStarter />
+
+        <section className="recent-projects" aria-labelledby="recent-projects-title">
+          <div className="recent-projects-head"><h2 id="recent-projects-title">最近项目</h2></div>
         {pageState === 'loading' && (
           <div className="projects-message" role="status">
             <span className="projects-loading-spinner" aria-hidden="true" />
@@ -342,17 +182,7 @@ export function Projects() {
         )}
 
         {pageState === 'empty' && (
-          <div className="projects-message projects-empty">
-            <strong>还没有项目</strong>
-            <p>创建你的第一个科研影像项目，上传资料后让 AI 帮你策划拍摄方案。</p>
-            <button
-              type="button"
-              className="project-btn-primary"
-              onClick={() => setShowNewModal(true)}
-            >
-              创建第一个项目
-            </button>
-          </div>
+          <div className="recent-projects-empty">还没有项目，从上方开始。</div>
         )}
 
         {pageState === 'ready' && (
@@ -406,14 +236,9 @@ export function Projects() {
             ))}
           </div>
         )}
-      </main>
-
-      {showNewModal && (
-        <NewProjectModal
-          onClose={() => setShowNewModal(false)}
-          onSubmit={createProject}
-        />
-      )}
+        </section>
+        </main>
+      </div>
 
       {renamingProject && (
         <RenameModal

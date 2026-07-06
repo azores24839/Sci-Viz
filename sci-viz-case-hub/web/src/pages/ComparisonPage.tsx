@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import { withBaseUrl } from '../baseUrl';
 import { theme } from '../theme';
 import type { ComparisonData, ComparisonGroup, ComparisonSample, EnterpriseCommercialSignals } from '../types';
 
@@ -516,7 +517,7 @@ function StrategyCaseItem({
       }}>
         {sample?.thumbnail ? (
           <img
-            src={sample.thumbnail}
+            src={withBaseUrl(sample.thumbnail)}
             alt={displayTitle}
             loading="lazy"
             style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }}

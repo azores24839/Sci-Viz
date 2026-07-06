@@ -40,7 +40,7 @@ export async function registerResearchRoutes(app: FastifyInstance, deps: {
     const { id } = request.params as { id: string }; const task = await deps.research.get(id);
     if (!task || !await deps.ownsProject(request.authUserId, task.projectId)) return missing(reply);
     if (!process.env.TAVILY_API_KEY?.trim()) return reply.code(503).send({ success: false, error: { code: 'RESEARCH_PROVIDER_NOT_CONFIGURED', message: '联网研究尚未配置。' } });
-    const queued: ResearchTask = { ...task, status: 'QUEUED', candidates: [], report: undefined, error: undefined, completedAt: undefined, updatedAt: now() };
+    const queued: ResearchTask = { ...task, status: 'QUEUED', candidates: [], report: undefined, error: undefined, effectiveQuery: undefined, completedAt: undefined, updatedAt: now() };
     await deps.research.save(queued); deps.processor.enqueue(id);
     return reply.code(202).send({ success: true, data: queued });
   });

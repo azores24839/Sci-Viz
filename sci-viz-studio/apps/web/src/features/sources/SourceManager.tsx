@@ -1,19 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SourceDocument } from '@studio/contracts';
-import { apiFetch, notifyUsageChanged } from '../../api/client';
+import { apiFetch } from '../../api/client';
 import { ResearchPanel } from './ResearchPanel';
+import { createProjectTextSource, createProjectWebSource, loadProjectSources, readApiPayload, uploadProjectFiles } from './sourceApi';
+import { validateAndMergeFiles } from './pendingFileUtils';
 const kindCopy: Record<SourceDocument['kind'], string> = { PDF: 'PDF', DOCX: 'Word', IMAGE: '图片', TEXT: '文字', WEB: '网页' };
 
 function sourceLabel(source: SourceDocument) {
   if (!source.sourceUrl) return kindCopy[source.kind];
   try { return new URL(source.sourceUrl).hostname.replace(/^www\./, ''); }
   catch { return '网页'; }
-}
-
-async function readPayload<T>(response: Response): Promise<T> {
-  if (response.ok) return (await response.json()) as T;
-  const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-  throw new Error(payload?.error?.message ?? `请求失败（${response.status}）`);
 }
 
 export function SourceManager({ projectId, onSourcesChange }: { projectId: string; onSourcesChange: (sources: SourceDocument[]) => void }) {
@@ -27,8 +23,8 @@ export function SourceManager({ projectId, onSourcesChange }: { projectId: strin
   const fileInput = useRef<HTMLInputElement>(null);
 
   const load = async () => {
-    const payload = await readPayload<{ success: true; data: SourceDocument[] }>(await apiFetch(`/projects/${projectId}/sources`));
-    setSources(payload.data); onSourcesChange(payload.data);
+    const data = await loadProjectSources(projectId);
+    setSources(data); onSourcesChange(data);
   };
 
   useEffect(() => { void load().catch((cause) => setError(cause instanceof Error ? cause.message : '资料列表加载失败')); }, [projectId]);
@@ -40,22 +36,15 @@ export function SourceManager({ projectId, onSourcesChange }: { projectId: strin
 
   const uploadFiles = async (files: FileList | null) => {
     if (!files?.length) return;
-    setBusy(true); setError('');
+    const validated = validateAndMergeFiles([], Array.from(files));
+    const validationMessage = validated.errors.join('；');
+    if (validationMessage) setError(validationMessage);
+    if (!validated.files.length) return;
+    setBusy(true); if (!validationMessage) setError('');
     try {
-      for (const file of Array.from(files)) {
-        const extension = file.name.split('.').pop()?.toLowerCase();
-        const mimeType = file.type || (extension === 'pdf' ? 'application/pdf' : extension === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : extension === 'png' ? 'image/png' : 'image/jpeg');
-        const init = await readPayload<{ success: true; data: { source: SourceDocument; storageMode: 'local' | 'oss'; uploadUrl?: string } }>(await apiFetch('/source-uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, fileName: file.name, mimeType, sizeBytes: file.size }) }));
-        if (init.data.storageMode === 'oss' && init.data.uploadUrl) {
-          const uploaded = await fetch(init.data.uploadUrl, { method: 'PUT', headers: { 'Content-Type': mimeType }, body: file });
-          if (!uploaded.ok) throw new Error(`“${file.name}”上传到 OSS 失败。`);
-          await readPayload(await apiFetch('/source-uploads/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, sourceId: init.data.source.id }) }));
-        } else {
-          const form = new FormData(); form.append('projectId', projectId); form.append('sourceId', init.data.source.id); form.append('file', file.type ? file : new File([file], file.name, { type: mimeType }));
-          await readPayload(await apiFetch('/source-uploads/local', { method: 'POST', body: form }));
-        }
-      }
-      await load(); notifyUsageChanged();
+      await uploadProjectFiles(projectId, validated.files);
+      await load();
+      if (validationMessage) setError(validationMessage);
     } catch (cause) { setError(cause instanceof Error ? cause.message : '上传失败'); }
     finally { setBusy(false); if (fileInput.current) fileInput.current.value = ''; }
   };
@@ -63,19 +52,19 @@ export function SourceManager({ projectId, onSourcesChange }: { projectId: strin
   const createText = async () => {
     if (!textBody.trim()) return;
     setBusy(true); setError('');
-    try { await readPayload(await apiFetch('/sources/text', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, title: textTitle || undefined, text: textBody }) })); setTextTitle(''); setTextBody(''); await load(); notifyUsageChanged(); }
+    try { await createProjectTextSource(projectId, textBody, textTitle || undefined); setTextTitle(''); setTextBody(''); await load(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : '文字资料保存失败'); } finally { setBusy(false); }
   };
 
   const createWeb = async () => {
     if (!url.trim()) return;
     setBusy(true); setError('');
-    try { await readPayload(await apiFetch('/sources/web', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, url }) })); setUrl(''); await load(); notifyUsageChanged(); }
+    try { await createProjectWebSource(projectId, url); setUrl(''); await load(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : '网页资料添加失败'); } finally { setBusy(false); }
   };
 
   const toggle = async (source: SourceDocument) => {
-    try { await readPayload(await apiFetch(`/sources/${source.id}/selection`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selected: !source.selected }) })); await load(); }
+    try { await readApiPayload(await apiFetch(`/sources/${source.id}/selection`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selected: !source.selected }) })); await load(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : '选择状态更新失败'); }
   };
   return <div className="source-manager">
@@ -92,7 +81,7 @@ export function SourceManager({ projectId, onSourcesChange }: { projectId: strin
       </>}
       {mode === 'text' && <div className="source-compose"><input value={textTitle} onChange={(event) => setTextTitle(event.target.value)} placeholder="标题（可选）" /><textarea value={textBody} onChange={(event) => setTextBody(event.target.value)} placeholder="粘贴研究背景、项目介绍或现场说明…" /><button onClick={() => void createText()} disabled={busy || !textBody.trim()} type="button">保存并解析</button></div>}
       {mode === 'web' && <div className="source-compose"><input type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/research" /><p>只读取当前公开页面，不会继续抓取站内其他链接。</p><button onClick={() => void createWeb()} disabled={busy || !url.trim()} type="button">读取并总结</button></div>}
-      {mode === 'research' && <ResearchPanel projectId={projectId} onAdopted={load} />}
+      {mode === 'research' && <ResearchPanel projectId={projectId} onAdopted={load} sources={sources} />}
     </section>
     {error && <div className="source-error" role="alert">{error}<button type="button" onClick={() => setError('')}>关闭</button></div>}
     <div className="source-ledger">

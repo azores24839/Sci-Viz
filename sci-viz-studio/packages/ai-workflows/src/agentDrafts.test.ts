@@ -65,6 +65,16 @@ describe('agent draft generation', () => {
     });
   });
 
+  it('falls back to a safe project understanding when the model returns markdown instead of JSON', async () => {
+    const gateway: ModelGateway = {
+      async generateText() { return '## 项目理解草案\n- 这不是 JSON'; },
+      async generateStructured() { throw new Error('not used'); },
+    };
+    const result = await generateAgentDraft(gateway, { ...request, nodeLabel: '项目理解', outputLabel: '项目理解', upstreamArtifacts: [{ nodeId: 'source:web-1', label: '资料：项目官网', body: '[资料类型：WEB]\n项目介绍' }] });
+    expect(result.body).toContain('本轮使用 1 份项目资料');
+    expect(result.body).not.toContain('这不是 JSON');
+  });
+
   it('keeps mock revisions labeled as the requested version', () => {
     expect(createMockAgentDraft({ ...request, revision: 2, planLabel: 'Plan B' })).toMatchObject({
       label: '视觉现状诊断 v2',

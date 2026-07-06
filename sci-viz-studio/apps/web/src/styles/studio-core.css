@@ -18,6 +18,9 @@
   background: var(--studio-surface);
 }
 
+.studio-intake-warning { position: fixed; top: 66px; left: 50%; z-index: 100; display: flex; align-items: center; gap: 16px; max-width: min(680px, calc(100vw - 40px)); padding: 10px 13px; border: 1px solid #e1c7c2; border-radius: 10px; color: #78342e; background: #fff7f5; box-shadow: 0 12px 32px rgb(30 22 20 / 10%); font-size: 12px; transform: translateX(-50%); }
+.studio-intake-warning button { border: 0; color: inherit; background: transparent; cursor: pointer; font: inherit; font-weight: 750; }
+
 .studio-header {
   position: absolute;
   top: 20px;

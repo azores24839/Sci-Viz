@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { apiFetch } from '../../api/client';
 
 const FEEDBACK_CATEGORIES = [
@@ -19,7 +19,7 @@ interface FeedbackContext {
 
 interface FeedbackWidgetProps {
   context: FeedbackContext;
-  triggerLabel?: string;
+  triggerLabel?: ReactNode;
   triggerClassName?: string;
 }
 

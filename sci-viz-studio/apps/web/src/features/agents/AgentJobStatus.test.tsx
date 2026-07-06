@@ -74,7 +74,7 @@ describe('AgentJobStatus', () => {
     );
     expect(screen.getByText('失败')).toBeTruthy();
     expect(screen.getByText('重试')).toBeTruthy();
-    expect(screen.getByText(/模型服务繁忙/)).toBeTruthy();
+    expect(screen.getByText('当前使用人数较多')).toBeTruthy();
   });
 
   it('renders failed state with non-retryable error without retry button', () => {
@@ -88,7 +88,10 @@ describe('AgentJobStatus', () => {
       />
     );
     expect(screen.queryByText('重试')).toBeNull();
-    expect(screen.getByText('此错误无法通过重试解决，请检查输入内容后重新运行。')).toBeTruthy();
+    expect(screen.getByText('这次没有生成成功')).toBeTruthy();
+    expect(screen.queryByText('AGENT_JOB_FAILED')).toBeNull();
+    expect(screen.queryByText('Task error')).toBeNull();
+    expect(screen.getByText('请返回上一步确认资料是否完整，然后重新运行。')).toBeTruthy();
   });
 
   it('renders quota exceeded with recovery info', () => {
@@ -114,7 +117,7 @@ describe('AgentJobStatus', () => {
         status="FAILED"
       />
     );
-    expect(screen.getByText(/模型处理超时/)).toBeTruthy();
+    expect(screen.getByText('处理时间有点久')).toBeTruthy();
   });
 
   it('renders model unavailable error', () => {
@@ -127,7 +130,7 @@ describe('AgentJobStatus', () => {
         status="FAILED"
       />
     );
-    expect(screen.getByText(/模型服务暂时不可用/)).toBeTruthy();
+    expect(screen.getByText('AI 服务暂时不可用')).toBeTruthy();
   });
 
   it('renders awaiting_human state', () => {
@@ -154,5 +157,12 @@ describe('AgentJobStatus', () => {
     );
     const alerts = screen.getAllByRole('alert');
     expect(alerts.length).toBeGreaterThan(0);
+  });
+
+  it('never exposes raw parser errors or internal error codes', () => {
+    render(<AgentJobStatus job={mockJob({ status: 'FAILED', error: { code: 'AGENT_OUTPUT_INVALID', message: 'Unexpected token # is not valid JSON', retryable: true } })} status="FAILED" onRetry={() => {}} />);
+    expect(screen.getByText('生成结果需要重新整理')).toBeTruthy();
+    expect(screen.queryByText(/Unexpected token/)).toBeNull();
+    expect(screen.queryByText('AGENT_OUTPUT_INVALID')).toBeNull();
   });
 });

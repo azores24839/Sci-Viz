@@ -204,7 +204,7 @@ export function AgentContextPanel({
           {activeJobError && <p className="agent-job-error" role="alert">{activeJobError}，系统会继续尝试恢复进度。</p>}
         </section>
       )}
-      {showPurposeChoices && <section className="decision-card" aria-label="目标与产物选择">
+      {showPurposeChoices && <section className="decision-card" aria-label="目标与受众确认">
         <div className="decision-card-header">
           <strong>传播目标</strong>
           <span>主目标必选，次目标最多一个</span>

@@ -24,6 +24,7 @@ import { registerReviewRoutes } from './reviews/routes.js';
 import { createResearchRepository } from './research/repository.js';
 import { ResearchProcessor } from './research/processor.js';
 import { registerResearchRoutes } from './research/routes.js';
+import { registerProjectIntakeRoutes } from './intake/routes.js';
 
 import { createFeedbackRepository } from './feedback.js';
 
@@ -40,7 +41,7 @@ const planRepository = createPlanRepository(process.env);
 const reviewRepository = createReviewRepository(process.env);
 const researchRepository = createResearchRepository(process.env);
 const sourceProcessor = new SourceProcessor(sourceRepository, sourceStorage, process.env, Number(process.env.SOURCE_WORKER_CONCURRENCY ?? 2), usageLimiter);
-const researchProcessor = new ResearchProcessor(researchRepository, process.env, Number(process.env.RESEARCH_WORKER_CONCURRENCY ?? 1));
+const researchProcessor = new ResearchProcessor(researchRepository, process.env, Number(process.env.RESEARCH_WORKER_CONCURRENCY ?? 1), sourceRepository);
 const ownsProject = async (userId: string, projectId: string) => projectId === defaultProjectId(userId, process.env) || (await workspaceRepository.getProject(projectId))?.ownerUserId === userId;
 const agentJobProcessor = new AgentJobProcessor(agentJobRepository, async (draft) => {
   const provider = process.env.AI_PROVIDER ?? 'mock';
@@ -99,6 +100,7 @@ await app.register(rateLimit, {
 });
 
 await registerWorkspaceRoutes(app, workspaceRepository);
+await registerProjectIntakeRoutes(app, process.env, (userId) => usageLimiter.consume(userId));
 await registerSourceRoutes(app, { repo: sourceRepository, storage: sourceStorage, processor: sourceProcessor, ownsProject, maxStorageBytes: Number(process.env.USER_STORAGE_LIMIT_MB ?? 500) * 1024 * 1024, maxSources: Number(process.env.USER_SOURCE_LIMIT ?? 50) });
 await registerAgentJobRoutes(app, { repo: agentJobRepository, processor: agentJobProcessor, ownsProject, dailyLimit: usageLimiter });
 await registerBenchmarkRoutes(app, { workspace: workspaceRepository, env: process.env });

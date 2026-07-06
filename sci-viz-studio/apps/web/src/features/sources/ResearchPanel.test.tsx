@@ -36,4 +36,22 @@ describe('ResearchPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '快速研究' }));
     expect(await screen.findByText('联网研究尚未配置。')).toBeTruthy();
   });
+
+  it('selects and clears every candidate in one research task', async () => {
+    const task = {
+      id: '22222222-2222-4222-8222-222222222222', projectId: '11111111-1111-4111-8111-111111111111', ownerUserId: 'user-a', mode: 'FAST', query: '深海机器人', status: 'COMPLETED', createdAt: '2026-07-05T00:00:00.000Z', updatedAt: '2026-07-05T00:00:01.000Z',
+      candidates: [
+        { id: '33333333-3333-4333-8333-333333333333', title: '来源 A', url: 'https://a.example/research', domain: 'a.example', snippet: 'A', score: 0.9, sourceType: 'OFFICIAL' },
+        { id: '44444444-4444-4444-8444-444444444444', title: '来源 B', url: 'https://b.example/paper', domain: 'b.example', snippet: 'B', score: 0.8, sourceType: 'PAPER' },
+      ],
+    };
+    mockedFetch.mockResolvedValueOnce(new Response(JSON.stringify({ success: true, data: [task] }), { status: 200 }));
+    render(<ResearchPanel projectId={task.projectId} onAdopted={vi.fn()} />);
+    const selectAll = await screen.findByRole('checkbox', { name: '全选本次结果' });
+    fireEvent.click(selectAll);
+    expect(screen.getByText('已选 2/2')).toBeTruthy();
+    expect(screen.getAllByRole('checkbox').filter((checkbox) => (checkbox as HTMLInputElement).checked)).toHaveLength(3);
+    fireEvent.click(selectAll);
+    expect(screen.getByText('已选 0/2')).toBeTruthy();
+  });
 });

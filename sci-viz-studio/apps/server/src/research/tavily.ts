@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ResearchCandidate, ResearchMode, ResearchReport } from '@studio/contracts';
+import { TAVILY_QUERY_LIMIT, TAVILY_RETRY_QUERY_LIMIT, truncateResearchQuery } from './researchQuery.js';
 
 type TavilyResult = { title?: string; url?: string; content?: string; score?: number; published_date?: string };
 type TavilyResponse = { answer?: string; results?: TavilyResult[] };
@@ -30,11 +31,12 @@ export async function searchTavily(env: NodeJS.ProcessEnv, query: string, mode: 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), mode === 'DEEP' ? 90_000 : 30_000);
   try {
-    const response = await fetch(env.TAVILY_API_URL?.trim() || 'https://api.tavily.com/search', {
+    const endpoint = env.TAVILY_API_URL?.trim() || 'https://api.tavily.com/search';
+    const request = (effectiveQuery: string) => fetch(endpoint, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        query,
+        query: effectiveQuery,
         search_depth: mode === 'DEEP' ? 'advanced' : 'basic',
         max_results: mode === 'DEEP' ? 12 : 8,
         include_answer: mode === 'DEEP' ? 'advanced' : false,
@@ -44,9 +46,22 @@ export async function searchTavily(env: NodeJS.ProcessEnv, query: string, mode: 
       }),
       signal: controller.signal,
     });
+
+    let effectiveQuery = truncateResearchQuery(query, TAVILY_QUERY_LIMIT);
+    let response = await request(effectiveQuery);
     if (!response.ok) {
       const message = await response.text().catch(() => '');
-      throw new Error(`RESEARCH_PROVIDER_ERROR:Tavily 请求失败（${response.status}）${message ? `：${message.slice(0, 200)}` : ''}`);
+      const queryTooLong = response.status === 400
+        && /(?:query|search|string).{0,80}(?:length|long|max|character|400)|(?:length|long|max|character|400).{0,80}(?:query|search|string)/i.test(message);
+      if (queryTooLong && effectiveQuery.length > TAVILY_RETRY_QUERY_LIMIT) {
+        effectiveQuery = truncateResearchQuery(effectiveQuery, TAVILY_RETRY_QUERY_LIMIT);
+        response = await request(effectiveQuery);
+      }
+      if (!response.ok) {
+        const retryMessage = response.bodyUsed ? '' : await response.text().catch(() => '');
+        const detail = retryMessage || message;
+        throw new Error(`RESEARCH_PROVIDER_ERROR:Tavily 请求失败（${response.status}）${detail ? `：${detail.slice(0, 200)}` : ''}`);
+      }
     }
     const payload = await response.json() as TavilyResponse;
     const candidates = (payload.results ?? []).flatMap((item): ResearchCandidate[] => {
@@ -56,6 +71,6 @@ export async function searchTavily(env: NodeJS.ProcessEnv, query: string, mode: 
         return [{ id: randomUUID(), title: item.title.trim().slice(0, 500), url: url.toString(), domain: url.hostname.replace(/^www\./, ''), snippet: (item.content ?? '').trim().slice(0, 6000), score: Math.max(0, Math.min(1, Number(item.score ?? 0))), sourceType: sourceType(url.toString(), item.title), ...(item.published_date ? { publishedAt: item.published_date } : {}) }];
       } catch { return []; }
     });
-    return { candidates, ...(mode === 'DEEP' ? { report: reportFrom(payload, candidates) } : {}) };
+    return { effectiveQuery, candidates, ...(mode === 'DEEP' ? { report: reportFrom(payload, candidates) } : {}) };
   } finally { clearTimeout(timer); }
 }

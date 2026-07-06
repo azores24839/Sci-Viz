@@ -1,15 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { agentMessages, agentProfiles, changxingProject } from '@studio/fixtures';
+import { agentMessages, agentProfiles } from '@studio/fixtures';
 import {
   confirmNodeAndQueueNext,
   createDirectorWorkflowStates,
   getCurrentDirectorNodeId,
   researchPhotoWorkflowV1,
   reviseNodeDraft,
-  type WorkflowNodeDefinition,
   type WorkflowNodeState,
 } from '@studio/workflow-core';
-import type { ProjectGoal, SourceDocument } from '@studio/contracts';
+import type { ProjectGoal, SourceDocument, StudioProject } from '@studio/contracts';
 import { WorkflowCanvas } from '../features/workflow-canvas/WorkflowCanvas';
 import { WorkflowFallbackList } from '../features/workflow-canvas/WorkflowFallbackList';
 import { AgentContextPanel } from '../features/workflow-canvas/AgentContextPanel';
@@ -17,12 +16,15 @@ import { StageProgress } from '../features/workflow-canvas/StageProgress';
 import { ProjectCompletion } from '../features/workflow-canvas/ProjectCompletion';
 import { usableSelectedSources } from '../features/sources/sourceUtils';
 import { resetWorkflowForSourceChange } from '../features/sources/sourceWorkflowReset';
+import { SourceOnboarding } from '../features/sources/SourceOnboarding';
+import { loadProjectSources, loadResearchTasks } from '../features/sources/sourceApi';
 import { apiFetch } from '../api/client';
 import { agentRoleForNode, useStudioAgentWorkflow } from '../features/workflow-canvas/useStudioAgentWorkflow';
 import { useWorkflowPersistence } from '../features/workflow-canvas/useWorkflowPersistence';
 import { FeedbackWidget } from '../features/feedback/FeedbackWidget';
 import { AccountIdentity } from '../auth/AuthRoot';
 import { UsageProfile } from '../auth/UsageProfile';
+import { migrateLegacyMockWorkflow } from '../features/workflow-canvas/workflowMigration';
 
 export interface ShootingPurposeOption {
   id: ProjectGoal;
@@ -37,77 +39,6 @@ const shootingPurposeOptions: ShootingPurposeOption[] = [
   { id: 'INDUSTRY_COLLABORATION', label: '产业转化/合作', description: '突出设备平台、应用场景、可靠性和工程化能力。' },
 ];
 
-function createDemoArtifact(node: WorkflowNodeDefinition, state: WorkflowNodeState) {
-  const version = state.revision;
-  const suffix = `v${version}`;
-  const label = `${node.outputLabel} ${suffix}`;
-
-  const drafts: Record<string, string> = {
-    'source-intake': [
-      '### 资料包',
-      '- 资料来源：Sci-Viz Case Hub mock 资料库，包含技术维度整体分布、高校实验室内容对象样本和对标案例缩略图。',
-      '- 使用范围：仅用于界面流程和诊断结构测试，后续替换为用户真实上传资料。',
-    ].join('\n'),
-    'visual-diagnosis': [
-      '### 视觉现状诊断',
-      '- 素材总览：当前使用 Sci-Viz Case Hub mock 样本作为资料源；126 条静图样本可进入结构诊断，21% 涉及屏幕、铭牌、合作单位或人员肖像等待确认。',
-      '- 功能维度结构：记录型素材约 72%，解释型约 12%，展示型约 9%，传播型约 5%，数据型约 2%；现阶段只描述结构，不判断目标优先级。',
-      '- 技术维度结构：拍摄 50%，绘设 19.6%，渲染 16.1%，成像 9.7%，数据 3.9%，生成 0.7%；说明资料库中真实采集仍是主流。',
-      '- 内容对象结构：设备、实验过程、团队协作和人物肖像占比较高；应用场景、样品细节和脱敏数据界面相对不足。',
-      '- 画面质量诊断：设备远景较多，景别层次、操作过程、尺度参照和稳定色调需要后续补强。',
-      '- 风险标记：屏幕数据、设备铭牌、合作单位名称、人员面部和未公开实验细节需要进入待确认清单。',
-    ].join('\n'),
-    'goal-output-selection': [
-      '### 目标配置',
-      '- 主目标：产业转化/合作。',
-      '- 次目标：公众传播。',
-      '- 产物类型：拍摄静图；录影/影片暂不可选。',
-      '- 目标匹配度：现有结构能够支撑设备能力展示，但对应用场景、可靠性证据和公众可理解过程支持不足。',
-      '- 目标缺口：若主打产业合作，需要补足工程应用、团队协作、关键操作和安全合规画面。',
-    ].join('\n'),
-    'case-benchmark': [
-      '### 案例对标',
-      '- 对标组：Sci-Viz Case Hub 中的高校平台实验室、企业工程案例、科研机构设备场景和期刊传播静图。',
-      '- 匹配依据：同为静图媒介，且包含设备尺度、实验过程、人物协作和工程应用语境。',
-      '- 结构差距：我方 mock 样本记录型较高；对标组在实验过程、应用展示和传播型画面上更完整。',
-      '- 借鉴方向：保留真实设备与空间秩序，同时补充人物尺度、关键操作、局部细节和外部应用语境。',
-      '- 降级逻辑：同科研方向不足时，退到同目标的工程可视化和大型设备场景案例。',
-    ].join('\n'),
-    'curation-strategy': [
-      '### 策展 brief',
-      '- 视觉路线：从“设备记录”走向“工程能力可见”，用尺度、过程、细节和协作关系补足可信证据。',
-      '- 叙事主线：平台能力 → 关键过程 → 团队协作 → 应用想象；不在此节点展开具体镜头参数。',
-      '- 必须强化的视觉证据：大型设备尺度、科研人员操作、样品或结构细节、脱敏数据界面、工程空间秩序。',
-      '- 科研审校员 · 贯穿风险层：持续检查事实、保密、安全和可拍条件；阻塞项未确认时，方案只能预览，不能标记为可执行。',
-      '- 不能照搬：不使用过度商业化口号，不把未确认指标视觉化为确定成果。',
-    ].join('\n'),
-    'photo-plan': [
-      `### ${state.planLabel ?? 'Plan A'} · 静图拍摄方案`,
-      '- 对外提案：围绕工程能力、应用想象和科研协作建立视觉路线。',
-      '- 画面卡：空间建立、人物与设备关系、操作过程、局部细节、脱敏屏幕。',
-      '- 执行清单：拍摄对象、景别、角度、光线、色调、优先级和禁拍提醒。',
-    ].join('\n'),
-    'ai-reference': [
-      `### ${state.planLabel ?? 'Plan A'} · AI 参考图`,
-      '- 参考图 1：大型海洋装备实验空间，冷白光，人物作为尺度参照。',
-      '- 参考图 2：科研人员操作控制台，屏幕内容抽象化处理。',
-      '- 说明：参考图只用于沟通画面方向，不替代真实拍摄。',
-    ].join('\n'),
-    'plan-output': [
-      `### ${state.planLabel ?? 'Plan A'} · 最终方案摘要`,
-      '- 对外沟通版：现状诊断、目标、案例对标、视觉路线、拍摄主题和风险。',
-      '- 摄影师执行版：拍摄对象、场景、景别、角度、光线、色调和优先级。',
-      '- 下一步可以继续生成 Plan B，或进入现场执行清单。',
-    ].join('\n'),
-  };
-
-  return {
-    label,
-    body: drafts[node.id] ?? `${node.label}草案已生成。`,
-    blockerCount: 0,
-  };
-}
-
 function createInitialStudioStates(): WorkflowNodeState[] {
   return createDirectorWorkflowStates(researchPhotoWorkflowV1).map((state) => {
     if (state.nodeId !== 'source-intake') return state;
@@ -115,14 +46,8 @@ function createInitialStudioStates(): WorkflowNodeState[] {
       ...state,
       status: 'AWAITING_HUMAN' as const,
       progress: 50,
-      summary: '请确认资料包',
-      artifactLabel: 'Sci-Viz Case Hub mock 资料源',
-      artifactBody: [
-        '### 资料输入',
-        '- 默认资料源：Sci-Viz Case Hub mock 资料库。',
-        '- 用途：用于测试视觉现状诊断、案例对标和拍摄方案流程。',
-        '- 下一步：确认资料源后进入视觉现状诊断。',
-      ].join('\n'),
+      summary: '请添加并选择至少一份已解析资料',
+      artifactLabel: '项目资料包',
     };
   });
 }
@@ -141,9 +66,17 @@ export function Studio({ projectId }: { projectId: string }) {
   } = workflow;
   const currentNodeId = getCurrentDirectorNodeId(researchPhotoWorkflowV1, states);
   const [selectedNodeId, setSelectedNodeId] = useState(currentNodeId);
+  const [canvasFocusRequest, setCanvasFocusRequest] = useState(0);
   const [revisionText, setRevisionText] = useState('');
   const [aiProviderLabel, setAiProviderLabel] = useState('AI 检查中');
+  const [project, setProject] = useState<StudioProject | null>(null);
   const [sources, setSources] = useState<SourceDocument[]>([]);
+  const [sourceBootstrapLoaded, setSourceBootstrapLoaded] = useState(false);
+  const [sourceBootstrapError, setSourceBootstrapError] = useState(false);
+  const [sourceBootstrapAttempt, setSourceBootstrapAttempt] = useState(0);
+  const [researchTaskCount, setResearchTaskCount] = useState(0);
+  const [workspaceStarted, setWorkspaceStarted] = useState(false);
+  const [intakeWarning, setIntakeWarning] = useState('');
   const sourceSelectionRef = useRef<{ projectId: string; signature: string } | null>(null);
   const [benchmarkSelectionCount, setBenchmarkSelectionCount] = useState(0);
   const usableSources = usableSelectedSources(sources);
@@ -151,6 +84,48 @@ export function Studio({ projectId }: { projectId: string }) {
   useEffect(() => {
     if (currentNodeId) setSelectedNodeId(currentNodeId);
   }, [currentNodeId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setWorkspaceStarted(false);
+    setSourceBootstrapLoaded(false);
+    setSourceBootstrapError(false);
+    setProject(null);
+    void Promise.all([
+      apiFetch(`/projects/${projectId}`).then(async (response) => {
+        const payload = await response.json() as { data?: StudioProject; error?: { message?: string } };
+        if (!response.ok || !payload.data) throw new Error(payload.error?.message ?? '项目加载失败。');
+        return payload.data;
+      }),
+      loadProjectSources(projectId),
+      loadResearchTasks(projectId),
+    ])
+      .then(([loadedProject, projectSources, tasks]) => {
+        if (cancelled) return;
+        setProject(loadedProject);
+        setSources(projectSources);
+        setResearchTaskCount(tasks.length);
+        setSourceBootstrapLoaded(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSourceBootstrapError(true);
+        setSourceBootstrapLoaded(true);
+      });
+    return () => { cancelled = true; };
+  }, [projectId, sourceBootstrapAttempt]);
+
+  useEffect(() => {
+    if (!workflowLoaded || !sourceBootstrapLoaded) return;
+    setStates((current) => migrateLegacyMockWorkflow(current, usableSources.length));
+  }, [workflowLoaded, sourceBootstrapLoaded, usableSources.length, setStates]);
+
+  useEffect(() => {
+    const key = `studio:intake-warning:${projectId}`;
+    const warning = sessionStorage.getItem(key) ?? '';
+    setIntakeWarning(warning);
+    if (warning) sessionStorage.removeItem(key);
+  }, [projectId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,7 +149,7 @@ export function Studio({ projectId }: { projectId: string }) {
     const primaryPurpose = shootingPurposeOptions.find((option) => option.id === primaryPurposeId) ?? shootingPurposeOptions[0];
     const secondaryPurpose = shootingPurposeOptions.find((option) => option.id === secondaryPurposeId);
     const body = [
-      '### 目标与产物选择',
+      '### 目标与受众确认',
       `- 主目标：${primaryPurpose?.label ?? '待选择'}`,
       `- 次目标：${secondaryPurpose?.label ?? '暂无'}`,
       '- 产物类型：拍摄静图。',
@@ -198,7 +173,7 @@ export function Studio({ projectId }: { projectId: string }) {
   const currentState = states.find((state) => state.nodeId === currentNodeId);
   const activeAgentJob = useStudioAgentWorkflow({
     projectId,
-    projectName: changxingProject.name,
+    projectName: project?.name ?? '未命名项目',
     workflowLoaded,
     currentNode,
     currentState,
@@ -234,17 +209,49 @@ export function Studio({ projectId }: { projectId: string }) {
     setRevisionText('');
   };
 
+  const sourceIntakeCompleted = states.find((state) => state.nodeId === 'source-intake')?.status === 'COMPLETED';
+  const showSourceOnboarding = workflowLoaded
+    && sourceBootstrapLoaded
+    && !workspaceStarted
+    && sources.length === 0
+    && researchTaskCount === 0
+    && !sourceIntakeCompleted;
+
+  if (!workflowLoaded || !sourceBootstrapLoaded) {
+    return <main className="app-loading"><strong>正在打开项目</strong><span>正在确认已有资料与工作进度…</span></main>;
+  }
+
+  if (sourceBootstrapError) {
+    return <main className="app-loading"><strong>项目资料暂时没有加载完成</strong><span>请检查网络后重试，已有内容不会丢失。</span><button type="button" onClick={() => setSourceBootstrapAttempt((value) => value + 1)}>重新加载</button></main>;
+  }
+
+  if (!project) {
+    return <main className="app-loading"><strong>项目不存在</strong><span>请返回项目列表后重新选择。</span></main>;
+  }
+
+  if (showSourceOnboarding) {
+    return <SourceOnboarding projectId={projectId} onStarted={async () => {
+      setSelectedNodeId('source-intake');
+      setWorkspaceStarted(true);
+      const result = await Promise.all([loadProjectSources(projectId), loadResearchTasks(projectId)]).catch(() => null);
+      if (!result) return;
+      setSources(result[0]);
+      setResearchTaskCount(result[1].length);
+    }} />;
+  }
+
   return <div className="studio-shell">
+    {intakeWarning && <div className="studio-intake-warning" role="status"><span>{intakeWarning}</span><button type="button" onClick={() => setIntakeWarning('')}>关闭</button></div>}
     <header className="studio-header">
       <div className="studio-header-left">
         <details className="brand-menu">
           <summary className="brand" aria-label="打开账户菜单">
-            <img className="brand-logo" src="/logo.png" alt="" />
-            <span>{changxingProject.name}</span>
+            <img className="brand-logo" src={`${import.meta.env.BASE_URL}logo.png`} alt="" />
+            <span>{project.name}</span>
           </summary>
           <div className="brand-menu-popover">
             <div className="brand-menu-account"><AccountIdentity /><span>个人账号</span></div>
-            <a href="/">返回项目列表</a>
+            <a href={import.meta.env.BASE_URL}>返回项目列表</a>
             <FeedbackWidget context={{ page: '工作流画布', projectId }} triggerLabel="问题反馈" triggerClassName="brand-menu-action" />
           </div>
         </details>
@@ -253,7 +260,10 @@ export function Studio({ projectId }: { projectId: string }) {
           {workflow.saveStatus === 'error' && <button type="button" onClick={workflow.retrySave}>重试</button>}
         </div>}
       </div>
-      <StageProgress states={states} selectedNodeId={selectedNodeId} onSelectNode={setSelectedNodeId} />
+      <StageProgress states={states} selectedNodeId={selectedNodeId} onSelectNode={(nodeId) => {
+        setSelectedNodeId(nodeId);
+        setCanvasFocusRequest((value) => value + 1);
+      }} />
       <div className="studio-usage-dock"><UsageProfile /></div>
     </header>
     <main className="studio-body">
@@ -264,6 +274,7 @@ export function Studio({ projectId }: { projectId: string }) {
           template={researchPhotoWorkflowV1}
           states={states}
           selectedNodeId={selectedNodeId}
+          focusRequestKey={canvasFocusRequest}
           onSelectNode={setSelectedNodeId}
           onConfirmNode={(nodeId) => {
             if (nodeId === 'source-intake' && usableSources.length === 0) return;

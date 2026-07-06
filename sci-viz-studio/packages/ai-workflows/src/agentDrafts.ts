@@ -29,9 +29,26 @@ const SourceDiagnosisSchema = z.object({
 
 type SourceDiagnosis = z.infer<typeof SourceDiagnosisSchema>;
 
-function parseSourceDiagnosis(raw: string): SourceDiagnosis {
-  const normalized = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  return SourceDiagnosisSchema.parse(JSON.parse(normalized));
+function fallbackProjectUnderstanding(request: AgentDraftRequest): SourceDiagnosis {
+  const sources = request.upstreamArtifacts.filter((item) => item.nodeId.startsWith('source:'));
+  const hasImage = sources.some((item) => item.body.includes('[资料类型：IMAGE]'));
+  return {
+    conclusion: hasImage ? '已收到项目资料与图片，可进入初步项目理解，具体信息仍需用户确认。' : '已收到文字或网页资料，可理解项目背景；当前没有图片资料，不对现有视觉素材做判断。',
+    overview: `本轮使用 ${sources.length} 份项目资料。`,
+    confirmed: sources.slice(0, 3).map((item) => `已读取“${item.label.replace(/^资料：/, '')}”。`),
+    gaps: ['需要用户确认研究重点、可公开范围和本次希望解决的问题。'],
+    risks: ['网页与 AI 摘要可能存在过期或误读，关键事实待用户确认。'],
+    basis: sources.slice(0, 3).map((item) => item.label.replace(/^资料：/, '')),
+  };
+}
+
+function parseSourceDiagnosis(raw: string, request: AgentDraftRequest): SourceDiagnosis {
+  try {
+    const normalized = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    return SourceDiagnosisSchema.parse(JSON.parse(normalized));
+  } catch {
+    return fallbackProjectUnderstanding(request);
+  }
 }
 
 function diagnosisBody(value: SourceDiagnosis) {
@@ -94,7 +111,9 @@ export function buildAgentUserPrompt(request: AgentDraftRequest): string {
     '',
     upstream,
     '',
-    '请直接生成当前节点的中文草案。不要输出 JSON。不要编造用户未提供的事实；不确定的地方请标注“待确认”。',
+    request.nodeId === 'visual-diagnosis' && request.agentRole === 'SOURCE_ANALYST'
+      ? '请严格按照系统提示的 JSON 结构输出，不要输出 Markdown、代码围栏或额外解释。'
+      : '请直接生成当前节点的中文草案，不要编造用户未提供的事实；不确定的地方请标注“待确认”。',
   ].join('\n');
 }
 
@@ -186,7 +205,7 @@ export async function generateAgentDraft(
     context: { projectId: request.projectId, promptVersion: prompt.version },
   });
   const body = request.nodeId === 'visual-diagnosis' && request.agentRole === 'SOURCE_ANALYST'
-    ? diagnosisBody(parseSourceDiagnosis(rawBody))
+    ? diagnosisBody(parseSourceDiagnosis(rawBody, request))
     : rawBody;
 
   const evidence = buildEvidence(body, request);

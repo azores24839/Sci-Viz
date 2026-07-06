@@ -39,188 +39,10 @@ const avatarByNode: Record<string, string> = {
   'ai-reference': '/agents/visual-planner.png',
 };
 
-const nodeEvidence: Record<string, Array<{ src: string; label: string; note: string }>> = {
-  'curation-strategy': [
-    { src: '/case-refs/changxing-01.jpg', label: '现状', note: '记录型' },
-    { src: '/case-refs/changxing-04.jpg', label: '方向', note: '工程能力可见' },
-  ],
-};
-
-const insightCharts: Record<string, {
-  title: string;
-  source: string;
-  rows: Array<{ label: string; value: number; note: string }>;
-}> = {
-  'case-benchmark': {
-    title: '我方结构 vs 对标组',
-    source: '引用 Sci-Viz Case Hub：高校/企业/机构 approved 样本',
-    rows: [
-      { label: '我方记录', value: 72, note: '设备/空间记录偏高' },
-      { label: '对标过程', value: 41, note: '操作与团队协作更完整' },
-      { label: '对标展示', value: 34, note: '应用语境更清楚' },
-    ],
-  },
-};
-
-const diagnosisChartGroups = [
-  {
-    title: '功能维度占比',
-    source: 'Sci-Viz Case Hub mock：静图案例功能分类',
-    rows: [
-      { label: '记录', value: 72, note: '设备/空间留档为主' },
-      { label: '解释', value: 12, note: '过程说明不足' },
-      { label: '展示', value: 9, note: '成果/应用较少' },
-      { label: '传播', value: 5, note: '面向公众较弱' },
-      { label: '数据', value: 2, note: '屏幕/图表少量出现' },
-    ],
-  },
-  {
-    title: '技术维度占比',
-    source: 'Sci-Viz Case Hub 技术维度：整体结构样本',
-    rows: [
-      { label: '拍摄', value: 50, note: '2799 条，真实采集主导' },
-      { label: '绘设', value: 19.6, note: '图标/信息设计' },
-      { label: '渲染', value: 16.1, note: '3D/工程可视化' },
-      { label: '成像', value: 9.7, note: '显微/医学/遥感等' },
-      { label: '数据', value: 3.9, note: '图表/地图/网络' },
-      { label: '生成', value: 0.7, note: 'AI 或风格迁移' },
-    ],
-  },
-  {
-    title: '内容对象占比',
-    source: 'Sci-Viz Case Hub mock：高校/实验室照片内容',
-    rows: [
-      { label: '实验设备', value: 31.5, note: '头部样本更重设备' },
-      { label: '实验过程', value: 24.1, note: '过程画面决定解释力' },
-      { label: '群体团队', value: 21.8, note: '交大现状样本较高' },
-      { label: '单人肖像', value: 18.8, note: '人物识别与可信度' },
-      { label: '团队场景', value: 13.9, note: '协作关系线索' },
-    ],
-  },
-  {
-    title: '可用性与风险',
-    source: '基于上传资料 + Case Hub mock 规则',
-    rows: [
-      { label: '可公开', value: 64, note: '可直接进入诊断' },
-      { label: '需脱敏', value: 21, note: '屏幕/铭牌/合作单位' },
-      { label: '低可用', value: 15, note: '模糊、光线差、主体弱' },
-    ],
-  },
-];
-
-const benchmarkCases = [
-  { src: '/case-refs/changxing-01.jpg', title: '高校平台实验室', meta: '设备尺度 / 空间秩序', fit: '补足“设备能力可见”' },
-  { src: '/case-refs/changxing-02.jpg', title: '团队协作场景', meta: '人物关系 / 过程线索', fit: '补足“谁在做、如何做”' },
-  { src: '/case-refs/changxing-03.jpg', title: '工程装备细节', meta: '局部结构 / 技术可信度', fit: '补足“专业细节证据”' },
-  { src: '/case-refs/changxing-04.jpg', title: '产业工程参照', meta: '应用语境 / 可靠性', fit: '补足“对外合作语境”' },
-];
-
-const diagnosisObjects = [
-  { src: '/case-refs/changxing-05.jpg', title: '实验设备', meta: '31.5% · 设备/平台记录', finding: '最能支撑“硬件能力”，但需要补拍人物尺度与运行状态。' },
-  { src: '/case-refs/changxing-04.jpg', title: '实验过程', meta: '24.1% · 会议/协作过程', finding: '能证明组织与协同，但还缺少真实操作和实验动作。' },
-  { src: '/case-refs/changxing-06.jpg', title: '人物肖像', meta: '18.8% · 单人/专家形象', finding: '有可信度入口，但偏正式肖像，科研现场关系不足。' },
-  { src: '/case-refs/changxing-02.jpg', title: '人物资料', meta: '14.9% · 人员识别素材', finding: '可用于团队识别，但传播画面价值低，需要转化为场景化拍摄。' },
-];
-
-interface SourceItem {
-  id: string;
-  name: string;
-  meta: string;
-  checked: boolean;
-}
-
-const defaultSourceItems: SourceItem[] = [
-  { id: 'hub-technical-distribution', name: 'Sci-Viz Case Hub · 技术维度整体分布', meta: 'Mock 资料库 · 已选', checked: true },
-  { id: 'hub-lab-photo-structure', name: 'Sci-Viz Case Hub · 高校实验室内容对象样本', meta: 'Mock 资料库 · 已选', checked: true },
-  { id: 'hub-benchmark-thumbnails', name: 'Sci-Viz Case Hub · 对标案例缩略图', meta: 'Mock 资料库 · 已选', checked: true },
-];
-
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function NodeEvidenceStrip({ items }: { items: Array<{ src: string; label: string; note: string }> }) {
-  return <div className="node-evidence-strip" aria-label="视觉证据">
-    {items.map((item) => <figure key={`${item.src}-${item.label}`}>
-      <img src={item.src} alt="" />
-      <figcaption>
-        <strong>{item.label}</strong>
-        <span>{item.note}</span>
-      </figcaption>
-    </figure>)}
-  </div>;
-}
-
-function NodeInsightChart({ chart }: { chart: NonNullable<(typeof insightCharts)[string]> }) {
-  return <div className="node-insight-chart" aria-label={chart.title}>
-    <div className="node-insight-header">
-      <strong>{chart.title}</strong>
-      <span>{chart.source}</span>
-    </div>
-    <div className="node-chart-rows">
-      {chart.rows.map((row) => <div className="node-chart-row" key={row.label}>
-        <div className="node-chart-label">
-          <span>{row.label}</span>
-          <em>{row.value}%</em>
-        </div>
-        <div className="node-chart-track"><span style={{ width: `${row.value}%` }} /></div>
-        <small>{row.note}</small>
-      </div>)}
-    </div>
-  </div>;
-}
-
-function DiagnosisDashboard() {
-  return <div className="diagnosis-dashboard" aria-label="视觉现状数据看板">
-    <div className="diagnosis-metric-row">
-      <div><strong>126</strong><span>Case Hub mock 样本</span></div>
-      <div><strong>82%</strong><span>静图可分析</span></div>
-      <div><strong>21%</strong><span>需脱敏/确认</span></div>
-    </div>
-    <div className="diagnosis-chart-grid">
-      {diagnosisChartGroups.map((chart) => <NodeInsightChart chart={chart} key={chart.title} />)}
-    </div>
-  </div>;
-}
-
-function DiagnosisObjectGallery() {
-  return <section className="diagnosis-object-gallery" aria-label="分析对象缩略图">
-    <div className="diagnosis-object-header">
-      <strong>分析对象代表样本</strong>
-      <span>按内容对象占比与诊断价值选取</span>
-    </div>
-    <div className="diagnosis-object-grid">
-      {diagnosisObjects.map((item) => <article className="diagnosis-object-card" key={item.title}>
-        <img src={item.src} alt="" />
-        <div>
-          <strong>{item.title}</strong>
-          <span>{item.meta}</span>
-          <p>{item.finding}</p>
-        </div>
-      </article>)}
-    </div>
-  </section>;
-}
-
-function CaseBenchmarkGallery() {
-  return <section className="benchmark-gallery" aria-label="对标案例缩略图">
-    <div className="benchmark-gallery-header">
-      <strong>对标案例候选</strong>
-      <span>先展示缩略图；后续可扩展为点击生成案例节点</span>
-    </div>
-    <div className="benchmark-case-grid">
-      {benchmarkCases.map((item) => <article className="benchmark-case-card" key={item.title}>
-        <img src={item.src} alt="" />
-        <div>
-          <strong>{item.title}</strong>
-          <span>{item.meta}</span>
-          <p>{item.fit}</p>
-        </div>
-      </article>)}
-    </div>
-  </section>;
 }
 
 function splitDiagnosisCards(cards: MdCard[]) {
@@ -379,8 +201,6 @@ export function WorkflowNodeCard({ data, selected }: NodeProps<StudioFlowNode>) 
   const preview = state.status === 'RUNNING'
     ? `${definition.owner}正在生成${definition.outputLabel}，完成后会停在确认点。`
     : summarizeNodeContent(state.artifactBody, state.summary || definition.description);
-  const evidence = nodeEvidence[definition.id] ?? [];
-  const chart = insightCharts[definition.id];
   const isTerminal = definition.kind === 'OUTPUT';
   const isSourceIntake = definition.id === 'source-intake';
   const isVisualDiagnosis = definition.id === 'visual-diagnosis';
@@ -416,9 +236,7 @@ export function WorkflowNodeCard({ data, selected }: NodeProps<StudioFlowNode>) 
           ? <span className="node-agent-avatar-frame" aria-hidden="true"><img className="node-agent-avatar" src={avatar} alt="" /></span>
           : !isSourceIntake ? <div className="node-visual" aria-hidden="true"><span className="node-glyph">{glyph[definition.kind]}</span></div> : null}
       </div>
-      {chart ? <NodeInsightChart chart={chart} /> : evidence.length > 0 ? <NodeEvidenceStrip items={evidence} /> : null}
       {definition.id === 'case-benchmark' && data.projectId ? <BenchmarkPanel projectId={data.projectId} {...(data.onBenchmarkSelectionChange ? { onSelectionChange: data.onBenchmarkSelectionChange } : {})} /> : null}
-      {definition.id === 'case-benchmark' && !data.projectId ? <CaseBenchmarkGallery /> : null}
       {definition.id === 'photo-plan' && data.projectId ? <PlanEditor projectId={data.projectId} /> : null}
       {isSourceIntake ? <section className="source-node-summary"><strong>{state.summary}</strong><span>在右侧“已添加的资料”中上传、解析并选择本轮资料。</span></section> : null}
       {waiting

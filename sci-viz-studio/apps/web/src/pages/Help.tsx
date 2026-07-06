@@ -129,7 +129,7 @@ export function Help() {
   return (
     <div className="help-shell">
       <div className="help-header">
-        <a href="/" className="help-back">&larr; 返回项目列表</a>
+        <a href={import.meta.env.BASE_URL} className="help-back">&larr; 返回项目列表</a>
         <h1>帮助中心</h1>
       </div>
       <main className="help-body">

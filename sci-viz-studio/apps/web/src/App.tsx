@@ -10,10 +10,11 @@ import './styles/studio-projects.css';
 import './styles/studio-agents.css';
 import './styles/studio-plans.css';
 import './styles/studio-reviews.css';
+import './styles/studio-onboarding.css';
 
 export function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '') || '/'}>
       <Routes>
         <Route path="/" element={<ProjectsPage />} />
         <Route path="/projects/:projectId" element={<StudioRoute />} />
@@ -25,12 +26,7 @@ export function App() {
 }
 
 function ProjectsPage() {
-  return (
-    <>
-      <Projects />
-      <FeedbackWidget context={{ page: '项目列表' }} />
-    </>
-  );
+  return <Projects />;
 }
 
 function StudioRoute() {

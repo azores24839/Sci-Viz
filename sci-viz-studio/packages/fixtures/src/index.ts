@@ -22,7 +22,7 @@ export const agentProfiles: AgentProfile[] = [
 
 export const changxingNodeStates: WorkflowNodeState[] = [
   { nodeId: 'source-intake', status: 'AWAITING_HUMAN', blockerCount: 0, progress: 50, summary: '等待确认资料包', artifactLabel: '资料包', revision: 1 },
-  { nodeId: 'visual-diagnosis', status: 'LOCKED', blockerCount: 0, progress: 0, summary: '等待资料包', artifactLabel: '视觉现状诊断', revision: 1 },
+  { nodeId: 'visual-diagnosis', status: 'LOCKED', blockerCount: 0, progress: 0, summary: '等待资料包', artifactLabel: '项目理解', revision: 1 },
   { nodeId: 'goal-output-selection', status: 'LOCKED', blockerCount: 0, progress: 0, summary: '等待视觉诊断', artifactLabel: '目标配置', revision: 1 },
   { nodeId: 'case-benchmark', status: 'LOCKED', blockerCount: 0, progress: 0, summary: '等待目标配置', artifactLabel: '对标案例', revision: 1 },
   { nodeId: 'curation-strategy', status: 'LOCKED', blockerCount: 0, progress: 0, summary: '等待案例对标', artifactLabel: '策展 brief', revision: 1 },

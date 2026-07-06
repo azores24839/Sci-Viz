@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { ResearchCandidate, ResearchMode, ResearchTask } from '@studio/contracts';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ResearchCandidate, ResearchMode, ResearchTask, SourceDocument } from '@studio/contracts';
 import { apiFetch, notifyUsageChanged } from '../../api/client';
 
 async function readPayload<T>(response: Response): Promise<T> {
@@ -11,7 +11,20 @@ async function readPayload<T>(response: Response): Promise<T> {
 const statusCopy: Record<ResearchTask['status'], string> = { QUEUED: '等待研究', RUNNING: '正在研究', COMPLETED: '研究完成', FAILED: '研究失败' };
 const typeCopy: Record<ResearchCandidate['sourceType'], string> = { OFFICIAL: '官方', PAPER: '论文', NEWS: '新闻', INSTITUTION: '机构', OTHER: '网页' };
 
-export function ResearchPanel({ projectId, onAdopted }: { projectId: string; onAdopted: () => Promise<void> }) {
+function ResearchSelectAll({ task, selectedIds, onChange }: { task: ResearchTask; selectedIds: string[]; onChange: (ids: string[]) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const allIds = task.candidates.map((candidate) => candidate.id);
+  const selectedCount = allIds.filter((id) => selectedIds.includes(id)).length;
+  const allSelected = allIds.length > 0 && selectedCount === allIds.length;
+  useEffect(() => { if (input.current) input.current.indeterminate = selectedCount > 0 && !allSelected; }, [allSelected, selectedCount]);
+  return <label className="research-select-all">
+    <input ref={input} type="checkbox" aria-label="全选本次结果" checked={allSelected} onChange={() => onChange(allSelected ? [] : allIds)} />
+    <span>全选本次结果</span>
+    <small>已选 {selectedCount}/{allIds.length}</small>
+  </label>;
+}
+
+export function ResearchPanel({ projectId, onAdopted, sources = [] }: { projectId: string; onAdopted: () => Promise<void>; sources?: SourceDocument[] }) {
   const [mode, setMode] = useState<ResearchMode>('FAST');
   const [query, setQuery] = useState('');
   const [tasks, setTasks] = useState<ResearchTask[]>([]);
@@ -33,6 +46,7 @@ export function ResearchPanel({ projectId, onAdopted }: { projectId: string; onA
   }, [hasActiveTask, projectId]);
 
   const visibleTasks = useMemo(() => tasks.slice(0, 4), [tasks]);
+  const evidenceSources = useMemo(() => sources.filter((source) => source.selected && (source.kind === 'WEB' || source.kind === 'PDF' || source.kind === 'DOCX' || source.kind === 'IMAGE')).slice(0, 8), [sources]);
 
   const start = async () => {
     if (query.trim().length < 2) return;
@@ -77,14 +91,21 @@ export function ResearchPanel({ projectId, onAdopted }: { projectId: string; onA
       <div><span>{mode === 'FAST' ? '返回候选来源，由你选择后加入资料。' : '任务在后台运行，不会阻塞当前工作。'}</span><button type="button" disabled={busy || query.trim().length < 2} onClick={() => void start()}>{busy ? '正在启动…' : mode === 'FAST' ? '快速研究' : '开始深度研究'}</button></div>
     </div>
     {error && <div className="source-error" role="alert">{error}<button type="button" onClick={() => setError('')}>关闭</button></div>}
+    {evidenceSources.length > 0 && <section className="research-used-sources" aria-label="本轮已使用资料">
+      <strong>本轮已使用资料</strong>
+      <div>{evidenceSources.map((source) => source.sourceUrl
+        ? <a key={source.id} href={source.sourceUrl} target="_blank" rel="noreferrer"><span>{source.title}</span><small>{new URL(source.sourceUrl).hostname.replace(/^www\./, '')}</small></a>
+        : <span key={source.id}><span>{source.title}</span><small>{source.kind}</small></span>)}</div>
+    </section>}
     {visibleTasks.length > 0 && <div className="research-task-list">
       {visibleTasks.map((task) => <article className="research-task" key={task.id}>
-        <header><div><span>{task.mode === 'FAST' ? 'FAST' : 'DEEP'}</span><strong>{task.query}</strong></div><em className={`is-${task.status.toLowerCase()}`}>{statusCopy[task.status]}</em></header>
+        <header><div><span>{task.mode === 'FAST' ? 'FAST' : 'DEEP'}</span><strong>{task.effectiveQuery ?? task.query}</strong></div><em className={`is-${task.status.toLowerCase()}`}>{statusCopy[task.status]}</em></header>
         {(task.status === 'QUEUED' || task.status === 'RUNNING') && <p>{task.mode === 'DEEP' ? '可以继续添加其他资料；研究完成后结果会保留在这里。' : '正在搜索并整理公开来源…'}</p>}
         {task.status === 'FAILED' && <div className="research-task-failure"><p>{task.error?.message ?? '联网研究失败。'}</p>{task.error?.retryable && <button type="button" onClick={() => void retry(task)}>重试</button>}</div>}
         {task.report && <section className="research-report"><strong>研究摘要</strong><p>{task.report.summary}</p>{task.report.limitations.map((item) => <small key={item}>限制：{item}</small>)}</section>}
         {task.status === 'COMPLETED' && task.candidates.length === 0 && <p>没有找到可采用的公开来源，请尝试更具体的查询。</p>}
         {task.candidates.length > 0 && <div className="research-candidates">
+          <ResearchSelectAll task={task} selectedIds={selected[task.id] ?? []} onChange={(ids) => setSelected((current) => ({ ...current, [task.id]: ids }))} />
           {task.candidates.map((candidate) => { const checked = (selected[task.id] ?? []).includes(candidate.id); return <label className={checked ? 'is-selected' : ''} key={candidate.id}>
             <input type="checkbox" checked={checked} onChange={() => toggle(task.id, candidate.id)} />
             <span className="research-source-type">{typeCopy[candidate.sourceType]}</span>

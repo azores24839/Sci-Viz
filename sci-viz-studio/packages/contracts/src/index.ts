@@ -75,6 +75,27 @@ export const UpdateStudioProjectRequestSchema = CreateStudioProjectRequestSchema
   expectedUpdatedAt: z.string().optional(),
 });
 
+export const InterpretProjectIntakeRequestSchema = z.object({
+  input: z.string().trim().max(20_000),
+  fileNames: z.array(z.string().trim().min(1).max(255)).max(20).default([]),
+}).refine((value) => value.input.length > 0 || value.fileNames.length > 0, { message: '请输入项目信息或上传资料。' });
+
+export const ProjectIntakeInterpretationSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  brief: z.string().trim().max(20_000),
+  userNeeds: z.array(z.string().trim().min(1).max(500)).max(8).default([]),
+  researchDirection: z.string().trim().max(300).default(''),
+  possibleAudience: z.string().trim().max(200).default(''),
+  primaryGoal: ProjectGoalSchema.optional(),
+  secondaryGoal: ProjectGoalSchema.optional(),
+  goalEvidence: z.string().trim().max(500).default(''),
+  constraints: z.array(z.string().trim().min(1).max(500)).max(8).default([]),
+  urls: z.array(z.string().url()).max(10).default([]),
+  searchQuery: z.string().trim().min(2).max(1000),
+  uncertainties: z.array(z.string().trim().min(1).max(500)).max(8).default([]),
+  usedAi: z.boolean(),
+});
+
 export const PersistedWorkflowNodeStateSchema = z.object({
   nodeId: z.string().min(1),
   status: z.enum(['LOCKED', 'READY', 'QUEUED', 'RUNNING', 'AWAITING_HUMAN', 'COMPLETED', 'FAILED']),
@@ -340,6 +361,7 @@ export const ResearchTaskSchema = z.object({
   ownerUserId: z.string().min(1),
   mode: ResearchModeSchema,
   query: z.string().trim().min(2).max(1000),
+  effectiveQuery: z.string().trim().min(2).max(1000).optional(),
   status: ResearchTaskStatusSchema,
   candidates: z.array(ResearchCandidateSchema).max(20).default([]),
   report: ResearchReportSchema.optional(),
@@ -443,6 +465,8 @@ export type ProjectGoal = z.infer<typeof ProjectGoalSchema>;
 export type Project = z.infer<typeof ProjectSchema>;
 export type StudioProject = z.infer<typeof StudioProjectSchema>;
 export type CreateStudioProjectRequest = z.infer<typeof CreateStudioProjectRequestSchema>;
+export type InterpretProjectIntakeRequest = z.infer<typeof InterpretProjectIntakeRequestSchema>;
+export type ProjectIntakeInterpretation = z.infer<typeof ProjectIntakeInterpretationSchema>;
 export type UpdateStudioProjectRequest = z.infer<typeof UpdateStudioProjectRequestSchema>;
 export type PersistedWorkflowNodeState = z.infer<typeof PersistedWorkflowNodeStateSchema>;
 export type ProjectWorkflow = z.infer<typeof ProjectWorkflowSchema>;
