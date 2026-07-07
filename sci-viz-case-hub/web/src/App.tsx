@@ -12,12 +12,12 @@ import { api, setOnUnauthorized } from './api';
 import { theme } from './theme';
 
 const navItems = [
-  { path: '/', label: '案例库' },
-  { path: '/review', label: '处理工作台' },
-  { path: '/pool', label: '采集来源' },
-  { path: '/insights', label: '案例库现状与对比' },
-  { path: '/comparison', label: '跨源对比' },
-  { path: '/report', label: '分析报告' },
+  { path: '/', label: '案例库', adminOnly: false },
+  { path: '/review', label: '处理工作台', adminOnly: true },
+  { path: '/pool', label: '采集来源', adminOnly: true },
+  { path: '/insights', label: '案例库现状与对比', adminOnly: false },
+  { path: '/comparison', label: '跨源对比', adminOnly: false },
+  { path: '/report', label: '分析报告', adminOnly: false },
 ];
 
 function App() {
@@ -58,10 +58,6 @@ function App() {
     );
   }
 
-  if (!authenticated) {
-    return <LoginPage onLogin={checkAuth} />;
-  }
-
   return (
     <div style={{ minHeight: '100vh', background: theme.colors.bg }}>
       <header style={{
@@ -90,7 +86,7 @@ function App() {
             Sci-Viz Case Hub
           </span>
           <nav style={{ display: 'flex', gap: 4, height: '100%', alignItems: 'stretch', flex: 1 }}>
-            {navItems.map(item => {
+            {navItems.filter(item => authenticated || !item.adminOnly).map(item => {
               const isActive = item.path === '/'
                 ? location.pathname === '/'
                 : location.pathname.startsWith(item.path);
@@ -117,32 +113,50 @@ function App() {
           </nav>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ fontSize: 13, color: theme.colors.text.secondary }}>
-              {username}
+              {authenticated ? username : 'Guest'}
             </span>
-            <button
-              onClick={handleLogout}
-              style={{
-                fontSize: 12,
-                color: theme.colors.text.secondary,
-                background: 'none',
-                border: `1px solid ${theme.colors.border}`,
-                borderRadius: 4,
-                padding: '3px 10px',
-                cursor: 'pointer',
-              }}
-            >
-              登出
-            </button>
+            {authenticated ? (
+              <button
+                onClick={handleLogout}
+                style={{
+                  fontSize: 12,
+                  color: theme.colors.text.secondary,
+                  background: 'none',
+                  border: `1px solid ${theme.colors.border}`,
+                  borderRadius: 4,
+                  padding: '3px 10px',
+                  cursor: 'pointer',
+                }}
+              >
+                登出
+              </button>
+            ) : (
+              <NavLink
+                to="/login"
+                style={{
+                  fontSize: 12,
+                  color: theme.colors.text.secondary,
+                  background: 'none',
+                  border: `1px solid ${theme.colors.border}`,
+                  borderRadius: 4,
+                  padding: '3px 10px',
+                  textDecoration: 'none',
+                }}
+              >
+                管理员登录
+              </NavLink>
+            )}
           </div>
         </div>
       </header>
       <main style={{ maxWidth: 1680, width: 'calc(100% - 80px)', margin: '0 auto', padding: '8px 40px 0' }}>
         <Routes>
-          <Route path="/" element={<CaseList />} />
-          <Route path="/cases" element={<CaseList />} />
-          <Route path="/cases/:id" element={<CaseDetail />} />
-          <Route path="/review" element={<ReviewPage />} />
-          <Route path="/pool" element={<PoolPage />} />
+          <Route path="/" element={<CaseList isAdmin={authenticated} />} />
+          <Route path="/cases" element={<CaseList isAdmin={authenticated} />} />
+          <Route path="/cases/:id" element={<CaseDetail isAdmin={authenticated} />} />
+          <Route path="/login" element={<LoginPage onLogin={checkAuth} />} />
+          <Route path="/review" element={authenticated ? <ReviewPage /> : <CaseList isAdmin={false} />} />
+          <Route path="/pool" element={authenticated ? <PoolPage /> : <CaseList isAdmin={false} />} />
           <Route path="/insights" element={<InsightsPage />} />
           <Route path="/comparison" element={<ComparisonPage />} />
           <Route path="/report" element={<AnalysisReportPage />} />

@@ -188,7 +188,11 @@ const selectStyle: React.CSSProperties = {
   cursor: 'pointer',
 };
 
-export default function CaseList() {
+type CaseListProps = {
+  isAdmin?: boolean;
+};
+
+export default function CaseList({ isAdmin = false }: CaseListProps) {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const lastAppliedSearchRef = useRef(searchParams.toString());
@@ -361,6 +365,13 @@ export default function CaseList() {
     setSelectedCaseIds(new Set());
   }, [filters]);
 
+  useEffect(() => {
+    if (!isAdmin) {
+      setManagementMode(false);
+      setSelectedCaseIds(new Set());
+    }
+  }, [isAdmin]);
+
   const setFilter = (key: string, value: string) => {
     setPage(1);
     setFilters(f => {
@@ -377,6 +388,7 @@ export default function CaseList() {
   };
 
   const toggleManagementMode = () => {
+    if (!isAdmin) return;
     setManagementMode(active => {
       if (active) setSelectedCaseIds(new Set());
       return !active;
@@ -401,6 +413,7 @@ export default function CaseList() {
   };
 
   const handleBulkDelete = async () => {
+    if (!isAdmin) return;
     const ids = Array.from(selectedCaseIds);
     if (ids.length === 0 || bulkDeleting) return;
     const ok = window.confirm(`确定删除已选的 ${ids.length} 个案例吗？此操作会同时移除本地图片文件，无法在界面中撤销。`);
@@ -566,22 +579,24 @@ export default function CaseList() {
           <div style={{ fontSize: 13, color: theme.colors.text.tertiary }}>
             已显示 {displayedCount || '-'} / {pagination?.total ?? '-'} 条 · 已入库 {statusCounts.approved ?? '-'} 条
           </div>
-          <button
-            onClick={toggleManagementMode}
-            style={{
-              height: 34,
-              padding: '0 14px',
-              borderRadius: 8,
-              border: `1px solid ${managementMode ? theme.colors.text.primary : theme.colors.border}`,
-              background: managementMode ? theme.colors.text.primary : theme.colors.bgCard,
-              color: managementMode ? theme.colors.bgCard : theme.colors.text.secondary,
-              cursor: 'pointer',
-              fontSize: 13,
-              fontWeight: 700,
-            }}
-          >
-            {managementMode ? '退出管理' : '管理'}
-          </button>
+          {isAdmin && (
+            <button
+              onClick={toggleManagementMode}
+              style={{
+                height: 34,
+                padding: '0 14px',
+                borderRadius: 8,
+                border: `1px solid ${managementMode ? theme.colors.text.primary : theme.colors.border}`,
+                background: managementMode ? theme.colors.text.primary : theme.colors.bgCard,
+                color: managementMode ? theme.colors.bgCard : theme.colors.text.secondary,
+                cursor: 'pointer',
+                fontSize: 13,
+                fontWeight: 700,
+              }}
+            >
+              {managementMode ? '退出管理' : '管理'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -853,7 +868,7 @@ export default function CaseList() {
         </div>
       )}
 
-      {managementMode && (
+      {isAdmin && managementMode && (
         <div style={{
           position: 'sticky',
           top: 0,
@@ -967,10 +982,10 @@ export default function CaseList() {
           const selected = selectedCaseIds.has(c.id);
           return (
           <Link
-            to={managementMode ? '#' : `/cases/${c.id}`}
+            to={isAdmin && managementMode ? '#' : `/cases/${c.id}`}
             state={{ from: `${location.pathname}${location.search}` }}
             onClick={(e) => {
-              if (managementMode) {
+              if (isAdmin && managementMode) {
                 e.preventDefault();
                 toggleCaseSelection(c.id);
                 return;
@@ -978,8 +993,8 @@ export default function CaseList() {
               rememberListPosition();
             }}
             key={c.id}
-            className={`case-card${managementMode ? ' is-managing' : ''}${selected ? ' is-selected' : ''}`}
-            aria-selected={managementMode ? selected : undefined}
+            className={`case-card${isAdmin && managementMode ? ' is-managing' : ''}${selected ? ' is-selected' : ''}`}
+            aria-selected={isAdmin && managementMode ? selected : undefined}
             style={{
               textDecoration: 'none',
               color: 'inherit',
@@ -1016,7 +1031,7 @@ export default function CaseList() {
                   无图片
                 </div>
               )}
-              {managementMode && (
+              {isAdmin && managementMode && (
                 <label
                   className="case-select-control"
                   onClick={(e) => e.stopPropagation()}

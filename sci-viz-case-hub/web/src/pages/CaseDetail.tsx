@@ -19,7 +19,11 @@ function imageCandidates(c: VisualCase): string[] {
   ).map(withBaseUrl);
 }
 
-export default function CaseDetail() {
+type CaseDetailProps = {
+  isAdmin?: boolean;
+};
+
+export default function CaseDetail({ isAdmin = false }: CaseDetailProps) {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -46,6 +50,10 @@ export default function CaseDetail() {
   useEffect(() => { fetchCase(); }, [id]);
 
   useEffect(() => {
+    if (!isAdmin) setEditing(false);
+  }, [isAdmin]);
+
+  useEffect(() => {
     setImgError(false);
     setImageCandidateIndex(0);
   }, [c?.id, c?.imagePath, c?.thumbnailPath, c?.imageUrl]);
@@ -57,6 +65,7 @@ export default function CaseDetail() {
   );
 
   const handleSave = async () => {
+    if (!isAdmin) return;
     if (!id) return;
     setSaving(true);
     await api.updateCase(id, form);
@@ -66,12 +75,14 @@ export default function CaseDetail() {
   };
 
   const handleDelete = async () => {
+    if (!isAdmin) return;
     if (!id || !confirm('确定删除此案例？')) return;
     await api.deleteCase(id);
     navigate((location.state as { from?: string } | null)?.from || '/');
   };
 
   const handleReanalyze = async () => {
+    if (!isAdmin) return;
     if (!id) return;
     await api.reanalyze(id);
     alert('已重新加入分析队列');
@@ -153,10 +164,12 @@ export default function CaseDetail() {
         <button onClick={goBackToList} style={btnBase}>
           ← 返回列表
         </button>
-        <button onClick={() => setEditing(!editing)} style={btnBase}>
-          {editing ? '取消编辑' : '编辑'}
-        </button>
-        {editing && (
+        {isAdmin && (
+          <button onClick={() => setEditing(!editing)} style={btnBase}>
+            {editing ? '取消编辑' : '编辑'}
+          </button>
+        )}
+        {isAdmin && editing && (
           <button
             onClick={handleSave}
             disabled={saving}
@@ -170,12 +183,16 @@ export default function CaseDetail() {
             {saving ? '保存中...' : '保存'}
           </button>
         )}
-        <button onClick={handleDelete} style={{ ...btnBase, color: theme.colors.red, borderColor: theme.colors.redBorder }}>
-          删除
-        </button>
-        <button onClick={handleReanalyze} style={btnBase}>
-          重新分析
-        </button>
+        {isAdmin && (
+          <>
+            <button onClick={handleDelete} style={{ ...btnBase, color: theme.colors.red, borderColor: theme.colors.redBorder }}>
+              删除
+            </button>
+            <button onClick={handleReanalyze} style={btnBase}>
+              重新分析
+            </button>
+          </>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>

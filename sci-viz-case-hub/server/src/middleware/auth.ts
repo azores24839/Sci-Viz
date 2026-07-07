@@ -17,9 +17,22 @@ declare global {
 }
 
 const PUBLIC_PATHS = ['/health', '/api/health'];
+const PUBLIC_READ_PATTERNS = [
+  /^\/cases$/,
+  /^\/cases\/facet-counts$/,
+  /^\/cases\/[^/]+$/,
+  /^\/insights\/summary$/,
+  /^\/insights\/comparison$/,
+  /^\/insights\/three-axis-spectrum$/,
+  /^\/pool\/sources$/,
+];
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction) {
   if (PUBLIC_PATHS.includes(req.path)) {
+    return next();
+  }
+
+  if (req.method === 'GET' && PUBLIC_READ_PATTERNS.some(pattern => pattern.test(req.path))) {
     return next();
   }
 
