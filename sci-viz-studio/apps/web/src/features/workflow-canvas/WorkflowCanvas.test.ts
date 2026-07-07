@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { StudioFlowNode } from './adapter';
-import { DEFAULT_WORKFLOW_VIEWPORT, preserveWorkflowNodes } from './WorkflowCanvas';
+import { DEFAULT_WORKFLOW_VIEWPORT, MIN_WORKFLOW_ZOOM, preserveWorkflowNodes } from './WorkflowCanvas';
 
 describe('WorkflowCanvas default viewport', () => {
   it('opens zoomed out enough to show workflow context', () => {
     expect(DEFAULT_WORKFLOW_VIEWPORT.zoom).toBe(0.72);
     expect(DEFAULT_WORKFLOW_VIEWPORT.zoom).toBeLessThan(1);
+    expect(MIN_WORKFLOW_ZOOM).toBeLessThanOrEqual(0.21);
   });
 });
 

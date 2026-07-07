@@ -1,4 +1,6 @@
 import { createDirectorWorkflowStates, researchPhotoWorkflowV1, type WorkflowNodeState } from '@studio/workflow-core';
+import type { SourceDocument } from '@studio/contracts';
+import { formatSourceSummary } from '../sources/sourceUtils';
 
 const LEGACY_MOCK_FINGERPRINTS = [
   'Sci-Viz Case Hub mock 资料库',
@@ -11,17 +13,21 @@ export function containsLegacyMockContent(state: WorkflowNodeState) {
   return LEGACY_MOCK_FINGERPRINTS.some((fingerprint) => content.includes(fingerprint));
 }
 
-export function migrateLegacyMockWorkflow(states: WorkflowNodeState[], usableSourceCount: number) {
-  if (!states.some(containsLegacyMockContent)) return states;
+export function migrateLegacyMockWorkflow(states: WorkflowNodeState[], selectedSources: SourceDocument[]) {
+  const sourceCount = selectedSources.length;
+  const withTemplateNodes = () => {
+    const byId = new Map(states.map((state) => [state.nodeId, state]));
+    return createDirectorWorkflowStates(researchPhotoWorkflowV1).map((state) => byId.get(state.nodeId) ?? state);
+  };
+
+  if (!states.some(containsLegacyMockContent)) return withTemplateNodes();
 
   return createDirectorWorkflowStates(researchPhotoWorkflowV1).map((state) => state.nodeId === 'source-intake'
     ? {
         ...state,
         status: 'AWAITING_HUMAN' as const,
-        progress: usableSourceCount > 0 ? 80 : 50,
-        summary: usableSourceCount > 0
-          ? `已选择 ${usableSourceCount} 份可用资料`
-          : '请添加并选择至少一份已解析资料',
+        progress: sourceCount > 0 ? 80 : 50,
+        summary: formatSourceSummary(selectedSources),
         artifactLabel: '项目资料包',
       }
     : state);

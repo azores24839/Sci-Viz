@@ -1,4 +1,6 @@
 import type { WorkflowNodeState } from '@studio/workflow-core';
+import type { SourceDocument } from '@studio/contracts';
+import { formatSourceSummary } from './sourceUtils';
 
 function clearGeneratedContent(state: WorkflowNodeState): WorkflowNodeState {
   const {
@@ -6,6 +8,9 @@ function clearGeneratedContent(state: WorkflowNodeState): WorkflowNodeState {
     artifactLabel: _artifactLabel,
     images: _images,
     evidence: _evidence,
+    clarificationItems: _clarificationItems,
+    clarificationHistory: _clarificationHistory,
+    clarificationVersion: _clarificationVersion,
     lastUserInstruction: _lastUserInstruction,
     confirmedAt: _confirmedAt,
     ...rest
@@ -13,16 +18,17 @@ function clearGeneratedContent(state: WorkflowNodeState): WorkflowNodeState {
   return { ...rest, blockerCount: 0, progress: 0, revision: state.revision + 1 };
 }
 
-export function resetWorkflowForSourceChange(states: WorkflowNodeState[], usableSourceCount: number) {
+export function resetWorkflowForSourceChange(states: WorkflowNodeState[], selectedSources: SourceDocument[]) {
+  const sourceCount = selectedSources.length;
   return states.map((state) => {
     if (state.nodeId === 'source-intake') {
       return {
         ...state,
-        status: usableSourceCount > 0 ? 'COMPLETED' as const : 'AWAITING_HUMAN' as const,
-        progress: usableSourceCount > 0 ? 100 : 50,
-        summary: usableSourceCount > 0 ? `已选择 ${usableSourceCount} 份可用资料` : '请添加并选择至少一份已解析资料',
+        status: sourceCount > 0 ? 'COMPLETED' as const : 'AWAITING_HUMAN' as const,
+        progress: sourceCount > 0 ? 100 : 50,
+        summary: formatSourceSummary(selectedSources),
         artifactLabel: '项目资料包',
-        artifactBody: `### 资料状态\n- 已选择 ${usableSourceCount} 份可用资料`,
+        artifactBody: `### 资料状态\n- ${formatSourceSummary(selectedSources)}`,
         updatedAt: new Date().toISOString(),
       };
     }
@@ -31,8 +37,17 @@ export function resetWorkflowForSourceChange(states: WorkflowNodeState[], usable
     if (state.nodeId === 'visual-diagnosis') {
       return {
         ...cleared,
-        status: usableSourceCount > 0 ? 'READY' as const : 'LOCKED' as const,
-        summary: usableSourceCount > 0 ? '资料已更新，准备重新诊断' : '等待资料输入',
+        status: sourceCount > 0 ? 'READY' as const : 'LOCKED' as const,
+        summary: sourceCount > 0 ? '检测到新增资料，可重新分析项目理解' : '等待资料输入',
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    if (state.nodeId === 'source-clarifications') {
+      return {
+        ...cleared,
+        status: 'LOCKED' as const,
+        summary: '检测到新增资料，等待 02 重新分析后更新补充清单',
         updatedAt: new Date().toISOString(),
       };
     }
@@ -45,4 +60,3 @@ export function resetWorkflowForSourceChange(states: WorkflowNodeState[], usable
     };
   });
 }
-

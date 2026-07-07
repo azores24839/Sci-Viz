@@ -55,17 +55,17 @@ export function createDirectorWorkflowStates(
   completedNodeIds: string[] = [],
 ): WorkflowNodeState[] {
   const completed = new Set(completedNodeIds);
-  const firstOpenNode = template.nodes.find((node) => !completed.has(node.id));
+  const firstOpenNode = template.nodes.find((node) => !node.auxiliary && !completed.has(node.id));
 
   return template.nodes.map((node) => {
     const isCompleted = completed.has(node.id);
-    const isFirstOpen = firstOpenNode?.id === node.id;
+    const isFirstOpen = !node.auxiliary && firstOpenNode?.id === node.id;
     return {
       nodeId: node.id,
       status: isCompleted ? 'COMPLETED' : isFirstOpen ? 'READY' : 'LOCKED',
       blockerCount: 0,
       progress: isCompleted ? 100 : 0,
-      summary: isCompleted ? `${node.label}已确认` : isFirstOpen ? '等待自动处理' : `等待${node.inputLabel}`,
+      summary: node.auxiliary && !isCompleted ? '等待 02 项目理解生成后创建补充清单' : isCompleted ? `${node.label}已确认` : isFirstOpen ? '等待自动处理' : `等待${node.inputLabel}`,
       artifactLabel: isCompleted ? `${node.outputLabel} v1` : node.outputLabel,
       ...(isCompleted ? { artifactBody: `${node.label}已完成，可作为后续节点输入。` } : {}),
       revision: 1,
@@ -78,6 +78,7 @@ export function createDirectorWorkflowStates(
 export function getCurrentDirectorNodeId(template: WorkflowTemplate, states: WorkflowNodeState[]): string {
   const stateById = new Map(states.map((state) => [state.nodeId, state]));
   const active = template.nodes.find((node) => {
+    if (node.auxiliary) return false;
     const status = stateById.get(node.id)?.status;
     return status === 'RUNNING' || status === 'AWAITING_HUMAN' || status === 'FAILED' || status === 'READY' || status === 'QUEUED';
   });
@@ -117,7 +118,7 @@ export function confirmNodeAndQueueNext(
   nodeId: string,
 ): WorkflowNodeState[] {
   const currentIndex = template.nodes.findIndex((node) => node.id === nodeId);
-  const nextNode = template.nodes[currentIndex + 1];
+  const nextNode = template.nodes.slice(currentIndex + 1).find((node) => !node.auxiliary);
 
   return states.map((state) => {
     if (state.nodeId === nodeId) {
@@ -132,7 +133,7 @@ export function confirmNodeAndQueueNext(
       };
     }
 
-    if (nextNode && state.nodeId === nextNode.id) {
+    if (nextNode && state.nodeId === nextNode.id && state.status === 'LOCKED') {
       return {
         ...state,
         status: 'READY',

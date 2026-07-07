@@ -25,7 +25,7 @@ describe('organizeVisualDiagnosis', () => {
     ]);
 
     expect(result.sections.map((section) => section.label)).toEqual([
-      '诊断结论', '已确认的信息', '目前无法判断', '需要补充或确认',
+      '诊断结论', '已确认的信息', '目前无法判断', '信息风险与使用限制',
     ]);
     expect(result.basis).toBe('官网首页');
   });

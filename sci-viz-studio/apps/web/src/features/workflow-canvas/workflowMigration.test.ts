@@ -10,7 +10,7 @@ describe('migrateLegacyMockWorkflow', () => {
         ? { ...state, status: 'COMPLETED' as const, artifactBody: '长兴 demo 诊断' }
         : state);
 
-    const migrated = migrateLegacyMockWorkflow(states, 0);
+    const migrated = migrateLegacyMockWorkflow(states, []);
     const sourceState = migrated.find((state) => state.nodeId === 'source-intake');
     expect(sourceState).toMatchObject({
       status: 'AWAITING_HUMAN',
@@ -22,6 +22,6 @@ describe('migrateLegacyMockWorkflow', () => {
 
   it('preserves workflows without a known mock fingerprint', () => {
     const states = createDirectorWorkflowStates(researchPhotoWorkflowV1);
-    expect(migrateLegacyMockWorkflow(states, 0)).toBe(states);
+    expect(migrateLegacyMockWorkflow(states, [])).toStrictEqual(states);
   });
 });

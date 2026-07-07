@@ -4,6 +4,7 @@ import { completeNodeDraft, markNodeRunning, type WorkflowNodeDefinition, type W
 import { apiFetch } from '../../api/client';
 import { useAgentJob } from '../agents/useAgentJob';
 import { usableSelectedSources } from '../sources/sourceUtils';
+import { syncClarificationBranchFromUnderstanding } from './clarificationBranch';
 
 const nodeAgent: Record<string, AgentRole> = {
   'source-intake': 'SOURCE_ANALYST',
@@ -112,13 +113,16 @@ export function useStudioAgentWorkflow({
     if (!currentNode || currentState?.status !== 'RUNNING') return;
     if (activeAgentJob.status === 'COMPLETED' && activeAgentJob.job?.result) {
       const result = activeAgentJob.job.result;
-      setStates((value) => completeNodeDraft(value, currentNode.id, {
-        label: result.label,
-        body: result.body,
-        blockerCount: result.blockerCount,
-        evidence: result.evidence,
-        ...(result.images ? { images: result.images } : {}),
-      }));
+      setStates((value) => {
+        const drafted = completeNodeDraft(value, currentNode.id, {
+          label: result.label,
+          body: result.body,
+          blockerCount: result.blockerCount,
+          evidence: result.evidence,
+          ...(result.images ? { images: result.images } : {}),
+        });
+        return currentNode.id === 'visual-diagnosis' ? syncClarificationBranchFromUnderstanding(drafted) : drafted;
+      });
       if (!persistedJobIds.current.has(activeAgentJob.job.id)) {
         persistedJobIds.current.add(activeAgentJob.job.id);
         void apiFetch(`/projects/${projectId}/artifacts`, {

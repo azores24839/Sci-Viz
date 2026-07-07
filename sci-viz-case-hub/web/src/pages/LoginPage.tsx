@@ -1,4 +1,5 @@
 import { useState, FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { theme } from '../theme';
 
 interface Props {
@@ -6,6 +7,7 @@ interface Props {
 }
 
 export default function LoginPage({ onLogin }: Props) {
+  const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -26,6 +28,7 @@ export default function LoginPage({ onLogin }: Props) {
         setError(data.error || '登录失败');
       } else {
         onLogin();
+        navigate('/');
       }
     } catch {
       setError('网络错误');
@@ -64,7 +67,7 @@ export default function LoginPage({ onLogin }: Props) {
           margin: '0 0 28px',
           textAlign: 'center',
         }}>
-          请登录以继续
+          管理员可登录编辑，访客可直接只读浏览
         </p>
 
         <form onSubmit={handleSubmit}>
@@ -155,6 +158,37 @@ export default function LoginPage({ onLogin }: Props) {
             {loading ? '登录中...' : '登录'}
           </button>
         </form>
+
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          margin: '22px 0',
+          color: theme.colors.text.tertiary,
+          fontSize: 12,
+        }}>
+          <span style={{ flex: 1, height: 1, background: theme.colors.border }} />
+          <span>或</span>
+          <span style={{ flex: 1, height: 1, background: theme.colors.border }} />
+        </div>
+
+        <button
+          type="button"
+          onClick={() => navigate('/')}
+          style={{
+            width: '100%',
+            padding: '10px 0',
+            fontSize: 14,
+            fontWeight: 600,
+            color: theme.colors.text.primary,
+            background: theme.colors.bg,
+            border: `1px solid ${theme.colors.border}`,
+            borderRadius: 6,
+            cursor: 'pointer',
+          }}
+        >
+          以 Guest 身份浏览
+        </button>
       </div>
     </div>
   );

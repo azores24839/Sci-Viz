@@ -17,6 +17,7 @@ describe('research photo workflow', () => {
     expect(researchPhotoWorkflowV1.nodes.map((node) => node.id)).toEqual([
       'source-intake',
       'visual-diagnosis',
+      'source-clarifications',
       'goal-output-selection',
       'case-benchmark',
       'curation-strategy',
@@ -24,6 +25,20 @@ describe('research photo workflow', () => {
       'ai-reference',
       'plan-output',
     ]);
+  });
+
+  it('keeps 02A as an auxiliary branch outside the main progression', () => {
+    const branch = researchPhotoWorkflowV1.nodes.find((node) => node.id === 'source-clarifications');
+    expect(branch).toMatchObject({ auxiliary: true, branchOf: 'visual-diagnosis' });
+
+    const states = createDirectorWorkflowStates(researchPhotoWorkflowV1, ['source-intake']);
+    const drafted = completeNodeDraft(states, 'visual-diagnosis', {
+      label: '项目理解 v1',
+      body: '测试草案',
+    });
+    const confirmed = confirmNodeAndQueueNext(researchPhotoWorkflowV1, drafted, 'visual-diagnosis');
+    expect(confirmed.find((state) => state.nodeId === 'goal-output-selection')?.status).toBe('READY');
+    expect(getCurrentDirectorNodeId(researchPhotoWorkflowV1, confirmed)).toBe('goal-output-selection');
   });
 
   it('blocks a downstream node until its source is complete and clear', () => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { agentMessages, agentProfiles } from '@studio/fixtures';
 import {
   confirmNodeAndQueueNext,
@@ -14,13 +14,14 @@ import { WorkflowFallbackList } from '../features/workflow-canvas/WorkflowFallba
 import { AgentContextPanel } from '../features/workflow-canvas/AgentContextPanel';
 import { StageProgress } from '../features/workflow-canvas/StageProgress';
 import { ProjectCompletion } from '../features/workflow-canvas/ProjectCompletion';
-import { usableSelectedSources } from '../features/sources/sourceUtils';
+import { formatSourceSummary, usableSelectedSources } from '../features/sources/sourceUtils';
 import { resetWorkflowForSourceChange } from '../features/sources/sourceWorkflowReset';
 import { SourceOnboarding } from '../features/sources/SourceOnboarding';
 import { loadProjectSources, loadResearchTasks } from '../features/sources/sourceApi';
 import { apiFetch } from '../api/client';
 import { agentRoleForNode, useStudioAgentWorkflow } from '../features/workflow-canvas/useStudioAgentWorkflow';
 import { useWorkflowPersistence } from '../features/workflow-canvas/useWorkflowPersistence';
+import { buildClarificationRevisionInstruction, syncClarificationBranchFromUnderstanding, updateClarificationItem } from '../features/workflow-canvas/clarificationBranch';
 import { FeedbackWidget } from '../features/feedback/FeedbackWidget';
 import { AccountIdentity } from '../auth/AuthRoot';
 import { UsageProfile } from '../auth/UsageProfile';
@@ -117,8 +118,19 @@ export function Studio({ projectId }: { projectId: string }) {
 
   useEffect(() => {
     if (!workflowLoaded || !sourceBootstrapLoaded) return;
-    setStates((current) => migrateLegacyMockWorkflow(current, usableSources.length));
+    setStates((current) => migrateLegacyMockWorkflow(current, usableSources));
   }, [workflowLoaded, sourceBootstrapLoaded, usableSources.length, setStates]);
+
+  useEffect(() => {
+    if (!workflowLoaded || !sourceBootstrapLoaded) return;
+    setStates((current) => {
+      const understanding = current.find((state) => state.nodeId === 'visual-diagnosis');
+      const branch = current.find((state) => state.nodeId === 'source-clarifications');
+      if (!understanding?.artifactBody || !branch) return current;
+      if ((branch.clarificationItems?.length ?? 0) > 0 && (branch.clarificationVersion ?? 0) >= understanding.revision) return current;
+      return syncClarificationBranchFromUnderstanding(current);
+    });
+  }, [workflowLoaded, sourceBootstrapLoaded, setStates]);
 
   useEffect(() => {
     const key = `studio:intake-warning:${projectId}`;
@@ -209,6 +221,56 @@ export function Studio({ projectId }: { projectId: string }) {
     setRevisionText('');
   };
 
+  const reanalyzeProjectUnderstandingFromClarifications = () => {
+    const clarificationState = states.find((state) => state.nodeId === 'source-clarifications');
+    const items = clarificationState?.clarificationItems ?? [];
+    const instruction = buildClarificationRevisionInstruction(items);
+    if (!instruction) return;
+    setSelectedNodeId('visual-diagnosis');
+    setStates((current) => {
+      const marked = current.map((state) => state.nodeId === 'source-clarifications'
+        ? {
+            ...state,
+            clarificationItems: (state.clarificationItems ?? []).map((item) => (
+              item.status === 'ANSWERED' || item.status === 'FROM_SOURCE' || item.status === 'UNCONFIRMABLE'
+                ? { ...item, status: 'USED_IN_REVISION' as const }
+                : item
+            )),
+            summary: '补充内容已送入 02，等待重新分析',
+            updatedAt: new Date().toISOString(),
+          }
+        : state);
+      return reviseNodeDraft(researchPhotoWorkflowV1, marked, 'visual-diagnosis', instruction);
+    });
+  };
+
+  const handleSourcesChange = useCallback((nextSources: SourceDocument[]) => {
+    setSources(nextSources);
+    const selected = usableSelectedSources(nextSources);
+    const failed = nextSources.filter((source) => source.status === 'FAILED').length;
+
+    const signature = selected.map((source) => source.id).sort().join('|');
+    const previousSelection = sourceSelectionRef.current;
+    const isStillParsing = nextSources.some((source) => ['UPLOADING', 'QUEUED', 'PARSING', 'SUMMARIZING'].includes(source.status));
+
+    if (!isStillParsing && previousSelection?.projectId === projectId && previousSelection.signature !== signature) {
+      sourceSelectionRef.current = { projectId, signature };
+      setStates((current) => resetWorkflowForSourceChange(current, selected));
+      return;
+    }
+
+    if (!previousSelection || previousSelection.projectId !== projectId) {
+      sourceSelectionRef.current = { projectId, signature };
+    }
+
+    setStates((current) => current.map((state) => state.nodeId === 'source-intake' && state.status !== 'COMPLETED' ? {
+      ...state,
+      summary: formatSourceSummary(selected),
+      artifactLabel: '项目资料包',
+      artifactBody: `### 资料状态\n- 共 ${nextSources.length} 份资料\n- ${formatSourceSummary(selected)}\n- 失败 ${failed} 份`,
+    } : state));
+  }, [projectId, setStates]);
+
   const sourceIntakeCompleted = states.find((state) => state.nodeId === 'source-intake')?.status === 'COMPLETED';
   const showSourceOnboarding = workflowLoaded
     && sourceBootstrapLoaded
@@ -293,6 +355,11 @@ export function Studio({ projectId }: { projectId: string }) {
           onSetPrimaryPurpose={setPrimaryPurpose}
           onSetSecondaryPurpose={setSecondaryPurpose}
           onBenchmarkSelectionChange={setBenchmarkSelectionCount}
+          onSourcesChange={handleSourcesChange}
+          onReanalyzeProjectUnderstanding={reanalyzeProjectUnderstandingFromClarifications}
+          onUpdateClarification={(itemId, update) => {
+            setStates((current) => updateClarificationItem(current, itemId, update));
+          }}
         />
         <WorkflowFallbackList template={researchPhotoWorkflowV1} states={states} selectedNodeId={selectedNodeId} onSelectNode={setSelectedNodeId} />
       </section>
@@ -319,32 +386,15 @@ export function Studio({ projectId }: { projectId: string }) {
         activeJobError={selectedNode.id === currentNode?.id ? activeAgentJob.error : null}
         onRetryJob={() => { void activeAgentJob.retry(); }}
         sources={sources}
-        onSourcesChange={(nextSources) => {
-          setSources(nextSources);
-          const selected = usableSelectedSources(nextSources);
-          const failed = nextSources.filter((source) => source.status === 'FAILED').length;
-
-          const signature = selected.map((source) => source.id).sort().join('|');
-          const previousSelection = sourceSelectionRef.current;
-          const isStillParsing = nextSources.some((source) => ['UPLOADING', 'QUEUED', 'PARSING', 'SUMMARIZING'].includes(source.status));
-
-          if (!isStillParsing && previousSelection?.projectId === projectId && previousSelection.signature !== signature) {
-            sourceSelectionRef.current = { projectId, signature };
-            setStates((current) => resetWorkflowForSourceChange(current, selected.length));
-            return;
-          }
-
-          if (!previousSelection || previousSelection.projectId !== projectId) {
-            sourceSelectionRef.current = { projectId, signature };
-          }
-
-          setStates((current) => current.map((state) => state.nodeId === 'source-intake' && state.status !== 'COMPLETED' ? {
-            ...state,
-            summary: selected.length > 0 ? `已选择 ${selected.length} 份可用资料` : '请添加并选择至少一份已解析资料',
-            artifactLabel: '项目资料包',
-            artifactBody: `### 资料状态\n- 共 ${nextSources.length} 份资料\n- 已选择 ${selected.length} 份可用资料\n- 失败 ${failed} 份`,
-          } : state));
+        onSelectNode={(nodeId) => {
+          setSelectedNodeId(nodeId);
+          setCanvasFocusRequest((value) => value + 1);
         }}
+        onUpdateClarification={(itemId, update) => {
+          setStates((current) => updateClarificationItem(current, itemId, update));
+        }}
+        onReanalyzeProjectUnderstanding={reanalyzeProjectUnderstandingFromClarifications}
+        onSourcesChange={handleSourcesChange}
       />
     </main>
   </div>;

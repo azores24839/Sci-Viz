@@ -10,17 +10,20 @@ const node = (
   description: string,
   inputLabel: string,
   outputLabel: string,
+  options: Partial<Pick<WorkflowTemplate['nodes'][number], 'auxiliary' | 'branchOf' | 'defaultPosition'>> = {},
 ): WorkflowTemplate['nodes'][number] => ({
   id,
   order,
   label,
   shortLabel,
   kind,
+  ...(options.auxiliary ? { auxiliary: true } : {}),
+  ...(options.branchOf ? { branchOf: options.branchOf } : {}),
   owner,
   description,
   inputLabel,
   outputLabel,
-  defaultPosition: { x: (order - 1) * 760, y: order % 2 === 0 ? 52 : 138 },
+  defaultPosition: options.defaultPosition ?? { x: (order - 1) * 760, y: order % 2 === 0 ? 52 : 138 },
 });
 
 export const researchPhotoWorkflowV1: WorkflowTemplate = {
@@ -30,6 +33,7 @@ export const researchPhotoWorkflowV1: WorkflowTemplate = {
   nodes: [
     node('source-intake', 1, '资料输入', '输入', 'INPUT', '资料管理员', '汇总上传资料、已有照片和官网线索', '资料 / 链接 / 已有照片', '资料包'),
     node('visual-diagnosis', 2, '项目理解', '理解', 'AGENT', '资料分析师', '整理项目资料、研究方向、核心对象、用户需求、信息缺口和待确认问题', '资料包', '项目理解'),
+    node('source-clarifications', 2.1, '资料补充与问题澄清', '02A', 'HUMAN_GATE', '资料分析师', '承接 02 中无法判断的信息，作为可操作的补充资料与问题澄清清单', '项目理解', '资料补充清单', { auxiliary: true, branchOf: 'visual-diagnosis', defaultPosition: { x: 980, y: 1120 } }),
     node('goal-output-selection', 3, '目标与受众确认', '目标', 'HUMAN_GATE', '项目负责人', '确认一个主目标、最多一个次目标与核心受众，首版产物为拍摄静图', '项目理解', '目标配置'),
     node('case-benchmark', 4, '案例对标', '对标', 'AGENT', '科研策展人', '从案例库中选择同类型、同科研方向或同传播目标的静图参照', '项目理解 + 目标配置', '对标案例'),
     node('curation-strategy', 5, '策展策略', '策略', 'AGENT', '科研策展人', '把案例库研究转化为视觉路线、策展 brief 和传播重点', '对标案例 + 目标配置', '策展 brief'),
@@ -39,6 +43,7 @@ export const researchPhotoWorkflowV1: WorkflowTemplate = {
   ],
   edges: [
     ['source-intake', 'visual-diagnosis'],
+    ['visual-diagnosis', 'source-clarifications'],
     ['visual-diagnosis', 'goal-output-selection'],
     ['goal-output-selection', 'case-benchmark'],
     ['case-benchmark', 'curation-strategy'],

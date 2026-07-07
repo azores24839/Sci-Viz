@@ -20,6 +20,8 @@ export interface WorkflowNodeDefinition {
   label: string;
   shortLabel: string;
   kind: WorkflowNodeKind;
+  auxiliary?: boolean;
+  branchOf?: string;
   owner: string;
   description: string;
   inputLabel: string;
@@ -51,9 +53,37 @@ export interface WorkflowNodeState {
   artifactBody?: string;
   images?: Array<{ url: string; prompt: string }>;
   evidence?: Array<{ statement: string; basis: 'SOURCE' | 'PENDING_CONFIRMATION' | 'USER_SUPPLIED'; sourceIds: string[]; confidence: 'HIGH' | 'MEDIUM' | 'LOW' }>;
+  clarificationItems?: WorkflowClarificationItem[];
+  clarificationHistory?: WorkflowClarificationSnapshot[];
+  clarificationVersion?: number;
   revision: number;
   planLabel?: string;
   lastUserInstruction?: string;
   confirmedAt?: string;
   updatedAt?: string;
+}
+
+export type WorkflowClarificationStatus =
+  | 'UNANSWERED'
+  | 'ANSWERED'
+  | 'FROM_SOURCE'
+  | 'UNCONFIRMABLE'
+  | 'USED_IN_REVISION';
+
+export interface WorkflowClarificationItem {
+  id: string;
+  title: string;
+  gap: string;
+  impact: '高' | '中' | '低';
+  suggestion: string;
+  answer?: string;
+  status: WorkflowClarificationStatus;
+}
+
+export interface WorkflowClarificationSnapshot {
+  version: number;
+  projectUnderstandingRevision: number;
+  generatedAt: string;
+  artifactBody?: string;
+  items: WorkflowClarificationItem[];
 }

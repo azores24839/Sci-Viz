@@ -1,12 +1,15 @@
-import { useState } from 'react';
+import { useRef, useState, type MouseEvent, type PointerEvent } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { ProjectGoal } from '@studio/contracts';
 import type { StudioFlowNode } from './adapter';
 import { getNodePreviewTone, summarizeNodeContent } from './nodePreview';
 import { parseMdToCards, type MdCard } from './parseMarkdownToCards';
 import { organizeVisualDiagnosis } from './visualDiagnosisContent';
+import { stripClarificationData } from './clarificationBranch';
 import { BenchmarkPanel } from '../benchmarks/BenchmarkPanel';
 import { PlanEditor } from '../plans/PlanEditor';
+import { loadProjectSources, uploadProjectFiles } from '../sources/sourceApi';
+import { validateAndMergeFiles } from '../sources/pendingFileUtils';
 
 const statusLabel = {
   LOCKED: '等待上一步',
@@ -82,7 +85,7 @@ function DiagnosisSection({ title, cards }: { title: string; cards: MdCard[] }) 
 }
 
 function VisualDiagnosisArtifact({ md }: { md: string }) {
-  const content = organizeVisualDiagnosis(parseMdToCards(md));
+  const content = organizeVisualDiagnosis(parseMdToCards(stripClarificationData(md)));
 
   return <div className="node-analysis-body diagnosis-node-summary">
     <section className="diagnosis-context" aria-label="本次分析信息">
@@ -94,6 +97,134 @@ function VisualDiagnosisArtifact({ md }: { md: string }) {
         <h3>{section.label}</h3>
         <p>{section.content}</p>
       </section>)}
+    </div>
+  </div>;
+}
+
+function ClarificationBranchArtifact({
+  state,
+  projectId,
+  onOpen,
+  onSourcesChange,
+  onReanalyze,
+  onUpdate,
+}: {
+  state: StudioFlowNode['data']['state'];
+  projectId?: string;
+  onOpen?: () => void;
+  onSourcesChange?: StudioFlowNode['data']['onSourcesChange'];
+  onReanalyze?: () => void;
+  onUpdate?: StudioFlowNode['data']['onUpdateClarification'];
+}) {
+  const [questionIndex, setQuestionIndex] = useState(0);
+  const [researchMode, setResearchMode] = useState<'FAST' | 'DEEP'>('FAST');
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const fileInput = useRef<HTMLInputElement>(null);
+  const items = state.clarificationItems ?? [];
+  const pending = items.filter((item) => item.status === 'UNANSWERED' || item.status === 'ANSWERED' || item.status === 'FROM_SOURCE');
+  const answered = items.filter((item) => item.status !== 'UNANSWERED');
+  const visibleItems = pending.length > 0 ? pending : items;
+  const safeQuestionIndex = visibleItems.length > 0 ? Math.min(questionIndex, visibleItems.length - 1) : 0;
+  const primaryItem = visibleItems[safeQuestionIndex];
+  const hasPendingAnswers = items.some((item) => item.status === 'ANSWERED' || item.status === 'FROM_SOURCE' || item.status === 'UNCONFIRMABLE');
+  const status = hasPendingAnswers ? '已补充待分析' : pending.length > 0 ? '待补充' : '已更新';
+  const canSwitchQuestion = visibleItems.length > 1;
+  const researchModeLabel = researchMode === 'FAST' ? 'Fast Research' : 'Deep Research';
+  const switchQuestion = (direction: -1 | 1) => {
+    setQuestionIndex((current) => {
+      if (visibleItems.length <= 1) return 0;
+      return (current + direction + visibleItems.length) % visibleItems.length;
+    });
+  };
+  const stopCanvasEvent = (event: MouseEvent | PointerEvent) => {
+    event.stopPropagation();
+  };
+  const uploadFiles = async (files: FileList | null) => {
+    if (!files?.length || !projectId) return;
+    const validated = validateAndMergeFiles([], Array.from(files));
+    const validationMessage = validated.errors.join('；');
+    if (validationMessage) setUploadError(validationMessage);
+    if (!validated.files.length) return;
+    setUploading(true);
+    if (!validationMessage) setUploadError('');
+    try {
+      await uploadProjectFiles(projectId, validated.files);
+      const nextSources = await loadProjectSources(projectId);
+      onSourcesChange?.(nextSources);
+      if (validationMessage) setUploadError(validationMessage);
+    } catch (cause) {
+      setUploadError(cause instanceof Error ? cause.message : '上传失败，请重试。');
+    } finally {
+      setUploading(false);
+      if (fileInput.current) fileInput.current.value = '';
+    }
+  };
+
+  return <div className="clarification-node-summary">
+    <div className="clarification-node-status">
+      <span>状态：{status}</span>
+      <span>待补充 {pending.length} 项 · 已补充 {answered.length} 项</span>
+    </div>
+    {primaryItem ? <article className="clarification-node-card">
+      <header>
+        <div>
+          <h3>{primaryItem.title}</h3>
+          <span>状态：{primaryItem.status === 'UNANSWERED' ? '未回答' : primaryItem.status === 'ANSWERED' ? '已回答' : primaryItem.status === 'FROM_SOURCE' ? '已从资料补充' : primaryItem.status === 'UNCONFIRMABLE' ? '暂无法确认' : '已用于重新分析'}</span>
+        </div>
+        <em>影响：{primaryItem.impact}</em>
+      </header>
+      <section className="clarification-node-gap">
+        <strong>当前缺口</strong>
+        <p>{primaryItem.gap}</p>
+      </section>
+      <section className="clarification-node-suggestion">
+        <strong>建议补充</strong>
+        <p>{primaryItem.suggestion}</p>
+      </section>
+      <label className="clarification-node-answer nowheel nodrag">
+        <span>用户回答</span>
+        <textarea
+          value={primaryItem.answer ?? ''}
+          placeholder="在这里补充一句话、事实、限制或负责人确认口径…"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => onUpdate?.(primaryItem.id, { answer: event.target.value, status: event.target.value.trim() ? 'ANSWERED' : 'UNANSWERED' })}
+        />
+        <div className="clarification-node-answer-tools">
+          <input ref={fileInput} className="sr-only" type="file" multiple accept=".pdf,.docx,.png,.jpg,.jpeg" onChange={(event) => void uploadFiles(event.currentTarget.files)} />
+          <button type="button" disabled={uploading || !projectId} onClick={(event) => { event.stopPropagation(); fileInput.current?.click(); }} aria-label="上传 PDF、Word 或图片">{uploading ? '…' : '+'}</button>
+          <details className="clarification-research-menu" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+            <summary>
+              <span className={`research-mode-icon ${researchMode === 'FAST' ? 'is-fast' : 'is-deep'}`} aria-hidden="true" />
+              <span>{researchModeLabel}</span>
+              <span className="research-mode-chevron" aria-hidden="true" />
+            </summary>
+            <div className="clarification-research-popover" role="menu">
+              <button type="button" role="menuitemradio" aria-checked={researchMode === 'FAST'} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setResearchMode('FAST'); }}>
+                <span className="research-mode-icon is-fast" aria-hidden="true" />
+                <span>Fast Research</span>
+              </button>
+              <button type="button" role="menuitemradio" aria-checked={researchMode === 'DEEP'} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setResearchMode('DEEP'); }}>
+                <span className="research-mode-icon is-deep" aria-hidden="true" />
+                <span>Deep Research</span>
+              </button>
+            </div>
+          </details>
+          <button type="button" className="send" disabled={!hasPendingAnswers} onClick={(event) => { event.stopPropagation(); onReanalyze?.(); }}>重新分析</button>
+        </div>
+        {uploadError && <div className="clarification-node-upload-error" role="alert">{uploadError}</div>}
+      </label>
+      {canSwitchQuestion && <div className="clarification-node-switcher nowheel nodrag" aria-label="切换补充问题">
+        <button type="button" onPointerDown={stopCanvasEvent} onClick={(event) => { event.stopPropagation(); switchQuestion(-1); }}>上一题</button>
+        <span>{safeQuestionIndex + 1} / {visibleItems.length}</span>
+        <button type="button" onPointerDown={stopCanvasEvent} onClick={(event) => { event.stopPropagation(); switchQuestion(1); }}>下一题</button>
+      </div>}
+    </article> : <div className="clarification-node-empty">暂无待补充问题</div>}
+    <div className="clarification-node-actions">
+      <button type="button" onClick={(event) => { event.stopPropagation(); onOpen?.(); }}>继续补充</button>
+      {primaryItem && <button type="button" onClick={(event) => { event.stopPropagation(); onUpdate?.(primaryItem.id, { answer: '暂无法确认', status: 'UNCONFIRMABLE' }); }}>标记为暂无法确认</button>}
+      <button type="button" disabled={!hasPendingAnswers} onClick={(event) => { event.stopPropagation(); onReanalyze?.(); }}>重新分析 02</button>
     </div>
   </div>;
 }
@@ -204,6 +335,7 @@ export function WorkflowNodeCard({ data, selected }: NodeProps<StudioFlowNode>) 
   const isTerminal = definition.kind === 'OUTPUT';
   const isSourceIntake = definition.id === 'source-intake';
   const isVisualDiagnosis = definition.id === 'visual-diagnosis';
+  const isClarificationBranch = definition.id === 'source-clarifications';
   const isGoalOutputSelection = definition.id === 'goal-output-selection';
   const showAgentActions = definition.kind === 'AGENT' && state.status === 'AWAITING_HUMAN' && hasArtifact;
   const showHumanGateActions = definition.kind === 'HUMAN_GATE' && state.status === 'AWAITING_HUMAN';
@@ -211,7 +343,7 @@ export function WorkflowNodeCard({ data, selected }: NodeProps<StudioFlowNode>) 
 
   return (
     <article
-      className={`workflow-node${selected ? ' is-selected' : ''}${state.status === 'LOCKED' ? ' is-locked' : ''}${state.status === 'RUNNING' ? ' is-running' : ''}${compact ? ' compact' : ''}`}
+      className={`workflow-node${selected ? ' is-selected' : ''}${state.status === 'LOCKED' ? ' is-locked' : ''}${state.status === 'RUNNING' ? ' is-running' : ''}${compact ? ' compact' : ''}${definition.auxiliary ? ' is-auxiliary-node' : ''}`}
       aria-label={`${definition.label}，${statusLabel[state.status]}`}
       onPointerDownCapture={(event) => {
         const rect = event.currentTarget.getBoundingClientRect();
@@ -226,15 +358,15 @@ export function WorkflowNodeCard({ data, selected }: NodeProps<StudioFlowNode>) 
       </div>
       <div className="node-card-top">
         <div className="node-heading">
-          <span className="node-number">{String(definition.order).padStart(2, '0')}</span>
+          <span className="node-number">{definition.auxiliary ? definition.shortLabel : String(definition.order).padStart(2, '0')}</span>
           <div>
             <h2 className="node-title">{definition.label}</h2>
             {!isSourceIntake && <div className="node-owner">{definition.owner}</div>}
           </div>
         </div>
-        {!isSourceIntake && avatar
+        {!isSourceIntake && !isClarificationBranch && avatar
           ? <span className="node-agent-avatar-frame" aria-hidden="true"><img className="node-agent-avatar" src={avatar} alt="" /></span>
-          : !isSourceIntake ? <div className="node-visual" aria-hidden="true"><span className="node-glyph">{glyph[definition.kind]}</span></div> : null}
+          : !isSourceIntake && !isClarificationBranch ? <div className="node-visual" aria-hidden="true"><span className="node-glyph">{glyph[definition.kind]}</span></div> : null}
       </div>
       {definition.id === 'case-benchmark' && data.projectId ? <BenchmarkPanel projectId={data.projectId} {...(data.onBenchmarkSelectionChange ? { onSelectionChange: data.onBenchmarkSelectionChange } : {})} /> : null}
       {definition.id === 'photo-plan' && data.projectId ? <PlanEditor projectId={data.projectId} /> : null}
@@ -245,7 +377,16 @@ export function WorkflowNodeCard({ data, selected }: NodeProps<StudioFlowNode>) 
             <p>{state.summary || '等待上一步确认'}</p>
           </div>
         : <>
-          {isGoalOutputSelection && data.purposeOptions && data.purposeOptions.length > 0 && data.onSetPrimaryPurpose ? (
+          {isClarificationBranch ? (
+            <ClarificationBranchArtifact
+              state={state}
+              {...(data.projectId ? { projectId: data.projectId } : {})}
+              {...(data.onOpenClarifications ? { onOpen: data.onOpenClarifications } : {})}
+              {...(data.onSourcesChange ? { onSourcesChange: data.onSourcesChange } : {})}
+              {...(data.onReanalyzeProjectUnderstanding ? { onReanalyze: data.onReanalyzeProjectUnderstanding } : {})}
+              {...(data.onUpdateClarification ? { onUpdate: data.onUpdateClarification } : {})}
+            />
+          ) : isGoalOutputSelection && data.purposeOptions && data.purposeOptions.length > 0 && data.onSetPrimaryPurpose ? (
             <GoalOutputSelectionPanel
               primaryPurposeId={data.primaryPurposeId ?? data.purposeOptions[0]!.id}
               secondaryPurposeId={data.secondaryPurposeId ?? ''}
@@ -254,7 +395,15 @@ export function WorkflowNodeCard({ data, selected }: NodeProps<StudioFlowNode>) 
               onSetSecondaryPurpose={data.onSetSecondaryPurpose ?? (() => {})}
             />
           ) : isVisualDiagnosis && state.artifactBody ? (
-            <VisualDiagnosisArtifact md={state.artifactBody} />
+            <div className="diagnosis-node-with-link">
+              <VisualDiagnosisArtifact md={state.artifactBody} />
+              <button type="button" className="clarification-link-card nowheel nodrag" onClick={(event) => {
+                event.stopPropagation();
+                data.onOpenClarifications?.();
+              }}>
+                查看 02A 资料补充清单
+              </button>
+            </div>
           ) : !isSourceIntake && state.artifactBody ? (
             <div className="node-analysis-body">
               {state.images && state.images.length > 0 && (

@@ -2,7 +2,7 @@ import type { WorkflowNodeState } from '@studio/workflow-core';
 
 const steps = [
   { nodeId: 'source-intake', label: '资料输入' },
-  { nodeId: 'visual-diagnosis', label: '视觉诊断' },
+  { nodeId: 'visual-diagnosis', label: '项目理解' },
   { nodeId: 'goal-output-selection', label: '目标' },
   { nodeId: 'case-benchmark', label: '案例对标' },
   { nodeId: 'curation-strategy', label: '策展策略' },

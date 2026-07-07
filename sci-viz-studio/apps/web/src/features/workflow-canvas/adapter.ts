@@ -1,6 +1,6 @@
 import type { Edge, Node } from '@xyflow/react';
-import type { ProjectGoal } from '@studio/contracts';
-import type { WorkflowNodeDefinition, WorkflowNodeState, WorkflowTemplate } from '@studio/workflow-core';
+import type { ProjectGoal, SourceDocument } from '@studio/contracts';
+import type { WorkflowClarificationItem, WorkflowNodeDefinition, WorkflowNodeState, WorkflowTemplate } from '@studio/workflow-core';
 
 export interface StudioNodeData extends Record<string, unknown> {
   definition: WorkflowNodeDefinition;
@@ -14,6 +14,10 @@ export interface StudioNodeData extends Record<string, unknown> {
   onSetPrimaryPurpose?: (purposeId: ProjectGoal) => void;
   onSetSecondaryPurpose?: (purposeId: ProjectGoal | '') => void;
   onBenchmarkSelectionChange?: (count: number) => void;
+  onOpenClarifications?: () => void;
+  onSourcesChange?: (sources: SourceDocument[]) => void;
+  onReanalyzeProjectUnderstanding?: () => void;
+  onUpdateClarification?: (itemId: string, update: Partial<WorkflowClarificationItem>) => void;
 }
 
 export type StudioFlowNode = Node<StudioNodeData, 'workflow'>;
@@ -42,11 +46,16 @@ export function toFlowElements(template: WorkflowTemplate, states: WorkflowNodeS
     selectable: true,
     deletable: false,
   }));
-  const edges: Edge[] = template.edges.map((edge) => ({
-    ...edge,
-    type: 'default',
-    selectable: false,
-    animated: stateById.get(edge.source)?.status === 'RUNNING',
-  }));
+  const auxiliaryTargets = new Set(template.nodes.filter((node) => node.auxiliary).map((node) => node.id));
+  const edges: Edge[] = template.edges.map((edge) => {
+    const auxiliary = auxiliaryTargets.has(edge.target);
+    return {
+      ...edge,
+      type: 'default',
+      selectable: false,
+      animated: !auxiliary && stateById.get(edge.source)?.status === 'RUNNING',
+      ...(auxiliary ? { className: 'is-auxiliary', style: { stroke: '#c9c5bf', strokeDasharray: '6 7', strokeWidth: 1.4 } } : {}),
+    };
+  });
   return { nodes, edges };
 }

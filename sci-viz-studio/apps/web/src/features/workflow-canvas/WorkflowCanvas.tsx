@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type WheelEvent } from 'react';
 import {
   Background,
   Controls,
@@ -8,8 +8,8 @@ import {
   type NodeChange,
   type ReactFlowInstance,
 } from '@xyflow/react';
-import type { ProjectGoal } from '@studio/contracts';
-import type { WorkflowNodeState, WorkflowTemplate } from '@studio/workflow-core';
+import type { ProjectGoal, SourceDocument } from '@studio/contracts';
+import type { WorkflowClarificationItem, WorkflowNodeState, WorkflowTemplate } from '@studio/workflow-core';
 import { toFlowElements, type StudioFlowNode } from './adapter';
 import { WorkflowNodeCard } from './WorkflowNodeCard';
 
@@ -28,10 +28,14 @@ interface WorkflowCanvasProps {
   onSetPrimaryPurpose: (purposeId: ProjectGoal) => void;
   onSetSecondaryPurpose: (purposeId: ProjectGoal | '') => void;
   onBenchmarkSelectionChange: (count: number) => void;
+  onSourcesChange: (sources: SourceDocument[]) => void;
+  onReanalyzeProjectUnderstanding: () => void;
+  onUpdateClarification: (itemId: string, update: Partial<WorkflowClarificationItem>) => void;
 }
 
 const nodeTypes = { workflow: WorkflowNodeCard };
 export const DEFAULT_WORKFLOW_VIEWPORT = { x: 28, y: 54, zoom: 0.72 };
+export const MIN_WORKFLOW_ZOOM = 0.21;
 
 export function preserveWorkflowNodes(next: StudioFlowNode[], expected: StudioFlowNode[]) {
   if (expected.length === 0) return next;
@@ -39,12 +43,24 @@ export function preserveWorkflowNodes(next: StudioFlowNode[], expected: StudioFl
   return expected.map((node) => nextById.get(node.id) ?? node);
 }
 
-export function WorkflowCanvas({ projectId, template, states, selectedNodeId, focusRequestKey, onSelectNode, onConfirmNode, onReviseNode, primaryPurposeId, secondaryPurposeId, purposeOptions, onSetPrimaryPurpose, onSetSecondaryPurpose, onBenchmarkSelectionChange }: WorkflowCanvasProps) {
+function shouldManualPanFromWheel(target: EventTarget | null) {
+  if (!(target instanceof Element)) return false;
+  if (!target.closest('.workflow-node')) return false;
+  if (target.closest('button, input, textarea, select, a, [contenteditable="true"], .nowheel, .react-flow__controls')) return false;
+  return true;
+}
+
+export function WorkflowCanvas({ projectId, template, states, selectedNodeId, focusRequestKey, onSelectNode, onConfirmNode, onReviseNode, primaryPurposeId, secondaryPurposeId, purposeOptions, onSetPrimaryPurpose, onSetSecondaryPurpose, onBenchmarkSelectionChange, onSourcesChange, onReanalyzeProjectUnderstanding, onUpdateClarification }: WorkflowCanvasProps) {
   const initial = useMemo(() => toFlowElements(template, states), [template, states]);
   const [nodes, setNodes] = useState<StudioFlowNode[]>(initial.nodes);
   const [locked, setLocked] = useState(false);
   const flowRef = useRef<ReactFlowInstance<StudioFlowNode> | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const nodesRef = useRef<StudioFlowNode[]>(initial.nodes);
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
 
   useEffect(() => {
     setNodes((current) => {
@@ -57,7 +73,7 @@ export function WorkflowCanvas({ projectId, template, states, selectedNodeId, fo
   }, [initial.nodes]);
 
   const focusSelectedNode = useCallback((duration = 260) => {
-    const target = nodes.find((node) => node.id === selectedNodeId);
+    const target = nodesRef.current.find((node) => node.id === selectedNodeId);
     if (!target || !flowRef.current) return;
     void flowRef.current.fitView({
       nodes: [target],
@@ -66,7 +82,7 @@ export function WorkflowCanvas({ projectId, template, states, selectedNodeId, fo
       maxZoom: 0.82,
       duration,
     });
-  }, [nodes, selectedNodeId]);
+  }, [selectedNodeId]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => focusSelectedNode());
@@ -90,13 +106,25 @@ export function WorkflowCanvas({ projectId, template, states, selectedNodeId, fo
     setNodes((current) => preserveWorkflowNodes(applyNodeChanges(changes, current), initial.nodes));
   }, [initial.nodes]);
 
+  const handleCanvasWheelCapture = useCallback((event: WheelEvent<HTMLDivElement>) => {
+    if (locked || !flowRef.current || !shouldManualPanFromWheel(event.target)) return;
+    const viewport = flowRef.current.getViewport();
+    void flowRef.current.setViewport({
+      ...viewport,
+      x: viewport.x - event.deltaX,
+      y: viewport.y - event.deltaY,
+    }, { duration: 0 });
+    event.preventDefault();
+    event.stopPropagation();
+  }, [locked]);
+
   const selectedEdges = initial.edges.map((edge) => {
     const isAdjacent = edge.target === selectedNodeId || edge.source === selectedNodeId;
     return isAdjacent ? { ...edge, className: 'selected' } : edge;
   });
 
   return (
-    <div ref={canvasRef} className={`workflow-canvas${locked ? ' is-locked' : ''}`} aria-label="科研影像工作流画布">
+    <div ref={canvasRef} className={`workflow-canvas${locked ? ' is-locked' : ''}`} aria-label="科研影像工作流画布" onWheelCapture={handleCanvasWheelCapture}>
       <ReactFlow
         onInit={(instance) => {
           flowRef.current = instance as unknown as ReactFlowInstance<StudioFlowNode>;
@@ -115,6 +143,10 @@ export function WorkflowCanvas({ projectId, template, states, selectedNodeId, fo
             onSetPrimaryPurpose,
             onSetSecondaryPurpose,
             onBenchmarkSelectionChange,
+            onOpenClarifications: () => onSelectNode('source-clarifications'),
+            onSourcesChange,
+            onReanalyzeProjectUnderstanding,
+            onUpdateClarification,
           },
           selected: node.id === selectedNodeId,
           draggable: !locked,
@@ -142,7 +174,7 @@ export function WorkflowCanvas({ projectId, template, states, selectedNodeId, fo
         zoomOnScroll={false}
         zoomOnPinch={!locked}
         defaultViewport={DEFAULT_WORKFLOW_VIEWPORT}
-        minZoom={0.35}
+        minZoom={MIN_WORKFLOW_ZOOM}
         maxZoom={1.2}
         proOptions={{ hideAttribution: true }}
       >
