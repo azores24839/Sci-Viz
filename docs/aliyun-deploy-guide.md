@@ -131,3 +131,6 @@ pm2 startup
 - 服务器 IP 在 `http://` 而非 `https://`，因为没有 SSL 证书。如果介意，后续可以配置 Nginx + Let's Encrypt 免费证书。
 - 数据库在服务器上，你在本地改了数据后需要重新 scp 上传 dev.db 到服务器才能同步。
 - 如果只是给同事看，不用频繁同步数据。每周更新一次即可。
+# 已归档：不可用于当前生产部署
+
+> 本文记录的是早期 Node 20 + PM2 + 主机源码部署方式，包含公网开放应用端口、HTTP、在线覆盖 SQLite 等已不符合当前安全要求的步骤。请勿按本文部署或更新生产环境。当前唯一有效入口为 [production-runbook.md](./production-runbook.md)。

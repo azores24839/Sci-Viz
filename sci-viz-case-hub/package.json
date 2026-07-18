@@ -8,12 +8,22 @@
     "dev:server": "cd server && npm run dev",
     "dev:web": "cd web && npm run dev",
     "build": "cd server && npm run build && cd ../web && npm run build",
+    "check": "npm run check:repo && npm run check:diff && npm run check:server:test && npm run check:server:types && npm run check:web:types",
+    "check:repo": "node ../scripts/check_project_health.mjs",
+    "check:diff": "git -C .. diff --check",
+    "check:server:test": "cd server && npm run test",
+    "check:server:types": "cd server && npx --no-install tsc --noEmit --incremental false",
+    "check:web:types": "cd web && npx --no-install tsc -p tsconfig.json --noEmit",
+    "check:media": "node ../scripts/media_inventory.mjs --verify --allow-added",
+    "check:media:strict": "node ../scripts/media_inventory.mjs --verify",
+    "check:ci": "npm run check && npm run build",
     "db:setup": "cd server && npm run db:setup",
     "db:seed": "cd server && npm run db:seed",
     "db:seed:enterprise-sources": "cd server && npm run db:seed:enterprise-sources",
     "enterprise:dry-run": "cd server && npm run enterprise:dry-run --",
     "enterprise:active-batch": "cd server && npm run enterprise:active-batch --",
-    "enterprise:browser-batch": "cd server && npm run enterprise:browser-batch --"
+    "enterprise:browser-batch": "cd server && npm run enterprise:browser-batch --",
+    "university:browser-batch": "cd server && npm run university:browser-batch --"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

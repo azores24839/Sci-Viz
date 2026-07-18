@@ -1,6 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
+import { rateLimit } from 'express-rate-limit';
+import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { ensureUploadDirs } from './services/image.js';
@@ -18,6 +21,12 @@ import { collectionRouter } from './routes/collection.js';
 import { processingRouter } from './routes/processing.js';
 import { insightsRouter } from './routes/insights.js';
 import { studioRouter } from './routes/studio.js';
+import { assertSecurityConfig, isProduction } from './config/security.js';
+import { requestContext, sendInternalError } from './middleware/requestContext.js';
+import { createConcurrencyLimit } from './middleware/concurrencyLimit.js';
+import { markInterruptedCrawlJobs } from './crawler/sourceJobRunner.js';
+import { recoverOcrJobs } from './services/ocrJobs.js';
+import { recoverAnalysisJobs } from './services/analysisJobs.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -39,18 +48,43 @@ if (process.argv.includes('--seed-videos')) {
   );
   // Do not start the HTTP server for CLI commands
 } else {
+  assertSecurityConfig();
   const app = express();
   const PORT = parseInt(process.env.PORT || '3001', 10);
   const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173')
     .split(',')
     .map(origin => origin.trim())
     .filter(Boolean);
+  const allowDevelopmentOrigins = !isProduction();
   const localDevOriginPattern = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/;
   const tryCloudflarePattern = /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/;
 
+  if (isProduction()) app.set('trust proxy', 1);
+  app.use(helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    contentSecurityPolicy: isProduction() ? {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+        connectSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'none'"],
+      },
+    } : false,
+  }));
+  app.use(requestContext);
+
   app.use(cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin) || localDevOriginPattern.test(origin) || origin.startsWith('chrome-extension://') || tryCloudflarePattern.test(origin)) {
+      const allowedDevelopmentOrigin = allowDevelopmentOrigins && (
+        localDevOriginPattern.test(origin ?? '')
+        || origin?.startsWith('chrome-extension://')
+        || tryCloudflarePattern.test(origin ?? '')
+      );
+      if (!origin || allowedOrigins.includes(origin) || allowedDevelopmentOrigin) {
         callback(null, true);
         return;
       }
@@ -60,16 +94,86 @@ if (process.argv.includes('--seed-videos')) {
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
 
+  const authRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 20,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { success: false, error: '请求过于频繁，请稍后重试' },
+  });
+  const studioRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 120,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { success: false, error: { code: 'STUDIO_API_RATE_LIMITED', message: 'Too many Studio requests.' } },
+  });
+  const authStatusRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 120,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { success: false, error: '请求过于频繁，请稍后重试' },
+  });
+  const apiRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 600,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { success: false, error: '请求过于频繁，请稍后重试' },
+  });
+  const captureRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 30,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { success: false, error: '上传请求过于频繁，请稍后重试' },
+  });
+  const captureConcurrencyLimit = createConcurrencyLimit(2);
+  const expensiveTaskRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 10,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { success: false, error: '高负载任务请求过于频繁，请稍后重试' },
+  });
+  const processingConcurrencyLimit = createConcurrencyLimit(1);
+  const crawlConcurrencyLimit = createConcurrencyLimit(1);
+
   app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
   app.use('/journal_covers', express.static(path.join(__dirname, '..', '..', '..', 'journal_covers')));
 
-  app.get('/api/health', (_req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  app.get('/api/health', async (req, res) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      res.json({ status: 'ready', timestamp: new Date().toISOString() });
+    } catch (error) {
+      console.error(`[health] database readiness failed requestId=${req.requestId ?? 'unknown'}`);
+      res.status(503).json({ status: 'not_ready', requestId: req.requestId });
+    }
   });
 
-  app.use('/api/auth', authRouter);
-  app.use('/api/studio', studioRouter);
+  app.use('/api/auth/login', authRateLimit);
+  app.use('/api/auth/register', authRateLimit);
+  app.use('/api/auth', authStatusRateLimit, authRouter);
+  app.use('/api/studio', studioRateLimit, studioRouter);
+  app.use('/api', apiRateLimit);
   app.use('/api', authMiddleware);
+  app.use('/api/captures', captureRateLimit, captureConcurrencyLimit);
+  app.use('/api/processing', (req, res, next) => {
+    if (req.method === 'GET') {
+      next();
+      return;
+    }
+    expensiveTaskRateLimit(req, res, () => processingConcurrencyLimit(req, res, next));
+  });
+  app.use('/api/crawl', (req, res, next) => {
+    if (req.method === 'GET') {
+      next();
+      return;
+    }
+    expensiveTaskRateLimit(req, res, () => crawlConcurrencyLimit(req, res, next));
+  });
   app.use('/api', capturesRouter);
   app.use('/api', casesRouter);
   app.use('/api', analysisRouter);
@@ -92,8 +196,29 @@ if (process.argv.includes('--seed-videos')) {
     });
   });
 
+  app.use((error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (res.headersSent) return next(error);
+    if (error instanceof Error && error.message === 'Origin is not allowed by CORS') {
+      return res.status(403).json({ success: false, error: '请求来源不被允许', requestId: req.requestId });
+    }
+    if (error instanceof multer.MulterError) {
+      const status = error.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(status).json({ success: false, error: '上传请求不符合文件大小或数量限制', requestId: req.requestId });
+    }
+    return sendInternalError(req, res, 'unhandled request', error);
+  });
+
   ensureUploadDirs();
 
+  void markInterruptedCrawlJobs().catch(error => {
+    console.error('[crawl-recovery] failed to mark interrupted jobs', error);
+  });
+  void recoverOcrJobs().catch(error => {
+    console.error('[ocr-recovery] failed to recover OCR job', error);
+  });
+  void recoverAnalysisJobs().catch(error => {
+    console.error('[analysis-recovery] failed to recover Qwen analysis job', error);
+  });
   startAnalysisRecovery();
 
   const server = app.listen(PORT, () => {

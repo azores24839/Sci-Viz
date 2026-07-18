@@ -72,7 +72,7 @@ export default function LoginPage({ onLogin }: Props) {
 
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: 16 }}>
-            <label style={{
+            <label htmlFor="case-hub-username" style={{
               display: 'block',
               fontSize: 13,
               fontWeight: 500,
@@ -82,7 +82,11 @@ export default function LoginPage({ onLogin }: Props) {
               用户名
             </label>
             <input
+              id="case-hub-username"
               type="text"
+              autoComplete="username"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? 'case-hub-login-error' : undefined}
               value={username}
               onChange={e => setUsername(e.target.value)}
               autoFocus
@@ -101,7 +105,7 @@ export default function LoginPage({ onLogin }: Props) {
           </div>
 
           <div style={{ marginBottom: 20 }}>
-            <label style={{
+            <label htmlFor="case-hub-password" style={{
               display: 'block',
               fontSize: 13,
               fontWeight: 500,
@@ -111,7 +115,11 @@ export default function LoginPage({ onLogin }: Props) {
               密码
             </label>
             <input
+              id="case-hub-password"
               type="password"
+              autoComplete="current-password"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? 'case-hub-login-error' : undefined}
               value={password}
               onChange={e => setPassword(e.target.value)}
               style={{
@@ -129,7 +137,7 @@ export default function LoginPage({ onLogin }: Props) {
           </div>
 
           {error && (
-            <div style={{
+            <div id="case-hub-login-error" role="alert" style={{
               fontSize: 13,
               color: '#e74c3c',
               marginBottom: 16,

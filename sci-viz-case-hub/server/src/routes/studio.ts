@@ -1,6 +1,8 @@
 import { Router, type Request, type Response } from 'express';
 import { prisma } from '../prisma.js';
 import { remapImagePath } from '../services/oss.js';
+import { findStudioRecommendationCandidates, STUDIO_RECOMMENDATION_CONTRACT_VERSION } from '../services/studioRecommendations.js';
+import { isValidStudioServiceKey } from '../services/studioAuth.js';
 
 export const studioRouter = Router();
 
@@ -22,7 +24,12 @@ function borrowable(value: string) {
 studioRouter.use((req, res, next) => {
   const configured = process.env.STUDIO_SERVICE_KEY;
   if (!configured) return res.status(503).json({ success: false, error: { code: 'STUDIO_API_DISABLED', message: 'Studio integration is not configured.' } });
-  if (req.header('x-studio-key') !== configured) return res.status(401).json({ success: false, error: { code: 'STUDIO_API_UNAUTHORIZED', message: 'Invalid service credential.' } });
+  if (!isValidStudioServiceKey(req.header('x-studio-key'), configured)) return res.status(401).json({ success: false, error: { code: 'STUDIO_API_UNAUTHORIZED', message: 'Invalid service credential.' } });
+  const requestedVersion = req.header('x-studio-contract-version');
+  if (requestedVersion && requestedVersion !== String(STUDIO_RECOMMENDATION_CONTRACT_VERSION)) {
+    return res.status(406).json({ success: false, error: { code: 'STUDIO_CONTRACT_UNSUPPORTED', message: 'Unsupported Studio contract version.' } });
+  }
+  res.setHeader('x-studio-contract-version', String(STUDIO_RECOMMENDATION_CONTRACT_VERSION));
   next();
 });
 
@@ -34,13 +41,10 @@ studioRouter.post('/recommendations', async (req: Request, res: Response) => {
     const desiredTechnicalMethods = list(req.body?.technicalMethods);
     const limit = Math.min(12, Math.max(3, Number(req.body?.limit) || 6));
     const purposes = [...new Set(goals.flatMap((goal) => goalPurpose[goal] ?? []))];
-    const candidates = await prisma.visualCase.findMany({
-      where: {
-        reviewStatus: 'approved',
-        OR: [{ distributionMedium: '静图' }, { distributionMedium: '' }, { captureType: 'image' }],
-      },
-      orderBy: [{ rating: 'desc' }, { confidence: 'desc' }, { updatedAt: 'desc' }],
-      take: 300,
+    const candidates = await findStudioRecommendationCandidates(prisma, {
+      discipline,
+      purposes,
+      technicalMethods: desiredTechnicalMethods,
     });
     const scored = candidates.map((entry) => {
       const disciplineMatch = Boolean(discipline && entry.discipline === discipline);
@@ -56,6 +60,7 @@ studioRouter.post('/recommendations', async (req: Request, res: Response) => {
     const exactCount = scored.filter((item) => item.matchLevel === 'EXACT').length;
     const fallbackMessage = exactCount >= 3 ? '' : exactCount > 0 ? `精确匹配仅 ${exactCount} 个，已补充同学科、同目标或同技术方法的相关案例。` : '暂无足够的精确匹配，已提供跨学科的优秀静图参考。';
     res.json({ success: true, data: {
+      contractVersion: STUDIO_RECOMMENDATION_CONTRACT_VERSION,
       items: scored.map(({ entry, score, matchLevel, reasons }) => ({
         id: entry.id,
         title: entry.caseTitle || entry.title || entry.pageTitle || '未命名案例',
@@ -76,6 +81,7 @@ studioRouter.post('/recommendations', async (req: Request, res: Response) => {
       appliedFilters: { discipline, teamType, goals, technicalMethods: desiredTechnicalMethods, medium: '静图' },
     } });
   } catch (error) {
-    res.status(500).json({ success: false, error: { code: 'STUDIO_RECOMMENDATION_FAILED', message: (error as Error).message } });
+    console.error('[studio] recommendation failed', error instanceof Error ? error.message : 'unknown error');
+    res.status(500).json({ success: false, error: { code: 'STUDIO_RECOMMENDATION_FAILED', message: 'Recommendation service failed.' } });
   }
 });

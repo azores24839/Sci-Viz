@@ -1,6 +1,7 @@
 node_modules
 dist
 .env
+**/.env*
 *.db
 *.tsbuildinfo
 server/uploads/originals/*
@@ -8,6 +9,8 @@ server/uploads/thumbnails/*
 !server/uploads/originals/.gitkeep
 !server/uploads/thumbnails/.gitkeep
 .DS_Store
+.playwright-cli
+server/backups
 .git
 .gitignore
 *.md

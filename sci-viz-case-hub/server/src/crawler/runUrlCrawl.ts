@@ -1,12 +1,17 @@
 import pLimit from 'p-limit';
 import { extractImagesFromPage } from './extractImagesFromPage.js';
-import { filterImageCandidates } from './filterImageCandidates.js';
+import {
+  canonicalImageUrl,
+  emptyFilterReasonCounts,
+  filterImageCandidates,
+  type FilterReasonCounts,
+} from './filterImageCandidates.js';
 import { prisma } from '../prisma.js';
 import { deleteSavedImage, saveImageFromUrl } from '../services/image.js';
 import { runAnalysis } from '../services/analysisRunner.js';
 import { assertPublicHttpUrl, readTextWithLimit } from '../utils/httpSafety.js';
 import { findDuplicateCase } from '../services/dedupe.js';
-import { scoreImageCandidate } from './collectionScoring.js';
+import { scoreSurveyImage } from './collectionScoring.js';
 
 const AUTH_DOMAINS = [
   'idp.', 'login.', 'auth.', 'sso.', 'account.', 'signin.', 'sign-in.',
@@ -33,7 +38,52 @@ const AUTH_URL_PARAMS = [
   'response_type=cookie',
 ];
 
-const MAX_IMAGES_PER_PAGE = 10;
+const MAX_IMAGES_PER_PAGE = 100;
+
+interface CrawlDedupContext {
+  imageKeys: Set<string>;
+  imageHashes: Set<string>;
+}
+
+function createCrawlDedupContext(): CrawlDedupContext {
+  return { imageKeys: new Set<string>(), imageHashes: new Set<string>() };
+}
+
+export type CrawlImageOutcome = 'created' | 'duplicate' | 'filtered' | 'capped' | 'failed';
+
+export type CrawlProgressEvent =
+  | { type: 'page_started'; url: string }
+  | { type: 'page_scanned'; url: string; candidateImageCount: number }
+  | { type: 'images_processed'; url: string; count: number; outcome: CrawlImageOutcome }
+  | { type: 'page_completed'; url: string; result: CrawlPageResult };
+
+export interface RunUrlCrawlOptions {
+  signal?: AbortSignal;
+  onProgress?: (event: CrawlProgressEvent) => void;
+}
+
+interface ProcessSingleUrlOptions extends RunUrlCrawlOptions {
+  dedupContext?: CrawlDedupContext;
+}
+
+export class CrawlCancelledError extends Error {
+  constructor() {
+    super('Crawl cancelled');
+    this.name = 'CrawlCancelledError';
+  }
+}
+
+function throwIfCancelled(signal?: AbortSignal) {
+  if (signal?.aborted) throw new CrawlCancelledError();
+}
+
+function reportProgress(options: RunUrlCrawlOptions, event: CrawlProgressEvent) {
+  try {
+    options.onProgress?.(event);
+  } catch (error) {
+    console.warn('[url-crawl] Progress observer failed:', error);
+  }
+}
 
 function detectAuthRedirect(originalUrl: string, finalUrl: string): string | null {
   if (originalUrl === finalUrl) return null;
@@ -88,8 +138,23 @@ export interface CrawlPageResult {
   pageTitle: string;
   candidateImageCount: number;
   filteredImageCount: number;
+  filterReasons: FilterReasonCounts;
   createdCaseCount: number;
+  duplicateImageCount: number;
+  cappedImageCount: number;
+  failedImageCount: number;
+  createdCases: CrawlCreatedCase[];
   errors: string[];
+  notices: string[];
+}
+
+export interface CrawlCreatedCase {
+  id: string;
+  pageTitle: string;
+  sourceUrl: string;
+  imageUrl: string;
+  imagePath: string;
+  thumbnailPath: string;
 }
 
 export interface CrawlSummary {
@@ -98,7 +163,10 @@ export interface CrawlSummary {
   failedPageCount: number;
   candidateImageCount: number;
   filteredImageCount: number;
+  filterReasons: FilterReasonCounts;
   createdCaseCount: number;
+  duplicateImageCount: number;
+  cappedImageCount: number;
   failedImageCount: number;
 }
 
@@ -113,30 +181,22 @@ export async function processSingleUrl(
   sourceName?: string,
   sourceType?: string,
   cookie?: string,
+  options: ProcessSingleUrlOptions = {},
 ): Promise<CrawlPageResult> {
+  throwIfCancelled(options.signal);
   const errors: string[] = [];
+  const notices: string[] = [];
   let pageTitle = '';
   let candidateImageCount = 0;
   let filteredImageCount = 0;
+  const filterReasons = emptyFilterReasonCounts();
   let createdCaseCount = 0;
+  let duplicateImageCount = 0;
+  let cappedImageCount = 0;
+  let failedImageCount = 0;
+  const createdCases: CrawlCreatedCase[] = [];
 
   try {
-    const urlCheck = await prisma.visualCase.findFirst({
-      where: { sourceUrl: url },
-      select: { id: true },
-    });
-    if (urlCheck) {
-      return {
-        url,
-        status: 'success',
-        pageTitle: 'Skipped: URL already exists',
-        candidateImageCount: 0,
-        filteredImageCount: 0,
-        createdCaseCount: 0,
-        errors: [`Skipped: sourceUrl already exists (id=${urlCheck.id})`],
-      };
-    }
-
     let parsedUrl = await assertPublicHttpUrl(url);
 
     const fetchHeaders: Record<string, string> = {
@@ -152,12 +212,17 @@ export async function processSingleUrl(
       const timeout = setTimeout(() => controller.abort(), 30000);
 
       try {
+        throwIfCancelled(options.signal);
+        const fetchSignal = options.signal
+          ? AbortSignal.any([options.signal, controller.signal])
+          : controller.signal;
         response = await fetch(parsedUrl.href, {
-          signal: controller.signal,
+          signal: fetchSignal,
           redirect: 'manual',
           headers: fetchHeaders,
         });
       } catch (fetchErr) {
+        throwIfCancelled(options.signal);
         throw new Error(`Page request failed: ${(fetchErr as Error).message}`);
       } finally {
         clearTimeout(timeout);
@@ -179,8 +244,14 @@ export async function processSingleUrl(
           pageTitle,
           candidateImageCount: 0,
           filteredImageCount: 0,
+          filterReasons,
           createdCaseCount: 0,
+          duplicateImageCount: 0,
+          cappedImageCount: 0,
+          failedImageCount: 0,
+          createdCases,
           errors: [authMsg],
+          notices: [],
         };
       }
       parsedUrl = await assertPublicHttpUrl(redirectUrl.href);
@@ -209,7 +280,7 @@ export async function processSingleUrl(
 
     const html = await readTextWithLimit(response);
 
-    const extracted = await extractImagesFromPage(url, html);
+    const extracted = await extractImagesFromPage(url, html, { mode: 'survey' });
     pageTitle = extracted.pageTitle;
 
     const authPageMsg = detectAuthPage(html, pageTitle);
@@ -220,25 +291,47 @@ export async function processSingleUrl(
         pageTitle,
         candidateImageCount: 0,
         filteredImageCount: 0,
+        filterReasons,
         createdCaseCount: 0,
+        duplicateImageCount: 0,
+        cappedImageCount: 0,
+        failedImageCount: 0,
+        createdCases,
         errors: [authPageMsg],
+        notices: [],
       };
     }
 
     candidateImageCount = extracted.images.length;
+    reportProgress(options, { type: 'page_scanned', url, candidateImageCount });
 
-    const { valid, filteredCount } = filterImageCandidates(extracted.images);
+    const { valid, filteredCount, reasonCounts } = filterImageCandidates(extracted.images);
     filteredImageCount = filteredCount;
+    Object.assign(filterReasons, reasonCounts);
+
+    const taskUniqueImages = valid.filter(image => {
+      if (!options.dedupContext) return true;
+      const key = canonicalImageUrl(image.src);
+      if (options.dedupContext.imageKeys.has(key)) {
+        duplicateImageCount++;
+        notices.push(`Cross-page duplicate skipped: ${image.src}`);
+        return false;
+      }
+      options.dedupContext.imageKeys.add(key);
+      return true;
+    });
+    if (filteredCount > 0) reportProgress(options, { type: 'images_processed', url, count: filteredCount, outcome: 'filtered' });
+    if (duplicateImageCount > 0) reportProgress(options, { type: 'images_processed', url, count: duplicateImageCount, outcome: 'duplicate' });
 
     const combinedContext = [
       extracted.metaDescription,
       extracted.bodyText,
     ].filter(Boolean).join('\n').substring(0, 1000);
 
-    const scoredImages = valid
+    const scoredImages = taskUniqueImages
       .map(img => ({
         image: img,
-        score: scoreImageCandidate({
+        score: scoreSurveyImage({
           image: img,
           pageTitle,
           pageUrl: parsedUrl.href,
@@ -250,35 +343,74 @@ export async function processSingleUrl(
       }))
       .sort((a, b) => b.score.score - a.score.score);
 
-    const selectedImages = scoredImages
-      .filter(item => item.score.shouldKeep)
-      .slice(0, MAX_IMAGES_PER_PAGE);
-
-    for (const skipped of scoredImages.filter(item => !item.score.shouldKeep)) {
-      errors.push(`Low-value image skipped: ${skipped.image.src} - score ${skipped.score.score}`);
-    }
+    const selectedImages = scoredImages.slice(0, MAX_IMAGES_PER_PAGE);
 
     if (scoredImages.length > selectedImages.length) {
-      for (const skipped of scoredImages.slice(MAX_IMAGES_PER_PAGE).filter(item => item.score.shouldKeep)) {
-        errors.push(`Image skipped by per-page cap: ${skipped.image.src} - score ${skipped.score.score}`);
+      cappedImageCount = scoredImages.length - selectedImages.length;
+      reportProgress(options, { type: 'images_processed', url, count: cappedImageCount, outcome: 'capped' });
+      for (const skipped of scoredImages.slice(MAX_IMAGES_PER_PAGE)) {
+        notices.push(`Safety cap skipped: ${skipped.image.src}`);
       }
     }
 
     for (const scored of selectedImages) {
+      throwIfCancelled(options.signal);
       const img = scored.image;
       let imageResult;
       try {
-        imageResult = await saveImageFromUrl(img.src);
+        imageResult = await saveImageFromUrl(img.src, options.signal);
       } catch (imgErr) {
-        errors.push(`Image download failed: ${img.src} - ${(imgErr as Error).message}`);
+        throwIfCancelled(options.signal);
+        const message = (imgErr as Error).message;
+        if (/unsupported image (type|format)|not an image|invalid or unsafe image data|could not determine image dimensions/i.test(message)) {
+          filteredImageCount++;
+          filterReasons.unsupportedFormatCount++;
+          notices.push(`Unsupported image format skipped: ${img.src}`);
+          reportProgress(options, { type: 'images_processed', url, count: 1, outcome: 'filtered' });
+          continue;
+        }
+        if (/image (dimensions )?too small/i.test(message)) {
+          filteredImageCount++;
+          filterReasons.tooSmallCount++;
+          notices.push(`Tiny image skipped: ${img.src}`);
+          reportProgress(options, { type: 'images_processed', url, count: 1, outcome: 'filtered' });
+          continue;
+        }
+        if (/image (dimensions )?too large|response too large/i.test(message)) {
+          cappedImageCount++;
+          notices.push(`Image safety limit skipped: ${img.src}`);
+          reportProgress(options, { type: 'images_processed', url, count: 1, outcome: 'capped' });
+          continue;
+        }
+        if (/failed to fetch image: HTTP (400|404|410)\b/i.test(message)) {
+          filteredImageCount++;
+          filterReasons.missingSourceCount++;
+          notices.push(`Invalid or expired image URL skipped: ${img.src}`);
+          reportProgress(options, { type: 'images_processed', url, count: 1, outcome: 'filtered' });
+          continue;
+        }
+        failedImageCount++;
+        errors.push(`Image download failed: ${img.src} - ${message}`);
+        reportProgress(options, { type: 'images_processed', url, count: 1, outcome: 'failed' });
         continue;
       }
 
       try {
+        if (options.dedupContext?.imageHashes.has(imageResult.imageHash)) {
+          duplicateImageCount++;
+          await deleteSavedImage(imageResult.imagePath, imageResult.thumbnailPath);
+          notices.push(`Concurrent duplicate image skipped: ${img.src}`);
+          reportProgress(options, { type: 'images_processed', url, count: 1, outcome: 'duplicate' });
+          continue;
+        }
+        options.dedupContext?.imageHashes.add(imageResult.imageHash);
+
         const duplicate = await findDuplicateCase(imageResult.imageHash);
         if (duplicate) {
+          duplicateImageCount++;
           await deleteSavedImage(imageResult.imagePath, imageResult.thumbnailPath);
-          errors.push(`Duplicate image skipped: ${img.src} - matched ${duplicate.caseEntry.id} (${duplicate.matchType})`);
+          notices.push(`Duplicate image skipped: ${img.src} - matched ${duplicate.caseEntry.id} (${duplicate.matchType})`);
+          reportProgress(options, { type: 'images_processed', url, count: 1, outcome: 'duplicate' });
           continue;
         }
 
@@ -312,10 +444,22 @@ export async function processSingleUrl(
         });
 
         createdCaseCount++;
+        createdCases.push({
+          id: caseEntry.id,
+          pageTitle,
+          sourceUrl: parsedUrl.href,
+          imageUrl: img.src,
+          imagePath: imageResult.imagePath,
+          thumbnailPath: imageResult.thumbnailPath,
+        });
+        reportProgress(options, { type: 'images_processed', url, count: 1, outcome: 'created' });
 
         runAnalysis(caseEntry.id, imageResult.imagePath, pageTitle, url, contextParts);
       } catch (createErr) {
+        options.dedupContext?.imageHashes.delete(imageResult.imageHash);
+        failedImageCount++;
         errors.push(`Case creation failed: ${img.src} - ${(createErr as Error).message}`);
+        reportProgress(options, { type: 'images_processed', url, count: 1, outcome: 'failed' });
       }
     }
 
@@ -325,18 +469,31 @@ export async function processSingleUrl(
       pageTitle,
       candidateImageCount,
       filteredImageCount,
+      filterReasons,
       createdCaseCount,
+      duplicateImageCount,
+      cappedImageCount,
+      failedImageCount,
+      createdCases,
       errors,
+      notices,
     };
   } catch (err) {
+    if (err instanceof CrawlCancelledError || options.signal?.aborted) throw new CrawlCancelledError();
     return {
       url,
       status: 'failed',
       pageTitle,
       candidateImageCount,
-      filteredImageCount: 0,
-      createdCaseCount: 0,
+      filteredImageCount,
+      filterReasons,
+      createdCaseCount,
+      duplicateImageCount,
+      cappedImageCount,
+      failedImageCount,
+      createdCases,
       errors: [(err as Error).message],
+      notices,
     };
   }
 }
@@ -346,16 +503,27 @@ export async function runUrlCrawl(
   sourceName?: string,
   sourceType?: string,
   cookie?: string,
+  options: RunUrlCrawlOptions = {},
 ): Promise<CrawlResponse> {
   const validUrls = urls
     .map(u => u.trim())
     .filter(u => u.length > 0);
 
   const limit = pLimit(2);
+  const dedupContext = createCrawlDedupContext();
 
   const results = await Promise.all(
     validUrls.map(url =>
-      limit(() => processSingleUrl(url, sourceName, sourceType, cookie))
+      limit(async () => {
+        throwIfCancelled(options.signal);
+        reportProgress(options, { type: 'page_started', url });
+        const result = await processSingleUrl(url, sourceName, sourceType, cookie, {
+          ...options,
+          dedupContext,
+        });
+        reportProgress(options, { type: 'page_completed', url, result });
+        return result;
+      })
     )
   );
 
@@ -367,8 +535,17 @@ export async function runUrlCrawl(
     failedPageCount: results.filter(r => r.status === 'failed').length + authRequiredCount,
     candidateImageCount: results.reduce((s, r) => s + r.candidateImageCount, 0),
     filteredImageCount: results.reduce((s, r) => s + r.filteredImageCount, 0),
+    filterReasons: results.reduce<FilterReasonCounts>((totals, result) => ({
+      missingSourceCount: totals.missingSourceCount + result.filterReasons.missingSourceCount,
+      inlineDataCount: totals.inlineDataCount + result.filterReasons.inlineDataCount,
+      unsupportedFormatCount: totals.unsupportedFormatCount + result.filterReasons.unsupportedFormatCount,
+      tooSmallCount: totals.tooSmallCount + result.filterReasons.tooSmallCount,
+      duplicateUrlCount: totals.duplicateUrlCount + result.filterReasons.duplicateUrlCount,
+    }), emptyFilterReasonCounts()),
     createdCaseCount: results.reduce((s, r) => s + r.createdCaseCount, 0),
-    failedImageCount: results.reduce((s, r) => s + r.errors.length, 0),
+    duplicateImageCount: results.reduce((s, r) => s + r.duplicateImageCount, 0),
+    cappedImageCount: results.reduce((s, r) => s + r.cappedImageCount, 0),
+    failedImageCount: results.reduce((s, r) => s + r.failedImageCount, 0),
   };
 
   return { success: true, summary, results };

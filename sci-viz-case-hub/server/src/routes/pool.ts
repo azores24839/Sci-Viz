@@ -3,6 +3,10 @@ import { prisma } from '../prisma.js';
 import { discoverSourceArticles, EASY_STATIC_SOURCE_NAMES, enqueueSourceCrawlJob } from '../crawler/sourceJobRunner.js';
 import { clampInt, normalizeHttpUrl, toTrimmedString } from '../utils/httpSafety.js';
 import { classifyEnterpriseSource } from '../services/enterpriseTaxonomy.js';
+import { toPublicSourceDto } from '../services/publicSource.js';
+import { sendInternalError } from '../middleware/requestContext.js';
+import { calculateSourceDistribution, classifySourceDistributionGroup } from '../services/sourceDistribution.js';
+import { inferSourceOwner } from '../services/sourceOwner.js';
 
 export const poolRouter = Router();
 
@@ -55,9 +59,10 @@ async function countCasesForSource(source: { name: string; url: string }) {
 poolRouter.get('/pool/sources', async (req: Request, res: Response) => {
   try {
     const { category, includeDisabled } = req.query;
+    const publicRequest = !req.user;
     const where: Record<string, unknown> = {};
     if (category && typeof category === 'string') where.category = category;
-    if (includeDisabled !== 'true') where.enabled = true;
+    if (publicRequest || includeDisabled !== 'true') where.enabled = true;
 
     const sources = await prisma.crawlSource.findMany({
       where,
@@ -75,22 +80,62 @@ poolRouter.get('/pool/sources', async (req: Request, res: Response) => {
       try { hostname = new URL(source.url).hostname; } catch { /* */ }
       const existingCases = await countCasesForSource(source);
       const enterpriseTaxonomy = classifyEnterpriseSource(source);
+      const sourceOwner = inferSourceOwner(source);
       return {
         ...source,
         sourceDomain: hostname,
         enterpriseCompany: enterpriseTaxonomy?.companyName || '',
         enterpriseCompanyKey: enterpriseTaxonomy?.companyKey || '',
         sourcePageType: enterpriseTaxonomy?.sourcePageType || '',
+        sourceOwnerName: sourceOwner.ownerName,
+        sourceOwnerKey: sourceOwner.ownerKey,
+        sourceOwnerKind: sourceOwner.ownerKind,
+        sourceOwnerDomain: sourceOwner.ownerDomain,
         lastJob: source.jobs[0] || null,
         existingCases,
+        sourceDistributionGroup: classifySourceDistributionGroup({
+          ...source,
+          sourceOwnerKey: sourceOwner.ownerKey,
+          sourceOwnerKind: sourceOwner.ownerKind,
+        }),
         crawlAvailability: classifyAvailability(source, existingCases),
         jobs: undefined,
       };
     }));
 
-    res.json({ success: true, data: result });
+    res.json({ success: true, data: publicRequest ? result.map(toPublicSourceDto) : result });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'pool route', error);
+  }
+});
+
+poolRouter.get('/pool/distribution', async (req: Request, res: Response) => {
+  try {
+    const [sources, mediaDomains] = await Promise.all([
+      prisma.crawlSource.findMany({
+        where: { enabled: true },
+        select: { name: true, category: true, sourceType: true, url: true },
+      }),
+      prisma.visualCase.groupBy({
+        by: ['sourceDomain'],
+        _count: { _all: true },
+      }),
+    ]);
+
+    const distribution = calculateSourceDistribution(
+      sources.map(source => {
+        const owner = inferSourceOwner(source);
+        return {
+          ...source,
+          sourceOwnerKey: owner.ownerKey,
+          sourceOwnerKind: owner.ownerKind,
+        };
+      }),
+      mediaDomains.map(item => ({ sourceDomain: item.sourceDomain, count: item._count._all })),
+    );
+    res.json({ success: true, data: distribution });
+  } catch (error) {
+    sendInternalError(req, res, 'pool distribution route', error);
   }
 });
 
@@ -113,7 +158,7 @@ poolRouter.get('/pool/sources/:id', async (req: Request, res: Response) => {
     }
     res.json({ success: true, data: source });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'pool route', error);
   }
 });
 
@@ -142,7 +187,7 @@ poolRouter.post('/pool/sources', async (req: Request, res: Response) => {
     });
     res.json({ success: true, data: source });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'pool route', error);
   }
 });
 
@@ -184,7 +229,7 @@ poolRouter.patch('/pool/sources/:id', async (req: Request, res: Response) => {
     const source = await prisma.crawlSource.update({ where: { id }, data: updateData });
     res.json({ success: true, data: source });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'pool route', error);
   }
 });
 
@@ -204,7 +249,7 @@ poolRouter.delete('/pool/sources/:id', async (req: Request, res: Response) => {
     await prisma.crawlSource.delete({ where: { id } });
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'pool route', error);
   }
 });
 
@@ -233,7 +278,7 @@ poolRouter.post('/pool/sources/:id/crawl', async (req: Request, res: Response) =
 
     res.json({ success: true, data: { jobId: result.job.id } });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'pool route', error);
   }
 });
 
@@ -280,7 +325,63 @@ poolRouter.post('/pool/crawl/easy', async (req: Request, res: Response) => {
 
     res.json({ success: true, data: jobs });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'pool route', error);
+  }
+});
+
+poolRouter.post('/pool/crawl/batch', async (req: Request, res: Response) => {
+  try {
+    const rawIds = Array.isArray(req.body.sourceIds) ? req.body.sourceIds : [];
+    const sourceIds = rawIds
+      .map((value: unknown) => clampInt(value, 0, 1, Number.MAX_SAFE_INTEGER))
+      .filter((value: number) => value > 0)
+      .slice(0, 100);
+    if (!sourceIds.length) {
+      res.status(400).json({ success: false, error: '请至少选择一个采集来源。' });
+      return;
+    }
+
+    const sources = await prisma.crawlSource.findMany({
+      where: { id: { in: sourceIds }, enabled: true },
+      orderBy: { id: 'asc' },
+    });
+    const jobs = [];
+    for (const source of sources) {
+      const result = await enqueueSourceCrawlJob(source, {
+        maxLinks: clampInt(req.body.maxLinksPerSource, 30, 1, 100),
+        maxPages: clampInt(req.body.maxPages, 5, 1, 20),
+        concurrency: clampInt(req.body.concurrency, 1, 1, 2),
+        trigger: 'batch',
+        mode: req.body.mode === 'full' ? 'full' : 'incremental',
+      });
+      jobs.push({
+        sourceId: source.id,
+        sourceName: source.name,
+        jobId: result.job.id,
+        queued: result.queued,
+      });
+    }
+    res.json({ success: true, data: jobs });
+  } catch (error) {
+    sendInternalError(req, res, 'pool batch crawl', error);
+  }
+});
+
+poolRouter.get('/pool/jobs', async (req: Request, res: Response) => {
+  try {
+    const limit = clampInt(req.query.limit, 20, 1, 100);
+    const jobs = await prisma.crawlJob.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: { source: { select: { name: true } } },
+    });
+    res.json({ success: true, data: jobs.map(job => ({
+      ...job,
+      sourceName: job.source.name,
+      source: undefined,
+    })) });
+  } catch (error) {
+    sendInternalError(req, res, 'pool job list', error);
   }
 });
 
@@ -298,6 +399,35 @@ poolRouter.get('/pool/jobs/:id', async (req: Request, res: Response) => {
     }
     res.json({ success: true, data: job });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'pool route', error);
+  }
+});
+
+poolRouter.post('/pool/jobs/:id/retry', async (req: Request, res: Response) => {
+  try {
+    const id = parseRouteId(req.params.id);
+    if (!id) {
+      res.status(400).json({ success: false, error: 'Invalid job id' });
+      return;
+    }
+    const previous = await prisma.crawlJob.findUnique({ where: { id }, include: { source: true } });
+    if (!previous) {
+      res.status(404).json({ success: false, error: 'Job not found' });
+      return;
+    }
+    if (!['failed', 'partial'].includes(previous.status)) {
+      res.status(409).json({ success: false, error: '只有失败或部分完成的任务可以重试。' });
+      return;
+    }
+    const result = await enqueueSourceCrawlJob(previous.source, {
+      maxLinks: previous.totalCount || 30,
+      maxPages: 5,
+      concurrency: 1,
+      trigger: 'retry',
+      mode: previous.mode === 'full' ? 'full' : 'incremental',
+    });
+    res.json({ success: true, data: { jobId: result.job.id, queued: result.queued } });
+  } catch (error) {
+    sendInternalError(req, res, 'pool retry crawl', error);
   }
 });

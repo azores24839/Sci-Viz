@@ -1,0 +1,144 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "Case Hub 接入与自动化就绪度审计",
+    "description": "面向 Sci AI Studio 接入与持续采集的 Case Hub 诊断报告。",
+    "generatedAt": "2026-07-14T21:00:00+08:00",
+    "charts": [
+      {
+        "id": "source_concentration",
+        "title": "主要来源案例量",
+        "subtitle": "实时库 approved 案例；头部来源高度集中",
+        "type": "bar",
+        "dataset": "top_sources",
+        "sourceId": "casehub_sqlite",
+        "encodings": {
+          "x": { "field": "source", "type": "nominal", "label": "来源" },
+          "y": { "field": "count", "type": "quantitative", "label": "案例数", "format": "number" }
+        },
+        "valueFormat": "number",
+        "layout": "full"
+      },
+      {
+        "id": "axis_skew",
+        "title": "三轴头部类别占比",
+        "subtitle": "传播、静图、拍摄分别是各轴最大类别",
+        "type": "bar",
+        "dataset": "axis_leaders",
+        "sourceId": "casehub_sqlite",
+        "encodings": {
+          "x": { "field": "category", "type": "nominal", "label": "轴与类别" },
+          "y": { "field": "share", "type": "quantitative", "label": "占比", "format": "percent" }
+        },
+        "valueFormat": "percent",
+        "layout": "full"
+      }
+    ],
+    "sources": [
+      {
+        "id": "casehub_sqlite",
+        "label": "Case Hub 实时 SQLite 只读统计",
+        "path": "server/prisma/dev.db",
+        "query": {
+          "engine": "sqlite",
+          "language": "sql",
+          "description": "案例量、来源集中度、三轴分布、缺失和采集任务覆盖审计。",
+          "tables_used": ["VisualCase", "CrawlSource", "CrawlJob", "CollectionKpi"],
+          "filters": ["统计时间：2026-07-14", "主要分布使用 approved 案例"],
+          "sql": "SELECT sourceDomain, COUNT(*) AS case_count FROM VisualCase WHERE reviewStatus = 'approved' GROUP BY sourceDomain ORDER BY case_count DESC;"
+        }
+      },
+      {
+        "id": "repo_audit",
+        "label": "Case Hub 与 Sci AI Studio 代码只读审计",
+        "path": "server/src/routes/studio.ts"
+      }
+    ],
+    "blocks": [
+      { "id": "title", "type": "markdown", "body": "# Case Hub 接入与自动化就绪度审计" },
+      {
+        "id": "executive_summary",
+        "type": "markdown",
+        "sourceId": "casehub_sqlite",
+        "body": "## Executive Summary\n\n- **现在不应继续无差别扩总量。** 实时库有 6,147 条案例，但 Top 5 域名占 61.2%，Top 10 占 75.0%；128 个域名的等效均衡来源数只有 9.7。\n- **Case Hub 还不是稳定的数据服务。** 当前 Studio 推荐接口会先截取全库前 300 条再匹配，低频学科可能被错误判定为无精确案例；数据模型也缺少来源外键、内容版本、版权和更新时间。\n- **采集尚未形成无人值守闭环。** 260 个启用来源中 240 个从未产生 CrawlJob；任务由 Web 进程内 fire-and-forget 启动，重启不可恢复，也没有周期调度、增量水位和失败退避。\n- **正确方向是双轨。** Case Hub 保留全量案例池，同时生成可复现的均衡分析样本；采集器改为由覆盖缺口驱动，Studio 通过版本化只读 API 和推荐快照消费案例。"
+      },
+      {
+        "id": "data_concentration_text",
+        "type": "markdown",
+        "sourceId": "casehub_sqlite",
+        "body": "## 总量已够做案例池，但不够支撑无偏比较\n\n国际研究组中 Nature 占 48.0%，企业组中 NVIDIA 中国占 50.9%。交大 24 个 approved 域名只有 4 个达到每来源 20 条的最低比较门槛，企业 50 个域名只有 11 个达到。正式研究结论应同时报告全库结果与均衡样本结果，避免把采集结构误写成视觉规律。"
+      },
+      { "id": "source_chart", "type": "chart", "chartId": "source_concentration", "layout": "full" },
+      {
+        "id": "axis_text",
+        "type": "markdown",
+        "sourceId": "casehub_sqlite",
+        "body": "## 真正的覆盖缺口在三轴长尾\n\n静图占 98.6%，数据功能只有 0.9%，交互功能仅 1 条，生成技术只有 37 条。三轴组合只出现 58 种，其中 31 种少于 5 例。下一轮应优先补非静图、数据功能、交互、生成技术，以及化学、环境、医学交叉组合。"
+      },
+      { "id": "axis_chart", "type": "chart", "chartId": "axis_skew", "layout": "full" },
+      {
+        "id": "integration_text",
+        "type": "markdown",
+        "sourceId": "repo_audit",
+        "body": "## Studio 已有接入骨架，但案例还没有进入真正工作流\n\n推荐边界应保持为 **Case Hub 独立只读内容服务 + Studio 服务端 BFF**，不要 iframe、直连 SQLite 或复制主库。Studio 当前已经能请求推荐案例，但案例主要旁挂在界面上，没有进入 BENCHMARK_CASES Agent、方案生成和拍摄卡片；同时没有保存推荐快照与数据版本，旧项目无法复现当时依据。"
+      },
+      {
+        "id": "automation_text",
+        "type": "markdown",
+        "sourceId": "repo_audit",
+        "body": "## 自动化的核心不是更多脚本，而是一个可恢复的闭环\n\n需要把 CrawlJob 改成持久状态机和独立 worker，补齐调度时间、租约、心跳、重试、逐 URL 结果、来源健康度和增量水位。调度优先级应由 **覆盖缺口 × 来源匹配能力 × 历史 approved 产出率 ÷ 成本** 计算，并在每轮运行后自动更新。"
+      },
+      {
+        "id": "priority_actions",
+        "type": "markdown",
+        "sourceId": "repo_audit",
+        "body": "## 推荐实施顺序\n\n1. **Studio 契约：** 建立 `/api/v1/studio` DTO、批量按 ID 获取、绝对缩略图 URL、datasetVersion 与 caseRevision。\n2. **推荐召回：** 数据库层分层召回 exact / related / cross-domain，不再先截全库前 300。\n3. **可恢复采集：** 独立 worker，加持久状态机、lease、heartbeat 和 retry。\n4. **覆盖度调度：** 重建三轴 + 学科 KPI，用缺口、来源产出率与质量率自动排程。\n5. **数据可信度：** Case 关联 Source/CrawlRun，增加 publishedAt、版权、模型版本和人工确认字段。\n6. **媒体可靠性：** 建立 OSS 同步状态、失败重试、历史迁移校验和 CDN 稳定缩略图。\n7. **质量门禁：** 完成 A4 金标准抽检、三轴完整编辑、枚举统一及 contract/adapter/job 测试。"
+      },
+      {
+        "id": "questions",
+        "type": "markdown",
+        "body": "## 需要尽快确定的产品决策\n\n1. Studio 是自动采用全部推荐，还是允许用户挑选？两套语义只能保留一套。\n2. Studio 需要引用公开缩略图还是原图？这决定 OSS/CDN、版权字段和签名 URL 方案。\n3. 哪些三轴 × 学科组合是研究核心？它们应成为采集目标，而不是继续让来源规模自然决定分布。"
+      },
+      {
+        "id": "caveats",
+        "type": "markdown",
+        "body": "## Caveats and Assumptions\n\n本次审计基于 2026-07-14 的本地实时 SQLite 与两个代码库的只读检查。远程来源 URL 未逐条联网探测；approved 状态不等同人工确认，因为当前只有 25.5% 案例有评分。"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-07-14T21:00:00+08:00",
+    "status": "ready",
+    "datasets": {
+      "top_sources": [
+        { "source": "Nature", "count": 1558, "share": 0.253 },
+        { "source": "LBL", "count": 658, "share": 0.107 },
+        { "source": "Harvard 主站", "count": 642, "share": 0.104 },
+        { "source": "NVIDIA 中国", "count": 529, "share": 0.086 },
+        { "source": "Harvard Gazette", "count": 377, "share": 0.061 },
+        { "source": "MIT News", "count": 261, "share": 0.042 }
+      ],
+      "axis_leaders": [
+        { "axis": "功能", "category": "功能：传播", "count": 2839, "share": 0.462 },
+        { "axis": "媒介", "category": "媒介：静图", "count": 6060, "share": 0.986 },
+        { "axis": "技术", "category": "技术：拍摄", "count": 3024, "share": 0.492 }
+      ],
+      "priorities": [
+        { "priority": 1, "workstream": "Studio 契约", "action": "建立 /api/v1/studio DTO、按 ID 批量获取、绝对缩略图 URL、datasetVersion 与 caseRevision", "acceptance": "Studio 可保存并重放推荐快照" },
+        { "priority": 2, "workstream": "推荐召回", "action": "数据库层分层召回 exact / related / cross-domain，不再先截全库前 300", "acceptance": "低频学科不会被虚假降级" },
+        { "priority": 3, "workstream": "可恢复采集", "action": "独立 worker + 持久队列/状态机 + lease/heartbeat/retry", "acceptance": "进程重启后任务可恢复且不重复" },
+        { "priority": 4, "workstream": "覆盖度调度", "action": "重建三轴 + 学科 KPI，用缺口、来源产出率与质量率自动排程", "acceptance": "每轮自动输出补采清单和覆盖变化" },
+        { "priority": 5, "workstream": "数据可信度", "action": "Case 关联 Source/CrawlRun，增加 publishedAt、版权、模型版本、人工确认字段", "acceptance": "每个案例可追溯、可增量同步" },
+        { "priority": 6, "workstream": "媒体可靠性", "action": "OSS 同步状态、失败重试、历史迁移校验与 CDN 稳定缩略图", "acceptance": "API 不返回不存在的媒体 URL" },
+        { "priority": 7, "workstream": "质量门禁", "action": "A4 金标准抽检、三轴完整编辑、枚举统一、contract/adapter/job 测试", "acceptance": "approved 与人工确认被明确区分" }
+      ]
+    }
+  },
+  "sources": [
+    { "id": "casehub_sqlite", "label": "Case Hub 实时 SQLite 只读统计", "path": "server/prisma/dev.db" },
+    { "id": "repo_audit", "label": "Case Hub 与 Sci AI Studio 代码只读审计", "path": "server/src/routes/studio.ts" }
+  ]
+}

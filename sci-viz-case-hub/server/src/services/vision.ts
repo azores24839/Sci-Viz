@@ -1,12 +1,16 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import sharp from 'sharp';
 import { getVisionConfig, getVisionHeaders } from './visionConfig.js';
+import { assertPublicHttpUrl, readResponseWithLimit, readTextWithLimit } from '../utils/httpSafety.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ORIGINALS_DIR = path.join(__dirname, '..', '..', 'uploads', 'originals');
 const REPO_ROOT = path.join(__dirname, '..', '..', '..');
+const MAX_REMOTE_IMAGE_BYTES = 15 * 1024 * 1024;
+const MAX_AI_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 export interface VisionAnalysisResult {
   media_type: string;
@@ -130,14 +134,28 @@ function getMimeType(imagePath: string): string {
 }
 
 async function imagePathToBase64(imagePath: string): Promise<string> {
-  const mime = getMimeType(imagePath);
+  const normalizeForVision = async (buffer: Buffer): Promise<string> => {
+    const normalized = await sharp(buffer, { animated: false, limitInputPixels: 80_000_000 })
+      .rotate()
+      .flatten({ background: '#ffffff' })
+      .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 88, chromaSubsampling: '4:4:4' })
+      .toBuffer();
+    return `data:image/jpeg;base64,${normalized.toString('base64')}`;
+  };
 
   if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
     try {
-      const res = await fetch(imagePath);
+      const safeUrl = await assertPublicHttpUrl(imagePath);
+      const res = await fetch(safeUrl, {
+        redirect: 'error',
+        signal: AbortSignal.timeout(30_000),
+      });
       if (!res.ok) return '';
-      const buffer = Buffer.from(await res.arrayBuffer());
-      return `data:${mime};base64,${buffer.toString('base64')}`;
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.startsWith('image/')) return '';
+      const buffer = await readResponseWithLimit(res, MAX_REMOTE_IMAGE_BYTES);
+      return await normalizeForVision(buffer);
     } catch {
       return '';
     }
@@ -147,7 +165,7 @@ async function imagePathToBase64(imagePath: string): Promise<string> {
     const filePath = path.join(REPO_ROOT, '..', imagePath);
     try {
       const buffer = await fs.readFile(filePath);
-      return `data:${mime};base64,${buffer.toString('base64')}`;
+      return await normalizeForVision(buffer);
     } catch {
       console.warn('[Vision] Cannot read journal cover:', filePath);
       return '';
@@ -158,7 +176,7 @@ async function imagePathToBase64(imagePath: string): Promise<string> {
   const filePath = path.join(ORIGINALS_DIR, filename);
   try {
     const buffer = await fs.readFile(filePath);
-    return `data:${mime};base64,${buffer.toString('base64')}`;
+    return await normalizeForVision(buffer);
   } catch {
     console.warn('[Vision] Cannot read image file:', filePath);
     return '';
@@ -196,6 +214,7 @@ export async function analyzeImage(params: {
 
     const response = await fetch(apiUrl, {
       method: 'POST',
+      signal: AbortSignal.timeout(60_000),
       headers: getVisionHeaders(apiKey),
       body: JSON.stringify({
         model,
@@ -215,11 +234,11 @@ export async function analyzeImage(params: {
     });
 
     if (!response.ok) {
-      const errText = await response.text().catch(() => '');
+      const errText = await readTextWithLimit(response, MAX_AI_RESPONSE_BYTES).catch(() => '');
       throw new Error(`${provider} API ${response.status}: ${errText}`);
     }
 
-    const data = await response.json() as {
+    const data = JSON.parse(await readTextWithLimit(response, MAX_AI_RESPONSE_BYTES)) as {
       choices: Array<{ message: { content?: string | null; reasoning?: string } }>;
     };
     const msg = data.choices?.[0]?.message;

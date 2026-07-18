@@ -39,6 +39,38 @@ const HIGH_VALUE_HOSTS = [
   'news.sciencenet.cn',
   'www.tsinghua.edu.cn',
   'news.pku.edu.cn',
+  // Yale
+  'news.yale.edu',
+  'environment.yale.edu',
+  'seas.yale.edu',
+  'engineering.yale.edu',
+  'www.yale.edu',
+  'yale.edu',
+  // ETH Zurich
+  'ethz.ch',
+  'www.ethz.ch',
+  'ai.ethz.ch',
+  'library.ethz.ch',
+  'focusterra.ethz.ch',
+  // NUS
+  'news.nus.edu.sg',
+  'nuspress.nus.edu.sg',
+  'nus.edu.sg',
+  'enterprise.nus.edu.sg',
+  'www.cqt.sg',
+  'cqt.sg',
+  'www.mbi.nus.edu.sg',
+  'mbi.nus.edu.sg',
+  'csi.nus.edu.sg',
+  'ifim.nus.edu.sg',
+  // Stanford new
+  'www.stanford.edu',
+  'stanford.edu',
+  'med.stanford.edu',
+  'sustainability.stanford.edu',
+  'hai.stanford.edu',
+  'www6.slac.stanford.edu',
+  'slac.stanford.edu',
 ];
 
 const SCIENCE_KEYWORDS = [
@@ -165,4 +197,22 @@ export function scoreImageCandidate(input: CollectionScoreInput): CollectionScor
     reasons: state.reasons,
     shouldKeep: score >= 35,
   };
+}
+
+/**
+ * Survey-mode ranking. This measures how much descriptive metadata is
+ * available for human review; it never decides whether an image is collected.
+ */
+export function scoreSurveyImage(input: CollectionScoreInput): CollectionScoreResult {
+  const { image } = input;
+  const state = { score: 50, reasons: ['+50 survey candidate'] };
+  if (image.width !== null && image.height !== null) {
+    const area = image.width * image.height;
+    add(area >= 800_000 ? 20 : 10, area >= 800_000 ? 'large dimensions' : 'known dimensions', state);
+  }
+  if (image.contextText.trim().length >= 30) add(15, 'has nearby text/caption', state);
+  if (image.alt?.trim().length >= 12) add(10, 'has descriptive alt text', state);
+  if (input.metaDescription?.trim()) add(5, 'page has description', state);
+  const score = Math.max(0, Math.min(100, state.score));
+  return { score, reasons: state.reasons, shouldKeep: true };
 }

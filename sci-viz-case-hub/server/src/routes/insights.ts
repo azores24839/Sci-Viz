@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { sendInternalError } from '../middleware/requestContext.js';
 import type { Prisma, VisualCase } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { toTrimmedString } from '../utils/httpSafety.js';
@@ -9,6 +10,9 @@ import {
 } from '../services/disciplineConfig.js';
 import type { DisciplineConfig } from '../services/disciplineConfig.js';
 import { classifyEnterpriseCase, makeEnterpriseCompanyWhere } from '../services/enterpriseTaxonomy.js';
+import { isUsefulInsightLabel as isUsefulLabel, normalizeInsightLabel as normalizeLabel, roundInsightPercent as roundPercent } from '../services/insightValue.js';
+import { buildThreeAxisSpectrum } from '../services/threeAxisSpectrum.js';
+import { countCasesBySourceName, type SourceOptionCase } from '../services/sourceFilterOptions.js';
 
 export const insightsRouter = Router();
 
@@ -109,10 +113,6 @@ function readQueryValue(query: Record<string, unknown>, aliases: string[]): stri
   return '';
 }
 
-function normalizeLabel(value: string): string {
-  return value.trim() || UNKNOWN_LABEL;
-}
-
 function sourceDomainFromUrl(url: string): string {
   try {
     return new URL(url).hostname;
@@ -128,15 +128,6 @@ function sourceHintWhere(name: string): Prisma.VisualCaseWhereInput {
       { userHint: { startsWith: `${name} /` } },
     ],
   };
-}
-
-function isUsefulLabel(label: string): boolean {
-  return label !== UNKNOWN_LABEL && label !== '不确定';
-}
-
-function roundPercent(count: number, total: number): number {
-  if (total <= 0) return 0;
-  return Math.round((count / total) * 1000) / 10;
 }
 
 function addExactFilter(
@@ -256,24 +247,8 @@ function makeFilterOption(values: string[]): DistributionItem[] {
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'zh-CN'));
 }
 
-async function makeSourceNameOptions(sources: Array<{ name: string; url: string }>): Promise<DistributionItem[]> {
-  const uniqueSources = [...new Map(
-    sources
-      .map(source => ({ ...source, name: source.name.trim(), domain: sourceDomainFromUrl(source.url) }))
-      .filter(source => source.name)
-      .map(source => [source.name, source]),
-  ).values()];
-
-  const pairs = await Promise.all(
-    uniqueSources.map(async (source) => {
-      const sourceWhere = await makeSourceNameWhere([source.name]);
-      const count = sourceWhere ? await prisma.visualCase.count({ where: sourceWhere }) : 0;
-      return {
-        label: source.name,
-        count,
-      };
-    }),
-  );
+function makeSourceNameOptions(sources: Array<{ name: string; url: string }>, cases: SourceOptionCase[]): DistributionItem[] {
+  const pairs = countCasesBySourceName(cases, sources);
   const filtered = pairs.filter(item => item.count > 0);
   const total = filtered.reduce((sum, item) => sum + item.count, 0);
   return filtered
@@ -512,7 +487,7 @@ async function makeFilterOptions() {
 
   return {
     sourceDomain: makeFilterOption(cases.map(item => item.sourceDomain)),
-    sourceName: await makeSourceNameOptions(crawlSources),
+    sourceName: makeSourceNameOptions(crawlSources, cases),
     enterpriseCompany: makeEnterpriseCompanyOptions(cases),
     enterprisePageType: makeEnterprisePageTypeOptions(cases),
     mediaType: makeFilterOption(cases.map(item => item.mediaType)),
@@ -643,7 +618,7 @@ insightsRouter.get('/insights/summary', async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'insights route', error);
   }
 });
 
@@ -673,6 +648,45 @@ const COMPARISON_GROUPS: Record<string, { id: string; label: string; domains: st
     label: '国内顶尖高校',
     domains: [],
   },
+  oxford: {
+    id: 'oxford',
+    label: '牛津大学',
+    domains: [
+      'www.ox.ac.uk', 'ox.ac.uk',
+      'oxfordsparks.ox.ac.uk',
+      'www.mpls.ox.ac.uk', 'mpls.ox.ac.uk',
+      'www.glam.ox.ac.uk', 'glam.ox.ac.uk',
+      'www.physics.ox.ac.uk', 'physics.ox.ac.uk',
+      'www.chem.ox.ac.uk', 'chem.ox.ac.uk',
+      'www.materials.ox.ac.uk', 'materials.ox.ac.uk',
+      'www.stats.ox.ac.uk', 'stats.ox.ac.uk',
+      'www.oii.ox.ac.uk', 'oii.ox.ac.uk',
+      'www.path.ox.ac.uk', 'path.ox.ac.uk',
+    ],
+  },
+  cambridge: {
+    id: 'cambridge',
+    label: '剑桥大学',
+    domains: [
+      'www.cam.ac.uk', 'cam.ac.uk',
+      'www.phy.cam.ac.uk', 'phy.cam.ac.uk',
+      'www.ch.cam.ac.uk', 'ch.cam.ac.uk',
+      'www.eng.cam.ac.uk', 'eng.cam.ac.uk',
+      'www.zoo.cam.ac.uk', 'zoo.cam.ac.uk',
+      'www.esc.cam.ac.uk', 'esc.cam.ac.uk',
+      'www.maths.cam.ac.uk', 'maths.cam.ac.uk',
+      'www.cst.cam.ac.uk', 'cst.cam.ac.uk',
+      'www.msm.cam.ac.uk', 'msm.cam.ac.uk',
+      'www.plantsci.cam.ac.uk', 'plantsci.cam.ac.uk',
+      'www.museums.cam.ac.uk', 'museums.cam.ac.uk',
+      'www.botanic.cam.ac.uk', 'botanic.cam.ac.uk',
+    ],
+  },
+  imperial: {
+    id: 'imperial',
+    label: '帝国理工',
+    domains: ['www.imperial.ac.uk', 'imperial.ac.uk'],
+  },
   overseasUniversity: {
     id: 'overseasUniversity',
     label: '国外高校',
@@ -680,6 +694,28 @@ const COMPARISON_GROUPS: Record<string, { id: string; label: string; domains: st
       'news.mit.edu',
       'news.harvard.edu', 'www.harvard.edu', 'harvard.edu',
       'news.stanford.edu', 'engineering.stanford.edu',
+      'www.ox.ac.uk', 'ox.ac.uk',
+      'oxfordsparks.ox.ac.uk',
+      'www.mpls.ox.ac.uk', 'mpls.ox.ac.uk',
+      'www.glam.ox.ac.uk', 'glam.ox.ac.uk',
+      'www.physics.ox.ac.uk', 'physics.ox.ac.uk',
+      'www.chem.ox.ac.uk', 'chem.ox.ac.uk',
+      'www.materials.ox.ac.uk', 'materials.ox.ac.uk',
+      'www.stats.ox.ac.uk', 'stats.ox.ac.uk',
+      'www.oii.ox.ac.uk', 'oii.ox.ac.uk',
+      'www.path.ox.ac.uk', 'path.ox.ac.uk',
+      'www.cam.ac.uk', 'cam.ac.uk',
+      'www.phy.cam.ac.uk', 'phy.cam.ac.uk',
+      'www.ch.cam.ac.uk', 'ch.cam.ac.uk',
+      'www.eng.cam.ac.uk', 'eng.cam.ac.uk',
+      'www.zoo.cam.ac.uk', 'zoo.cam.ac.uk',
+      'www.esc.cam.ac.uk', 'esc.cam.ac.uk',
+      'www.maths.cam.ac.uk', 'maths.cam.ac.uk',
+      'www.cst.cam.ac.uk', 'cst.cam.ac.uk',
+      'www.msm.cam.ac.uk', 'msm.cam.ac.uk',
+      'www.plantsci.cam.ac.uk', 'plantsci.cam.ac.uk',
+      'www.museums.cam.ac.uk', 'museums.cam.ac.uk',
+      'www.botanic.cam.ac.uk', 'botanic.cam.ac.uk',
     ],
   },
   international: {
@@ -733,7 +769,7 @@ const SJTU_SCHOOLS = [
   { id: 'aero', label: '航空航天学院', discipline: '工程', domains: ['www.aero.sjtu.edu.cn', 'news.sjtu.edu.cn'] },
 ];
 
-type ComparisonGroupId = 'ime' | 'sjtu' | 'domestic' | 'overseasUniversity' | 'international' | 'enterprise';
+type ComparisonGroupId = 'ime' | 'sjtu' | 'oxford' | 'cambridge' | 'imperial' | 'domestic' | 'overseasUniversity' | 'international' | 'enterprise';
 
 function includesAny(text: string, patterns: RegExp[]): boolean {
   return patterns.some(pattern => pattern.test(text));
@@ -1265,26 +1301,17 @@ insightsRouter.get('/insights/comparison', async (req: Request, res: Response) =
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'insights route', error);
   }
 });
 
 // ── Three-axis spectrum analysis ─────────────────────────────────────
-
-type SpectrumDimKey = 'functionalPurpose' | 'mediaType' | 'discipline' | 'distributionMedium' | 'technicalMethod' | 'contentType';
-// The canonical three-axis view is functionalPurpose x technicalMethod x distributionMedium.
-// mediaType/contentType/discipline remain available as auxiliary or legacy drill-down dimensions.
-const SPECTRUM_DIMS: SpectrumDimKey[] = ['functionalPurpose', 'mediaType', 'discipline', 'distributionMedium', 'technicalMethod', 'contentType'];
 
 insightsRouter.get('/insights/three-axis-spectrum', async (req: Request, res: Response) => {
   try {
     const xDim = toTrimmedString(req.query.x as string, 100) || 'functionalPurpose';
     const yDim = toTrimmedString(req.query.y as string, 100) || 'technicalMethod';
     const zDim = toTrimmedString(req.query.z as string, 100) || 'distributionMedium';
-
-    const dims: SpectrumDimKey[] = [xDim, yDim, zDim].map(d =>
-      SPECTRUM_DIMS.includes(d as SpectrumDimKey) ? (d as SpectrumDimKey) : 'functionalPurpose'
-    ) as SpectrumDimKey[];
 
     const cases = await prisma.visualCase.findMany({
       where: { reviewStatus: 'approved' },
@@ -1295,91 +1322,23 @@ insightsRouter.get('/insights/three-axis-spectrum', async (req: Request, res: Re
         discipline: true,
         technicalMethod: true,
         contentType: true,
-        imageUrl: true,
-        thumbnailPath: true,
       },
     });
-
-    const useful = cases.filter(c => {
-      const xv = normalizeLabel(String(c[dims[0]] ?? ''));
-      const yv = normalizeLabel(String(c[dims[1]] ?? ''));
-      const zv = normalizeLabel(String(c[dims[2]] ?? ''));
-      return isUsefulLabel(xv) && isUsefulLabel(yv) && isUsefulLabel(zv);
-    });
-
-    const cellMap = new Map<string, number>();
-    const xSet = new Set<string>();
-    const ySet = new Set<string>();
-    const zSet = new Set<string>();
-
-    for (const c of useful) {
-      const xv = normalizeLabel(String(c[dims[0]] ?? ''));
-      const yv = normalizeLabel(String(c[dims[1]] ?? ''));
-      const zv = normalizeLabel(String(c[dims[2]] ?? ''));
-      xSet.add(xv); ySet.add(yv); zSet.add(zv);
-      const key = `${xv}||${yv}||${zv}`;
-      cellMap.set(key, (cellMap.get(key) || 0) + 1);
-    }
-
-    const total = useful.length;
-
-    const cells = [...cellMap.entries()].map(([key, count]) => {
-      const [x, y, z] = key.split('||');
-      return { x, y, z, count, percentage: roundPercent(count, total) };
-    });
-
-    const dimensionLabels: Record<string, string> = {
-      functionalPurpose: '功能用途',
-      distributionMedium: '传播媒介',
-      mediaType: '呈现方式',
-      discipline: '学科',
-      technicalMethod: '技术手段',
-      contentType: '内容类型',
-    };
-
-    const sortByTotal = (vals: string[], axis: 'x' | 'y' | 'z') =>
-      [...vals].sort((a, b) => {
-        const ca = cells.filter(ce => ce[axis] === a).reduce((s, ce) => s + ce.count, 0);
-        const cb = cells.filter(ce => ce[axis] === b).reduce((s, ce) => s + ce.count, 0);
-        return cb - ca;
-      });
-
-    const dmDist = new Map<string, number>();
-    for (const c of useful) {
-      const v = normalizeLabel(String(c.distributionMedium ?? ''));
-      dmDist.set(v, (dmDist.get(v) || 0) + 1);
-    }
-    const staticCount = dmDist.get('静图') || 0;
-    const dynamicCount = total - staticCount;
-
-    const note = dynamicCount < 5
-      ? `当前数据库${total}条有效案例中，${staticCount}条（${roundPercent(staticCount, total)}%）传播媒介为"静图"，视频/动图/交互类案例仅${dynamicCount}条。三轴频谱主要反映静态图像的分布格局，建议通过公众号/视频平台采集补充多媒体案例后再做完整对比。`
-      : '';
-
     res.json({
       success: true,
-      data: {
-        dimensions: [
-          { axis: dims[0], label: dimensionLabels[dims[0]] || dims[0], values: sortByTotal([...xSet], 'x') },
-          { axis: dims[1], label: dimensionLabels[dims[1]] || dims[1], values: sortByTotal([...ySet], 'y') },
-          { axis: dims[2], label: dimensionLabels[dims[2]] || dims[2], values: sortByTotal([...zSet], 'z') },
-        ],
-        cells,
-        total,
-        note,
-      },
+      data: buildThreeAxisSpectrum(cases, [xDim, yDim, zDim]),
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'insights route', error);
   }
 });
 
-insightsRouter.get('/discipline-configs', async (_req: Request, res: Response) => {
+insightsRouter.get('/discipline-configs', async (req: Request, res: Response) => {
   try {
     const configs = await getAllDisciplineConfigs();
     res.json({ success: true, data: configs });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'insights route', error);
   }
 });
 
@@ -1396,6 +1355,6 @@ insightsRouter.get('/discipline-config/:discipline', async (req: Request, res: R
     const config = await getDisciplineConfig(discipline);
     res.json({ success: true, data: config });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'insights route', error);
   }
 });

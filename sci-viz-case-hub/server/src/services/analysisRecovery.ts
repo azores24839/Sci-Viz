@@ -1,5 +1,5 @@
 import { prisma } from '../prisma.js';
-import { runAnalysis } from './analysisRunner.js';
+import { enqueueAnalysis } from './analysisRunner.js';
 
 const RECOVERY_INTERVAL_MS = 5 * 60 * 1000;
 const STUCK_THRESHOLD_MINUTES = 10;
@@ -86,8 +86,8 @@ async function recoverStuckCases() {
         });
 
         if (c.imagePath) {
-          runAnalysis(c.id, c.imagePath, c.pageTitle, c.sourceUrl, c.contextText);
-          console.log(`[analysis-recovery] Retrying analysis for case ${c.id} (attempt ${retryCount + 1})`);
+          const queueStatus = enqueueAnalysis(c.id, c.imagePath, c.pageTitle, c.sourceUrl, c.contextText);
+          console.log(`[analysis-recovery] ${queueStatus === 'queued' ? 'Retrying' : 'Deferred'} analysis for case ${c.id} (attempt ${retryCount + 1}, status=${queueStatus})`);
         } else {
           await prisma.visualCase.update({
             where: { id: c.id },

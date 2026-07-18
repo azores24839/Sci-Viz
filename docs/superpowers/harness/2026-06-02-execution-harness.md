@@ -242,3 +242,6 @@ npm run dev:web       # 仅前端
 - 修改前端后运行 `cd web && npx tsc --noEmit` 检查类型
 - 数据库是 SQLite，直接在 `server/prisma/dev.db`
 - 代码风格：内联样式，无 CSS 文件，theme.ts 统一变量
+# 历史执行快照（不可作为当前生产状态或分类口径）
+
+> 本文保留 2026-06-02 阶段记录，其中固定案例数、完成率、项目结构和部分三轴映射已过时。当前案例数量必须实时查询数据库；三轴口径以仓库根目录 `AGENTS.md` 为准，`mediaType` 不属于技术维度。生产部署与上线门槛以 [`docs/production-runbook.md`](../../production-runbook.md) 为准。

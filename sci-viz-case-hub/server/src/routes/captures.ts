@@ -1,16 +1,18 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { prisma } from '../prisma.js';
-import { deleteSavedImage, saveImage, saveImageFromUrl, type SavedImage } from '../services/image.js';
-import { runAnalysis } from '../services/analysisRunner.js';
+import { deleteSavedImage, ImageValidationError, saveImage, saveImageFromUrl, type SavedImage } from '../services/image.js';
+import { enqueueAnalysis } from '../services/analysisRunner.js';
 import { findDuplicateCase } from '../services/dedupe.js';
 import { normalizeHttpUrl, toTrimmedString } from '../utils/httpSafety.js';
 import { remapImagePath } from '../services/oss.js';
+import { sendInternalError } from '../middleware/requestContext.js';
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 1, fields: 12 } });
 export const capturesRouter = Router();
 
 capturesRouter.post('/captures', upload.single('image_file'), async (req: Request, res: Response) => {
+  let imageResult: SavedImage | null = null;
   try {
     const sourceUrl = normalizeHttpUrl(req.body.source_url) || '';
     const imageUrl = normalizeHttpUrl(req.body.image_url) || '';
@@ -21,15 +23,15 @@ capturesRouter.post('/captures', upload.single('image_file'), async (req: Reques
     const videoPlatform = toTrimmedString(req.body.video_platform, 50) || '';
     const videoDuration = parseInt(req.body.video_duration) || 0;
 
-    let imageResult: SavedImage | null = null;
-
     if (req.file) {
       imageResult = await saveImage(req.file.buffer, req.file.originalname.split('.').pop() || 'jpg');
     } else if (imageUrl) {
       try {
         imageResult = await saveImageFromUrl(imageUrl);
       } catch (err) {
-        console.warn('[captures] Failed to download image from URL:', (err as Error).message);
+        console.warn(`[${req.requestId}] [captures] Failed to download image from URL:`, err);
+        res.status(422).json({ success: false, error: '无法安全下载或解析该远程图片', requestId: req.requestId });
+        return;
       }
     }
 
@@ -88,10 +90,18 @@ capturesRouter.post('/captures', upload.single('image_file'), async (req: Reques
 
     // Fire-and-forget: OCR + Vision analysis runs in background
     if (imageResult?.imagePath) {
-      runAnalysis(caseEntry.id, imageResult.imagePath, pageTitle, sourceUrl, contextText);
+      if (enqueueAnalysis(caseEntry.id, imageResult.imagePath, pageTitle, sourceUrl, contextText) === 'full') {
+        console.warn(`[${req.requestId}] [captures] Analysis queue is full; case ${caseEntry.id} will be recovered later`);
+      }
     }
   } catch (error) {
-    console.error('[captures] Error:', error);
-    res.status(500).json({ success: false, error: (error as Error).message });
+    if (imageResult) {
+      await deleteSavedImage(imageResult.imagePath, imageResult.thumbnailPath);
+    }
+    if (error instanceof ImageValidationError) {
+      res.status(400).json({ success: false, error: '上传的图片无效、格式不受支持或尺寸超出限制' });
+      return;
+    }
+    sendInternalError(req, res, 'capture creation', error);
   }
 });

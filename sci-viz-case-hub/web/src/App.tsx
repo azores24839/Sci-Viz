@@ -60,6 +60,60 @@ function App() {
 
   return (
     <div style={{ minHeight: '100vh', background: theme.colors.bg }}>
+      <style>{`
+        .app-header-inner {
+          max-width: 1200px;
+          margin: 0 auto;
+          padding: 0 ${theme.spacing['2xl']}px;
+          height: 52px;
+          display: flex;
+          align-items: center;
+          gap: 32px;
+          box-sizing: border-box;
+        }
+        .app-nav {
+          display: flex;
+          gap: 4px;
+          height: 100%;
+          align-items: stretch;
+          flex: 1;
+          min-width: 0;
+        }
+        .app-account { display: flex; align-items: center; gap: 12px; white-space: nowrap; }
+        .app-main {
+          max-width: 1680px;
+          width: calc(100% - 80px);
+          margin: 0 auto;
+          padding: 8px 40px 0;
+          box-sizing: content-box;
+        }
+        @media (max-width: 767px) {
+          .app-header-inner {
+            height: auto;
+            min-height: 52px;
+            padding: 0 16px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 0 12px;
+          }
+          .app-nav {
+            grid-column: 1 / -1;
+            grid-row: 2;
+            width: 100%;
+            height: 42px;
+            overflow-x: auto;
+            scrollbar-width: none;
+          }
+          .app-nav::-webkit-scrollbar { display: none; }
+          .app-nav a { flex: 0 0 auto; white-space: nowrap; }
+          .app-account { justify-self: end; }
+          .app-account > span { display: none; }
+          .app-main {
+            width: calc(100% - 32px);
+            padding: 8px 16px 0;
+          }
+        }
+      `}</style>
       <header style={{
         background: theme.colors.bgCard,
         borderBottom: `1px solid ${theme.colors.border}`,
@@ -67,15 +121,7 @@ function App() {
         top: 0,
         zIndex: 100,
       }}>
-        <div style={{
-          maxWidth: 1200,
-          margin: '0 auto',
-          padding: `0 ${theme.spacing['2xl']}px`,
-          height: 52,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 32,
-        }}>
+        <div className="app-header-inner">
           <span style={{
             fontWeight: 700,
             fontSize: 15,
@@ -85,7 +131,7 @@ function App() {
           }}>
             Sci-Viz Case Hub
           </span>
-          <nav style={{ display: 'flex', gap: 4, height: '100%', alignItems: 'stretch', flex: 1 }}>
+          <nav className="app-nav">
             {navItems.filter(item => authenticated || !item.adminOnly).map(item => {
               const isActive = item.path === '/'
                 ? location.pathname === '/'
@@ -111,7 +157,7 @@ function App() {
               );
             })}
           </nav>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div className="app-account">
             <span style={{ fontSize: 13, color: theme.colors.text.secondary }}>
               {authenticated ? username : 'Guest'}
             </span>
@@ -149,7 +195,7 @@ function App() {
           </div>
         </div>
       </header>
-      <main style={{ maxWidth: 1680, width: 'calc(100% - 80px)', margin: '0 auto', padding: '8px 40px 0' }}>
+      <main className="app-main">
         <Routes>
           <Route path="/" element={<CaseList isAdmin={authenticated} />} />
           <Route path="/cases" element={<CaseList isAdmin={authenticated} />} />

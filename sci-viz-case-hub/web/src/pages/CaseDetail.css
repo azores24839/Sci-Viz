@@ -1,0 +1,42 @@
+.case-detail-page,
+.case-detail-column {
+  min-width: 0;
+}
+
+.case-detail-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.case-detail-info-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.case-detail-classification-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+}
+
+.case-detail-field-value,
+.case-detail-source-link,
+.case-detail-page li,
+.case-detail-page pre {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 760px) {
+  .case-detail-layout,
+  .case-detail-classification-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .case-detail-layout {
+    gap: 16px;
+  }
+}

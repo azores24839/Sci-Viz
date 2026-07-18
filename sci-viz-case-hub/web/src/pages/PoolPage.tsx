@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { api } from '../api';
 import { theme } from '../theme';
 import { Card } from '../components';
-import type { CrawlSource, CrawlJob } from '../types';
-import { CATEGORY_LABELS, SOURCE_TYPE_LABELS } from '../types';
+import type { CrawlSource, CrawlJob, SourceDistributionGroupKey, SourceDistributionSummary } from '../types';
+import { SOURCE_TYPE_LABELS } from '../types';
 import UrlCrawlPage from './UrlCrawlPage';
 
 function sourceTypeLabel(st: string): string {
@@ -15,6 +15,30 @@ const AVAILABILITY_META: Record<string, { label: string; bg: string; color: stri
   needs_adapter: { label: '需适配', bg: '#fff4dc', color: '#966b12' },
   blocked: { label: '被阻断', bg: '#ffe8e8', color: '#a63a3a' },
   dead: { label: '入口失效', bg: '#eeeeF2', color: '#66616f' },
+};
+
+const JOB_STATUS_LABEL: Record<string, string> = {
+  pending: '排队中', discovering: '正在找文章', crawling: '正在下载',
+  completed: '已完成', partial: '完成但需注意', failed: '失败',
+};
+
+type SourceOwnerKind = NonNullable<CrawlSource['sourceOwnerKind']>;
+
+const OWNER_KIND_META: Array<{ key: SourceOwnerKind; label: string }> = [
+  { key: 'university', label: '高校' },
+  { key: 'research_institute', label: '科研机构' },
+  { key: 'government', label: '政府机构' },
+  { key: 'company', label: '企业' },
+  { key: 'publisher_media', label: '出版与媒体' },
+  { key: 'platform', label: '平台' },
+  { key: 'other', label: '其他' },
+];
+
+type SourceOwnerGroup = {
+  key: string;
+  name: string;
+  kind: SourceOwnerKind;
+  sources: CrawlSource[];
 };
 
 function timeAgo(dateStr: string): string {
@@ -31,10 +55,38 @@ function timeAgo(dateStr: string): string {
   return `${days}天前`;
 }
 
+function DistributionMetric({
+  value,
+  unit,
+  percent,
+  color,
+}: {
+  value: number;
+  unit: string;
+  percent: number;
+  color: string;
+}) {
+  return (
+    <span style={{ minWidth: 0 }}>
+      <span style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+        <span style={{ fontSize: theme.typography.size.base, fontWeight: 600 }}>
+          {value.toLocaleString()} {unit}
+        </span>
+        <span style={{ fontSize: theme.typography.size.xs, color: theme.colors.text.secondary }}>
+          {percent.toFixed(1)}%
+        </span>
+      </span>
+      <span style={{ display: 'block', height: 3, marginTop: 5, borderRadius: 2, background: theme.colors.borderLight, overflow: 'hidden' }}>
+        <span style={{ display: 'block', width: `${Math.max(0, Math.min(100, percent))}%`, height: '100%', background: color }} />
+      </span>
+    </span>
+  );
+}
+
 export default function PoolPage() {
   const [sources, setSources] = useState<CrawlSource[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [activeOwnerKind, setActiveOwnerKind] = useState<SourceOwnerKind | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [crawlState, setCrawlState] = useState<{
     sourceId: number;
@@ -44,10 +96,19 @@ export default function PoolPage() {
     totalCount: number;
     crawledCount: number;
     newCases: number;
+    warning: string;
+    error: string;
   } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
   const [showUrlCrawl, setShowUrlCrawl] = useState(false);
+  const [sourceDistribution, setSourceDistribution] = useState<SourceDistributionSummary | null>(null);
+  const [distributionLoading, setDistributionLoading] = useState(true);
+  const [distributionError, setDistributionError] = useState(false);
+  const [activeDistributionGroup, setActiveDistributionGroup] = useState<SourceDistributionGroupKey | null>(null);
+  const [recentJobs, setRecentJobs] = useState<CrawlJob[]>([]);
+  const [batchStarting, setBatchStarting] = useState(false);
+  const [operationMessage, setOperationMessage] = useState('');
 
   useEffect(() => {
     mountedRef.current = true;
@@ -57,13 +118,46 @@ export default function PoolPage() {
   const loadSources = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.getPoolSources(activeCategory || undefined);
+      const res = await api.getPoolSources();
       setSources(res.data || []);
     } catch { /* ignore */ }
     setLoading(false);
-  }, [activeCategory]);
+  }, []);
 
   useEffect(() => { loadSources(); }, [loadSources]);
+
+  const loadJobs = useCallback(async () => {
+    try {
+      const res = await api.getCrawlJobs(12);
+      if (mountedRef.current) setRecentJobs(res.data || []);
+    } catch { /* 页面仍可继续使用 */ }
+  }, []);
+
+  useEffect(() => {
+    loadJobs();
+    const timer = setInterval(loadJobs, 5000);
+    return () => clearInterval(timer);
+  }, [loadJobs]);
+
+  const loadSourceDistribution = useCallback(async () => {
+    setDistributionLoading(true);
+    try {
+      const res = await api.getPoolDistribution();
+      if (!mountedRef.current) return;
+      if (res.success) {
+        setSourceDistribution(res.data);
+        setDistributionError(false);
+      } else {
+        setDistributionError(true);
+      }
+    } catch {
+      if (mountedRef.current) setDistributionError(true);
+    } finally {
+      if (mountedRef.current) setDistributionLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadSourceDistribution(); }, [loadSourceDistribution]);
 
   useEffect(() => {
     return () => {
@@ -85,6 +179,8 @@ export default function PoolPage() {
         totalCount: 0,
         crawledCount: 0,
         newCases: 0,
+        warning: '',
+        error: '',
       });
 
       pollRef.current = setInterval(async () => {
@@ -98,17 +194,18 @@ export default function PoolPage() {
             totalCount: job.totalCount,
             crawledCount: job.crawledCount,
             newCases: job.newCases,
+            warning: job.warning,
+            error: job.error,
           } : null);
 
-          if (job.status === 'completed' || job.status === 'failed') {
+          if (job.status === 'completed' || job.status === 'partial' || job.status === 'failed') {
             if (pollRef.current) {
               clearInterval(pollRef.current);
               pollRef.current = null;
             }
-            setTimeout(() => {
-              setCrawlState(null);
-              loadSources();
-            }, 3000);
+            loadSources();
+            loadJobs();
+            loadSourceDistribution();
           }
         } catch {
           if (pollRef.current) {
@@ -118,20 +215,91 @@ export default function PoolPage() {
           setCrawlState(null);
         }
       }, 2000);
-    } catch { /* ignore */ }
+    } catch (error) {
+      setOperationMessage(error instanceof Error ? error.message : '无法开始采集，请稍后重试。');
+    }
   };
 
-  const filteredSources = activeCategory
-    ? sources.filter(s => s.category === activeCategory)
-    : sources;
+  const ownerGroups = useMemo<SourceOwnerGroup[]>(() => {
+    const groups = new Map<string, SourceOwnerGroup>();
+    sources.forEach(source => {
+      const key = source.sourceOwnerKey || `source:${source.id}`;
+      const kind = source.sourceOwnerKind || 'other';
+      const existing = groups.get(key);
+      if (existing) existing.sources.push(source);
+      else groups.set(key, {
+        key,
+        name: source.sourceOwnerName || source.name,
+        kind,
+        sources: [source],
+      });
+    });
+    return [...groups.values()]
+      .map(group => ({ ...group, sources: [...group.sources].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')) }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+  }, [sources]);
 
-  const categories = [...new Set(sources.map(s => s.category))].sort();
+  const filteredOwnerGroups = useMemo(() => ownerGroups
+    .filter(group => !activeOwnerKind || group.kind === activeOwnerKind)
+    .map(group => ({
+      ...group,
+      sources: activeDistributionGroup
+        ? group.sources.filter(source => source.sourceDistributionGroup === activeDistributionGroup)
+        : group.sources,
+    }))
+    .filter(group => group.sources.length > 0), [ownerGroups, activeOwnerKind, activeDistributionGroup]);
+
+  const filteredSources = filteredOwnerGroups.flatMap(group => group.sources);
+  const batchSources = activeOwnerKind || activeDistributionGroup
+    ? filteredSources.filter(source => source.enabled && (source.crawlAvailability || 'auto') === 'auto')
+    : [];
+
+  const startBatchCrawl = async () => {
+    if (!batchSources.length) {
+      setOperationMessage('当前分组没有可自动采集的来源。');
+      return;
+    }
+    const confirmed = window.confirm(
+      `将依次更新 ${batchSources.length} 个来源。每个来源默认最多检查 30 篇文章，重复图片不会再次入库。是否继续？`,
+    );
+    if (!confirmed) return;
+    setBatchStarting(true);
+    setOperationMessage('');
+    try {
+      const res = await api.triggerBatchCrawl(batchSources.map(source => source.id), {
+        mode: 'incremental',
+        maxLinksPerSource: 30,
+        maxPages: 5,
+      });
+      const queued = (res.data || []).filter(item => item.queued).length;
+      setOperationMessage(`已将 ${queued} 个来源加入队列。你可以离开此页面，任务会继续运行。`);
+      await loadJobs();
+    } catch (error) {
+      setOperationMessage(error instanceof Error ? error.message : '批量采集启动失败。');
+    } finally {
+      setBatchStarting(false);
+    }
+  };
+
+  const retryJob = async (job: CrawlJob) => {
+    try {
+      await api.retryCrawlJob(job.id);
+      setOperationMessage(`“${job.sourceName || '该来源'}”已重新加入队列。`);
+      await loadJobs();
+    } catch (error) {
+      setOperationMessage(error instanceof Error ? error.message : '重试失败。');
+    }
+  };
+
+  const ownerKindCounts = ownerGroups.reduce<Record<string, number>>((acc, group) => {
+    acc[group.kind] = (acc[group.kind] || 0) + 1;
+    return acc;
+  }, {});
   const availabilityCounts = sources.reduce<Record<string, number>>((acc, source) => {
     const key = source.crawlAvailability || 'auto';
     acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {});
-
   return (
     <div>
       <div style={{
@@ -149,22 +317,110 @@ export default function PoolPage() {
         }}>
           来源池
         </h1>
-        <button
-          onClick={() => setShowUrlCrawl(true)}
-          style={{
-            padding: '6px 14px',
-            borderRadius: theme.radius.md,
-            border: `1px solid ${theme.colors.border}`,
-            cursor: 'pointer',
-            background: theme.colors.bgCard,
-            color: theme.colors.text.secondary,
-            fontSize: theme.typography.size.sm,
-            fontWeight: 500,
-          }}
-        >
-          URL 自动采集
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {(activeOwnerKind || activeDistributionGroup) && <button
+            onClick={startBatchCrawl}
+            disabled={batchStarting || batchSources.length === 0}
+            style={{
+              padding: '8px 16px', borderRadius: theme.radius.md, border: 'none',
+              cursor: batchStarting || batchSources.length === 0 ? 'not-allowed' : 'pointer',
+              background: theme.colors.text.primary, color: theme.colors.bgCard,
+              fontSize: theme.typography.size.sm, fontWeight: 600,
+              opacity: batchStarting || batchSources.length === 0 ? 0.5 : 1,
+            }}
+          >
+            {batchStarting ? '正在加入队列…' : `更新当前分组（${batchSources.length}）`}
+          </button>}
+          <button
+            onClick={() => setShowUrlCrawl(true)}
+            style={{
+              padding: '6px 14px', borderRadius: theme.radius.md,
+              border: `1px solid ${theme.colors.border}`, cursor: 'pointer',
+              background: theme.colors.bgCard, color: theme.colors.text.secondary,
+              fontSize: theme.typography.size.sm, fontWeight: 500,
+            }}
+          >
+            输入网址采集
+          </button>
+        </div>
       </div>
+
+      {operationMessage && (
+        <div style={{
+          marginBottom: 16, padding: '10px 14px', borderRadius: theme.radius.md,
+          background: theme.colors.bgSubtle, color: theme.colors.text.secondary,
+          fontSize: theme.typography.size.sm,
+        }}>
+          {operationMessage}
+        </div>
+      )}
+
+      <Card padding={20} style={{ marginBottom: 16 }}>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: theme.typography.size.lg, fontWeight: 600, color: theme.colors.text.primary }}>
+              机构构成
+            </div>
+            {sourceDistribution && (
+              <div style={{ fontSize: theme.typography.size.sm, color: theme.colors.text.secondary }}>
+                {sourceDistribution.totalSources.toLocaleString()} 家机构 · {sourceDistribution.totalMedia.toLocaleString()} 张关联媒体
+              </div>
+            )}
+          </div>
+          <div style={{ marginTop: 3, fontSize: theme.typography.size.sm, color: theme.colors.text.secondary }}>
+            机构已合并同一组织下的不同采集入口。媒体按来源域名归属，每张只计算一次；点击一行可筛选下方机构。
+          </div>
+        </div>
+        {distributionLoading ? (
+          <div style={{ fontSize: theme.typography.size.sm, color: theme.colors.text.tertiary }}>正在统计来源...</div>
+        ) : distributionError || !sourceDistribution ? (
+          <div style={{ fontSize: theme.typography.size.sm, color: theme.colors.text.tertiary }}>
+            暂时无法读取来源构成，来源列表的其他功能不受影响。
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <div style={{ minWidth: 620 }}>
+            <div style={{
+              display: 'grid', gridTemplateColumns: 'minmax(150px, 1.2fr) minmax(180px, 1fr) minmax(180px, 1fr)',
+              gap: 16, padding: '0 12px 7px', color: theme.colors.text.tertiary,
+              fontSize: theme.typography.size.xs, fontWeight: 600,
+            }}>
+              <span>机构类型</span><span>机构数量</span><span>媒体数量</span>
+            </div>
+            <div style={{ display: 'grid', gap: 6 }}>
+              {sourceDistribution.groups.map(group => {
+                const active = activeDistributionGroup === group.key;
+                return (
+                  <button
+                    key={group.key}
+                    onClick={() => {
+                      setActiveOwnerKind(null);
+                      setActiveDistributionGroup(active ? null : group.key);
+                    }}
+                    style={{
+                      display: 'grid', gridTemplateColumns: 'minmax(150px, 1.2fr) minmax(180px, 1fr) minmax(180px, 1fr)',
+                      gap: 16, alignItems: 'center', width: '100%', padding: '10px 12px', textAlign: 'left',
+                      borderRadius: theme.radius.md, border: `1px solid ${active ? theme.colors.accent : 'transparent'}`,
+                      background: active ? theme.colors.accentBg : theme.colors.bgSubtle,
+                      color: theme.colors.text.primary, cursor: 'pointer',
+                    }}
+                  >
+                    <span style={{ fontSize: theme.typography.size.base, fontWeight: 600 }}>{group.label}</span>
+                    <DistributionMetric value={group.sourceCount} unit="个" percent={group.sourcePercent} color="#6476d3" />
+                    <DistributionMetric value={group.mediaCount} unit="张" percent={group.mediaPercent} color="#9b6bb5" />
+                  </button>
+                );
+              })}
+            </div>
+            {sourceDistribution.unmatchedMedia > 0 && (
+              <div style={{ marginTop: 9, fontSize: theme.typography.size.xs, color: theme.colors.text.tertiary }}>
+                另有 {sourceDistribution.unmatchedMedia.toLocaleString()} 张媒体尚未匹配到启用来源，不计入上方媒体比例。
+              </div>
+            )}
+            </div>
+          </div>
+        )}
+      </Card>
 
       <div style={{
         display: 'flex',
@@ -189,6 +445,44 @@ export default function PoolPage() {
           </span>
         ))}
       </div>
+
+      {recentJobs.length > 0 && (
+        <Card padding={16} style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: theme.typography.size.base, fontWeight: 600, color: theme.colors.text.primary, marginBottom: 10 }}>
+            最近采集任务
+          </div>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {recentJobs.slice(0, 6).map(job => {
+              const needsAttention = job.status === 'partial' || job.status === 'failed';
+              return (
+                <div key={job.id} style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                  padding: '9px 10px', borderRadius: theme.radius.sm, background: theme.colors.bgSubtle,
+                }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: theme.typography.size.sm, color: theme.colors.text.primary, fontWeight: 500 }}>
+                      {job.sourceName || `来源 #${job.sourceId}`}
+                    </div>
+                    <div style={{ fontSize: theme.typography.size.xs, color: needsAttention ? '#966b12' : theme.colors.text.tertiary, marginTop: 2 }}>
+                      {JOB_STATUS_LABEL[job.status] || job.status} · 检查 {job.crawledCount}/{job.totalCount} 篇 · 新增 {job.newCases} 张
+                      {(job.warning || job.error) ? ` · ${job.warning || job.error}` : ''}
+                    </div>
+                  </div>
+                  {needsAttention && (
+                    <button onClick={() => retryJob(job)} style={{
+                      flex: '0 0 auto', padding: '4px 9px', borderRadius: theme.radius.sm,
+                      border: `1px solid ${theme.colors.border}`, background: theme.colors.bgCard,
+                      color: theme.colors.text.secondary, fontSize: theme.typography.size.xs, cursor: 'pointer',
+                    }}>
+                      重试更新
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
 
       {crawlState && (
         <div style={{
@@ -227,9 +521,18 @@ export default function PoolPage() {
               {crawlState.status === 'discovering' && '正在发现文章链接...'}
               {crawlState.status === 'crawling' && `正在采集 ${crawlState.crawledCount}/${crawlState.totalCount} 篇文章`}
               {crawlState.status === 'completed' && `采集完成！入库 ${crawlState.newCases} 张图片`}
+              {crawlState.status === 'partial' && `采集已结束，但有内容需要注意。新增 ${crawlState.newCases} 张图片`}
               {crawlState.status === 'failed' && '采集失败'}
               {crawlState.status === 'pending' && '准备中...'}
             </div>
+            {(crawlState.warning || crawlState.error) && (
+              <div style={{
+                marginBottom: 14, padding: 10, borderRadius: theme.radius.sm,
+                background: '#fff4dc', color: '#7a5913', fontSize: theme.typography.size.xs, lineHeight: 1.5,
+              }}>
+                {crawlState.warning || crawlState.error}
+              </div>
+            )}
             {(crawlState.status === 'discovering' || crawlState.status === 'crawling' || crawlState.status === 'pending') && (
               <div style={{
                 width: '100%',
@@ -250,7 +553,7 @@ export default function PoolPage() {
                 }} />
               </div>
             )}
-            {(crawlState.status === 'completed' || crawlState.status === 'failed') && (
+            {(crawlState.status === 'completed' || crawlState.status === 'partial' || crawlState.status === 'failed') && (
               <button
                 onClick={() => setCrawlState(null)}
                 style={{
@@ -333,7 +636,10 @@ export default function PoolPage() {
           top: 72,
         }}>
           <button
-            onClick={() => setActiveCategory(null)}
+            onClick={() => {
+              setActiveOwnerKind(null);
+              setActiveDistributionGroup(null);
+            }}
             style={{
               display: 'block',
               width: '100%',
@@ -341,20 +647,23 @@ export default function PoolPage() {
               padding: '6px 10px',
               borderRadius: theme.radius.sm,
               border: 'none',
-              background: activeCategory === null ? theme.colors.bgSubtle : 'transparent',
-              color: activeCategory === null ? theme.colors.text.primary : theme.colors.text.secondary,
+              background: activeOwnerKind === null && activeDistributionGroup === null ? theme.colors.bgSubtle : 'transparent',
+              color: activeOwnerKind === null && activeDistributionGroup === null ? theme.colors.text.primary : theme.colors.text.secondary,
               fontSize: theme.typography.size.sm,
-              fontWeight: activeCategory === null ? 600 : 400,
+              fontWeight: activeOwnerKind === null && activeDistributionGroup === null ? 600 : 400,
               cursor: 'pointer',
               marginBottom: 2,
             }}
           >
-            全部 ({sources.length})
+            全部 ({ownerGroups.length})
           </button>
-          {categories.map(cat => (
+          {OWNER_KIND_META.filter(item => ownerKindCounts[item.key]).map(item => (
             <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
+              key={item.key}
+              onClick={() => {
+                setActiveOwnerKind(item.key);
+                setActiveDistributionGroup(null);
+              }}
               style={{
                 display: 'block',
                 width: '100%',
@@ -362,17 +671,17 @@ export default function PoolPage() {
                 padding: '6px 10px',
                 borderRadius: theme.radius.sm,
                 border: 'none',
-                background: activeCategory === cat ? theme.colors.bgSubtle : 'transparent',
-                color: activeCategory === cat ? theme.colors.text.primary : theme.colors.text.secondary,
+                background: activeOwnerKind === item.key ? theme.colors.bgSubtle : 'transparent',
+                color: activeOwnerKind === item.key ? theme.colors.text.primary : theme.colors.text.secondary,
                 fontSize: theme.typography.size.sm,
-                fontWeight: activeCategory === cat ? 600 : 400,
+                fontWeight: activeOwnerKind === item.key ? 600 : 400,
                 cursor: 'pointer',
                 marginBottom: 2,
               }}
             >
-              {cat}. {CATEGORY_LABELS[cat] || cat}
+              {item.label}
               <span style={{ color: theme.colors.text.tertiary, marginLeft: 4 }}>
-                ({sources.filter(s => s.category === cat).length})
+                ({ownerKindCounts[item.key]})
               </span>
             </button>
           ))}
@@ -388,8 +697,19 @@ export default function PoolPage() {
               暂无来源
             </Card>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 12 }}>
-              {filteredSources.map(source => (
+            <div style={{ display: 'grid', gap: 20 }}>
+              {filteredOwnerGroups.map(owner => (
+                <section key={owner.key}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, margin: '0 2px 8px' }}>
+                    <h2 style={{ margin: 0, fontSize: theme.typography.size.lg, fontWeight: 600, color: theme.colors.text.primary }}>
+                      {owner.name}
+                    </h2>
+                    <span style={{ fontSize: theme.typography.size.xs, color: theme.colors.text.tertiary }}>
+                      {owner.sources.length} 个采集入口
+                    </span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 12 }}>
+                  {owner.sources.map(source => (
                 <div key={source.id} style={{
                   background: theme.colors.bgCard,
                   borderRadius: theme.radius.lg,
@@ -485,7 +805,7 @@ export default function PoolPage() {
                         opacity: crawlState !== null ? 0.5 : 1,
                       }}
                     >
-                      采集
+                      立即更新
                     </button>
                   </div>
 
@@ -519,6 +839,9 @@ export default function PoolPage() {
                     </div>
                   )}
                 </div>
+                  ))}
+                  </div>
+                </section>
               ))}
             </div>
           )}

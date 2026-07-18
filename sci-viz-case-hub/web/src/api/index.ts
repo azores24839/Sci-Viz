@@ -1,4 +1,4 @@
-import type { ApiResponse, VisualCase, CrawlResponse, NetworkTestResponse, CrawlSource, CrawlJob, CollectionKpiProgress, InsightSummary, ComparisonData, ThreeAxisSpectrum } from '../types';
+import type { ApiResponse, VisualCase, CrawlResponse, NetworkTestResponse, CrawlSource, CrawlJob, CollectionKpiProgress, InsightSummary, ComparisonData, ThreeAxisSpectrum, SiteDiscoveryResult, UrlCrawlTask, SourceDistributionSummary, OcrJob, AnalysisJob } from '../types';
 import { apiBaseUrl } from '../baseUrl';
 
 const BASE = apiBaseUrl;
@@ -102,9 +102,78 @@ export const api = {
     });
   },
 
+  previewSiteCrawl(
+    url: string,
+    preset: 'quick' | 'standard' | 'deep',
+    sourceName: string,
+    sourceType: string,
+    cookie?: string,
+  ) {
+    return request<SiteDiscoveryResult>('/crawl/site/preview', {
+      method: 'POST',
+      body: JSON.stringify({ url, preset, source_name: sourceName, source_type: sourceType, cookie }),
+    });
+  },
+
+  runSiteCrawl(data: {
+    rootUrl: string;
+    urls: string[];
+    sourceName?: string;
+    sourceType?: string;
+    cookie?: string;
+  }) {
+    return fetch(`${BASE}/crawl/site/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        rootUrl: data.rootUrl,
+        urls: data.urls,
+        source_name: data.sourceName,
+        source_type: data.sourceType,
+        cookie: data.cookie,
+      }),
+    }).then(async res => {
+      const response = await res.json().catch(() => ({ success: false, summary: null, results: [] }));
+      return response as CrawlResponse;
+    });
+  },
+
+  startSiteCrawlTask(data: {
+    rootUrl: string;
+    urls: string[];
+    sourceName?: string;
+    sourceType?: string;
+    cookie?: string;
+  }) {
+    return request<UrlCrawlTask>('/crawl/site/tasks', {
+      method: 'POST',
+      body: JSON.stringify({
+        rootUrl: data.rootUrl,
+        urls: data.urls,
+        source_name: data.sourceName,
+        source_type: data.sourceType,
+        cookie: data.cookie,
+      }),
+    });
+  },
+
+  getSiteCrawlTask(id: string) {
+    return request<UrlCrawlTask>(`/crawl/site/tasks/${encodeURIComponent(id)}`);
+  },
+
+  cancelSiteCrawlTask(id: string) {
+    return request<UrlCrawlTask>(`/crawl/site/tasks/${encodeURIComponent(id)}/cancel`, {
+      method: 'POST',
+    });
+  },
+
   getPoolSources(category?: string) {
     const qs = category ? `?category=${encodeURIComponent(category)}` : '';
     return request<CrawlSource[]>(`/pool/sources${qs}`);
+  },
+
+  getPoolDistribution() {
+    return request<SourceDistributionSummary>('/pool/distribution');
   },
 
   getPoolSource(id: number) {
@@ -138,6 +207,21 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(options),
     });
+  },
+
+  triggerBatchCrawl(sourceIds: number[], options: { mode?: 'incremental' | 'full'; maxLinksPerSource?: number; maxPages?: number } = {}) {
+    return request<Array<{ sourceId: number; sourceName: string; jobId: number; queued: boolean }>>('/pool/crawl/batch', {
+      method: 'POST',
+      body: JSON.stringify({ sourceIds, ...options }),
+    });
+  },
+
+  getCrawlJobs(limit = 20) {
+    return request<CrawlJob[]>(`/pool/jobs?limit=${limit}`);
+  },
+
+  retryCrawlJob(jobId: number) {
+    return request<{ jobId: number; queued: boolean }>(`/pool/jobs/${jobId}/retry`, { method: 'POST' });
   },
 
   getCrawlJob(jobId: number) {
@@ -180,6 +264,44 @@ export const api = {
       '/processing/ocr',
       { method: 'POST', body: JSON.stringify({ scope, caseIds }) },
     );
+  },
+
+  startOcrJob(caseIds?: string[]) {
+    return request<OcrJob>('/processing/ocr/jobs', {
+      method: 'POST',
+      body: JSON.stringify({ caseIds }),
+    });
+  },
+
+  getLatestOcrJob() {
+    return request<OcrJob | null>('/processing/ocr/jobs/latest');
+  },
+
+  getOcrJob(jobId: string) {
+    return request<OcrJob>(`/processing/ocr/jobs/${encodeURIComponent(jobId)}`);
+  },
+
+  cancelOcrJob(jobId: string) {
+    return request<OcrJob>(`/processing/ocr/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' });
+  },
+
+  startAnalysisJob(caseIds?: string[]) {
+    return request<AnalysisJob>('/processing/analysis/jobs', {
+      method: 'POST',
+      body: JSON.stringify({ caseIds }),
+    });
+  },
+
+  getLatestAnalysisJob() {
+    return request<AnalysisJob | null>('/processing/analysis/jobs/latest');
+  },
+
+  getAnalysisJob(jobId: string) {
+    return request<AnalysisJob>(`/processing/analysis/jobs/${encodeURIComponent(jobId)}`);
+  },
+
+  cancelAnalysisJob(jobId: string) {
+    return request<AnalysisJob>(`/processing/analysis/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' });
   },
 
   batchQualityCheck(scope?: string, caseIds?: string[]) {

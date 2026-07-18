@@ -1,19 +1,15 @@
 import { PrismaClient } from '@prisma/client';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import fs from 'fs/promises';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { getVisionConfig, getVisionHeaders } from './services/visionConfig.js';
 
 const prisma = new PrismaClient();
-const execFileAsync = promisify(execFile);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SERVER_ROOT = path.resolve(__dirname, '..');
 const UPLOADS_ROOT = path.join(SERVER_ROOT, 'uploads');
-const OCR_BINARY = path.join(SERVER_ROOT, '.tmp', 'ocr_image');
-const OCR_SWIFT_SCRIPT = path.join(SERVER_ROOT, 'scripts', 'ocr_image.swift');
 
 function uploadPathToFilePath(webPath: string): string {
   if (!webPath.startsWith('/uploads/')) return '';
@@ -32,20 +28,81 @@ function cleanOcrText(text: string): string {
     .trim();
 }
 
-async function runLocalOcr(filePath: string) {
-  const binaryExists = await fs.access(OCR_BINARY).then(() => true).catch(() => false);
-  if (binaryExists) {
-    const { stdout } = await execFileAsync(OCR_BINARY, [filePath], {
-      maxBuffer: 1024 * 1024 * 4,
-      timeout: 30000,
-    });
-    return cleanOcrText(stdout);
+function localPathFromWebPath(webPath: string): string {
+  if (webPath.startsWith('/uploads/')) {
+    return path.join(SERVER_ROOT, webPath.replace(/^\//, ''));
   }
-  const { stdout } = await execFileAsync('swift', [OCR_SWIFT_SCRIPT, filePath], {
-    maxBuffer: 1024 * 1024 * 4,
-    timeout: 30000,
-  });
-  return cleanOcrText(stdout);
+  return '';
+}
+
+function mimeType(filePath: string): string {
+  const ext = filePath.split('.').pop()?.toLowerCase() || '';
+  if (ext === 'png') return 'image/png';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'gif') return 'image/gif';
+  return 'image/jpeg';
+}
+
+async function imageToBase64(webPath: string): Promise<string> {
+  const local = localPathFromWebPath(webPath);
+  if (!local) return '';
+  try {
+    const buffer = await fs.readFile(local);
+    return `data:${mimeType(local)};base64,${buffer.toString('base64')}`;
+  } catch {
+    return '';
+  }
+}
+
+async function runCloudOcr(webPath: string, context: string): Promise<string> {
+  const { url, key, ocrModel } = getVisionConfig();
+  if (!url || !key || key.includes('your-')) {
+    console.warn('[ocr-cloud] config missing');
+    return '';
+  }
+  const imageInput = await imageToBase64(webPath);
+  if (!imageInput) {
+    console.warn('[ocr-cloud] imageToBase64 failed for', webPath.slice(0, 80));
+    return '';
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: getVisionHeaders(key),
+      signal: AbortSignal.timeout(30000),
+      body: JSON.stringify({
+        model: ocrModel,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an OCR engine. Extract visible text from the image. Return plain text only. Keep line breaks where useful. Do not describe the image. If there is no readable text, return an empty string.',
+          },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: `Extract all visible text.${context ? `\nContext: ${context}` : ''}` },
+              { type: 'image_url', image_url: { url: imageInput } },
+            ],
+          },
+        ],
+        temperature: 0,
+        max_tokens: 500,
+      }),
+    });
+
+    if (!response.ok) {
+      const errBody = await response.text().catch(() => '');
+      console.warn(`[ocr-cloud] API ${response.status}: ${errBody.slice(0, 200)}`);
+      return '';
+    }
+    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const text = data.choices?.[0]?.message?.content || '';
+    return cleanOcrText(text);
+  } catch (e: any) {
+    console.warn(`[ocr-cloud] fetch error: ${e.message}`);
+    return '';
+  }
 }
 
 async function main() {
@@ -54,7 +111,10 @@ async function main() {
   const domainFilter = args.length > 0 ? args : null;
 
   const where: any = {
-    ocrText: '',
+    OR: [
+      { ocrText: '' },
+      { ocrText: '[无可读文字]' },
+    ],
     imagePath: { startsWith: '/uploads/originals/' },
     reviewStatus: { not: 'rejected' },
   };
@@ -65,49 +125,56 @@ async function main() {
 
   const cases = await prisma.visualCase.findMany({
     where,
-    select: { id: true, sourceDomain: true, imagePath: true, thumbnailPath: true, manualNotes: true },
+    select: { id: true, sourceDomain: true, imagePath: true, thumbnailPath: true, manualNotes: true, contextText: true, caseTitle: true, pageTitle: true },
   });
 
-  let updated = 0;
+  let cloudUpdated = 0;
   let noText = 0;
   let failed = 0;
 
-  for (const c of cases) {
+  for (let i = 0; i < cases.length; i++) {
+    const c = cases[i];
+    if (i % 10 === 0) {
+      console.log(`[ocr] ${i + 1}/${cases.length} (cloud=${cloudUpdated} noText=${noText} failed=${failed})`);
+    }
     const filePath = uploadPathToFilePath(c.imagePath) || uploadPathToFilePath(c.thumbnailPath);
     if (!filePath) {
       failed++;
       continue;
     }
 
+    const context = [c.caseTitle, c.pageTitle, c.contextText].filter(Boolean).join('\n').slice(0, 1200);
+
     try {
-      const text = await runLocalOcr(filePath);
+      const text = await runCloudOcr(c.imagePath, context);
       if (text) {
         await prisma.visualCase.update({
           where: { id: c.id },
           data: { ocrText: text },
         });
-        updated++;
-      } else {
-        await prisma.visualCase.update({
-          where: { id: c.id },
-          data: {
-            ocrText: '[无可读文字]',
-            manualNotes: [
-              c.manualNotes,
-              '本地 Apple Vision OCR：无可读文字',
-            ].filter(Boolean).join('\n'),
-          },
-        });
-        noText++;
+        cloudUpdated++;
+        continue;
       }
+
+      await prisma.visualCase.update({
+        where: { id: c.id },
+        data: {
+          ocrText: '[无可读文字]',
+          manualNotes: [
+            c.manualNotes,
+            'Qwen VL OCR：无可读文字',
+          ].filter(Boolean).join('\n'),
+        },
+      });
+      noText++;
     } catch {
       await prisma.visualCase.update({
         where: { id: c.id },
         data: {
-          ocrText: '[本地OCR失败]',
+          ocrText: '[OCR失败]',
           manualNotes: [
             c.manualNotes,
-            '本地 Apple Vision OCR：执行失败',
+            'Qwen VL OCR：执行失败',
           ].filter(Boolean).join('\n'),
         },
       }).catch(() => {});
@@ -115,7 +182,7 @@ async function main() {
     }
   }
 
-  const remaining = await prisma.visualCase.count({ where: { ocrText: '' } });
+  const remaining = await prisma.visualCase.count({ where: { OR: [{ ocrText: '' }, { ocrText: '[无可读文字]' }] } });
   const domainLabel = domainFilter ? ` (${domainFilter.join(', ')})` : '';
   const lines = [
     '# 本地 OCR 补跑报告' + domainLabel,
@@ -124,12 +191,12 @@ async function main() {
     `结束时间：${new Date().toISOString()}`,
     '',
     `待 OCR 本地图：${cases.length}`,
-    `识别并写入：${updated}`,
+    `云 OCR 识别：${cloudUpdated}`,
     `无可读文字：${noText}`,
     `失败：${failed}`,
     `全库 OCR 仍为空：${remaining}`,
     '',
-    '说明：本轮只调用本机 Apple Vision OCR，不调用云 OCR 或外部视觉 API。',
+    '说明：使用 OpenRouter Qwen VL 视觉模型进行 OCR 提取。',
   ];
 
   const reportPath = path.resolve(process.cwd(), '..', 'docs', `local-ocr-missing-report-${startedAt.toISOString().slice(0,10)}.md`);

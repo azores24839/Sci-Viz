@@ -1,0 +1,4 @@
+interface:
+  display_name: "来源网站发现"
+  short_description: "系统查漏并整理任意来源主体相关候选网站链接清单供人工浏览"
+  default_prompt: "Use $case-hub-source-discovery to find candidate websites for a source subject without crawling or changing Case Hub data."

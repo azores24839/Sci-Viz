@@ -4,13 +4,19 @@ import { prisma } from '../prisma.js';
 import { discoverLinks } from './discoverLinks.js';
 import { processSingleUrl } from './runUrlCrawl.js';
 import { discoverNasaImages, ingestNasaImage } from './nasaAdapter.js';
-import { findDuplicateByUrl } from '../services/dedupe.js';
+import { KeyedTaskQueue } from '../services/taskQueue.js';
 
 export interface SourceCrawlOptions {
   maxLinks?: number;
   maxPages?: number;
   concurrency?: number;
+  trigger?: 'manual' | 'batch' | 'schedule' | 'retry';
+  mode?: 'incremental' | 'full';
 }
+
+const sourceQueue = new KeyedTaskQueue(1, 100, error => {
+  console.error('[source-crawl-queue]', error);
+});
 
 export const EASY_STATIC_SOURCE_NAMES = [
   'MIT News - Research',
@@ -59,24 +65,59 @@ export async function enqueueSourceCrawlJob(source: CrawlSource, options: Source
   }
 
   const job = await prisma.crawlJob.create({
-    data: { sourceId: source.id, status: 'pending' },
+    data: {
+      sourceId: source.id,
+      status: 'pending',
+      trigger: options.trigger || 'manual',
+      mode: options.mode || 'incremental',
+    },
   });
 
-  void runSourceCrawlJob(source, job.id, options);
+  const queueStatus = sourceQueue.tryEnqueue(String(source.id), () => runSourceCrawlJob(source, job.id, options));
+  if (queueStatus === 'full') {
+    await prisma.crawlJob.update({
+      where: { id: job.id },
+      data: { status: 'failed', error: '采集队列已满，请稍后重试。', finishedAt: new Date() },
+    });
+    return { job: { ...job, status: 'failed' }, queued: false };
+  }
   return { job, queued: true };
 }
 
 async function runSourceCrawlJob(source: CrawlSource, jobId: number, options: SourceCrawlOptions) {
   try {
+    await prisma.crawlJob.update({
+      where: { id: jobId },
+      data: { startedAt: new Date(), heartbeatAt: new Date(), attempt: { increment: 1 } },
+    });
     if (source.adapterType === 'api' || source.sourceType === 'api') {
       await runApiSourceCrawl(source, jobId, options);
+      return;
+    }
+    if (source.adapterType === 'browser_render' || source.crawlStatus === 'needs_browser') {
+      const { supportsUniversityBrowserSource, runUniversityBrowserSource } = await import('./runUniversityBrowserBatch.js');
+      if (!supportsUniversityBrowserSource(source.name)) {
+        throw new Error('该来源需要浏览器采集，但尚未配置浏览器适配规则。');
+      }
+      await runUniversityBrowserSource(source.name, source.id, jobId, {
+        maxArticles: options.maxLinks ?? 30,
+        maxImagesPerPage: 100,
+      });
+      await prisma.crawlSource.update({
+        where: { id: source.id },
+        data: { lastSuccessAt: new Date(), healthStatus: 'healthy' },
+      });
       return;
     }
     await runStaticSourceCrawl(source, jobId, options);
   } catch (err) {
     await prisma.crawlJob.update({
       where: { id: jobId },
-      data: { status: 'failed', error: (err as Error).message },
+      data: { status: 'failed', error: (err as Error).message, finishedAt: new Date() },
+    }).catch(() => {});
+    await prisma.crawlSource.update({
+      where: { id: source.id },
+      data: { healthStatus: 'failing' },
     }).catch(() => {});
   }
 }
@@ -98,7 +139,14 @@ async function runStaticSourceCrawl(source: CrawlSource, jobId: number, options:
   if (articleUrls.length === 0) {
     await prisma.crawlJob.update({
       where: { id: jobId },
-      data: { status: 'completed', totalCount: 0, crawledCount: 0, newCases: 0 },
+      data: {
+        status: 'partial',
+        totalCount: 0,
+        crawledCount: 0,
+        newCases: 0,
+        warning: '没有发现文章链接，可能是网站改版、被阻挡或没有完成翻页。',
+        finishedAt: new Date(),
+      },
     });
     return;
   }
@@ -107,24 +155,50 @@ async function runStaticSourceCrawl(source: CrawlSource, jobId: number, options:
     where: { id: jobId },
     data: { status: 'crawling', discoveredUrls: JSON.stringify(articleUrls), totalCount: articleUrls.length },
   });
+  await prisma.crawlItem.createMany({
+    data: articleUrls.map(url => ({ jobId, sourceId: source.id, url })),
+  });
 
   const limit = pLimit(options.concurrency ?? 2);
   const completedUrls: string[] = [];
   let totalNewCases = 0;
+  let failedPages = 0;
 
   await Promise.all(articleUrls.map(url =>
     limit(async () => {
       try {
-        const dupe = await findDuplicateByUrl(url);
-        if (!dupe) {
-          const result = await processSingleUrl(url, source.name, source.sourceType);
+        let lastError = '';
+        let result: Awaited<ReturnType<typeof processSingleUrl>> | null = null;
+        for (let attempt = 1; attempt <= 2 && !result; attempt++) {
+          try {
+            await prisma.crawlItem.updateMany({ where: { jobId, url }, data: { status: 'crawling', attempts: attempt } });
+            result = await processSingleUrl(url, source.name, source.sourceType);
+          } catch (error) {
+            lastError = (error as Error).message;
+          }
+        }
+        if (result) {
           totalNewCases += result.createdCaseCount;
+          await prisma.crawlItem.updateMany({
+            where: { jobId, url },
+            data: { status: 'completed', downloadedImages: result.createdCaseCount, error: '' },
+          });
+        } else {
+          failedPages++;
+          await prisma.crawlItem.updateMany({ where: { jobId, url }, data: { status: 'failed', error: lastError } });
         }
       } finally {
         completedUrls.push(url);
         await prisma.crawlJob.update({
           where: { id: jobId },
-          data: { crawledCount: completedUrls.length, crawledUrls: JSON.stringify(completedUrls), newCases: totalNewCases },
+          data: {
+            crawledCount: completedUrls.length,
+            crawledUrls: JSON.stringify(completedUrls),
+            newCases: totalNewCases,
+            downloadedImages: totalNewCases,
+            failedPages,
+            heartbeatAt: new Date(),
+          },
         });
       }
     })
@@ -132,7 +206,22 @@ async function runStaticSourceCrawl(source: CrawlSource, jobId: number, options:
 
   await prisma.crawlJob.update({
     where: { id: jobId },
-    data: { status: 'completed', crawledCount: completedUrls.length, newCases: totalNewCases },
+    data: {
+      status: failedPages ? 'partial' : 'completed',
+      crawledCount: completedUrls.length,
+      newCases: totalNewCases,
+      downloadedImages: totalNewCases,
+      failedPages,
+      warning: failedPages ? `有 ${failedPages} 篇文章失败，可稍后重试。` : '',
+      finishedAt: new Date(),
+    },
+  });
+  await prisma.crawlSource.update({
+    where: { id: source.id },
+    data: {
+      lastSuccessAt: failedPages ? undefined : new Date(),
+      healthStatus: failedPages ? 'warning' : 'healthy',
+    },
   });
 }
 
@@ -188,6 +277,21 @@ async function runApiSourceCrawl(source: CrawlSource, jobId: number, options: So
 
   await prisma.crawlJob.update({
     where: { id: jobId },
-    data: { status: 'completed', crawledCount, newCases: totalNewCases },
+    data: { status: 'completed', crawledCount, newCases: totalNewCases, downloadedImages: totalNewCases, finishedAt: new Date() },
+  });
+  await prisma.crawlSource.update({
+    where: { id: source.id },
+    data: { lastSuccessAt: new Date(), healthStatus: 'healthy' },
+  });
+}
+
+export async function markInterruptedCrawlJobs() {
+  return prisma.crawlJob.updateMany({
+    where: { status: { in: ['pending', 'discovering', 'crawling'] } },
+    data: {
+      status: 'partial',
+      warning: '上次采集因服务停止而中断，请点击“重试更新”。',
+      finishedAt: new Date(),
+    },
   });
 }

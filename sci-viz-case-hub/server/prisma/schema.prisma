@@ -60,6 +60,63 @@ model VisualCase {
   @@index([sourceDomain])
 }
 
+model OcrJob {
+  id               String    @id @default(uuid())
+  status           String    @default("queued")
+  stage            String    @default("preparing")
+  activeKey        String?   @unique
+  caseIdsJson      String    @default("[]")
+  nextIndex        Int       @default(0)
+  totalCount       Int       @default(0)
+  processedCount   Int       @default(0)
+  updatedCount     Int       @default(0)
+  skippedCount     Int       @default(0)
+  failedCount      Int       @default(0)
+  currentCaseId    String    @default("")
+  currentCaseTitle String    @default("")
+  currentMethod    String    @default("")
+  errorsJson       String    @default("[]")
+  backupPath       String    @default("")
+  error            String    @default("")
+  cancelRequested  Boolean   @default(false)
+  startedAt        DateTime?
+  heartbeatAt      DateTime?
+  finishedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model AnalysisJob {
+  id               String    @id @default(uuid())
+  status           String    @default("queued")
+  stage            String    @default("preparing")
+  activeKey        String?   @unique
+  caseIdsJson      String    @default("[]")
+  nextIndex        Int       @default(0)
+  totalCount       Int       @default(0)
+  processedCount   Int       @default(0)
+  analyzedCount    Int       @default(0)
+  skippedCount     Int       @default(0)
+  failedCount      Int       @default(0)
+  currentCaseId    String    @default("")
+  currentCaseTitle String    @default("")
+  errorsJson       String    @default("[]")
+  backupPath       String    @default("")
+  error            String    @default("")
+  cancelRequested  Boolean   @default(false)
+  startedAt        DateTime?
+  heartbeatAt      DateTime?
+  finishedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
 model CrawlSource {
   id           Int      @id @default(autoincrement())
   name         String   @default("")
@@ -73,11 +130,19 @@ model CrawlSource {
   visualValue  String   @default("")
   strategyHint String   @default("")
   enabled      Boolean  @default(true)
+  scheduleEnabled Boolean @default(false)
+  scheduleIntervalHours Int @default(168)
+  nextRunAt    DateTime?
+  lastSuccessAt DateTime?
+  healthStatus String   @default("unknown")
+  configJson   String   @default("{}")
+  cursorJson   String   @default("{}")
   notes        String   @default("")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   jobs CrawlJob[]
+  items CrawlItem[]
 }
 
 model CrawlJob {
@@ -90,12 +155,49 @@ model CrawlJob {
   crawledCount   Int      @default(0)
   newCases       Int      @default(0)
   error          String   @default("")
+  warning        String   @default("")
+  mode           String   @default("incremental")
+  trigger        String   @default("manual")
+  attempt        Int      @default(0)
+  pagesVisited   Int      @default(0)
+  articlesWithImages Int  @default(0)
+  candidateImages Int     @default(0)
+  downloadedImages Int    @default(0)
+  duplicateImages Int     @default(0)
+  failedPages    Int      @default(0)
+  failedImages   Int      @default(0)
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  heartbeatAt    DateTime?
+  manifestPath   String   @default("")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   source CrawlSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  items  CrawlItem[]
 
   @@index([sourceId])
+}
+
+model CrawlItem {
+  id               Int      @id @default(autoincrement())
+  jobId            Int
+  sourceId         Int
+  url              String
+  status           String   @default("pending")
+  attempts         Int      @default(0)
+  error            String   @default("")
+  foundImages      Int      @default(0)
+  downloadedImages Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  job    CrawlJob    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  source CrawlSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, url])
+  @@index([sourceId, url])
+  @@index([status])
 }
 
 model User {

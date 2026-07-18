@@ -52,14 +52,20 @@ function isPrivateIPv4(ip: string): boolean {
 
 function isPrivateIPv6(ip: string): boolean {
   const normalized = ip.toLowerCase();
+  const mappedIPv4 = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];
+  if (mappedIPv4) return isPrivateIPv4(mappedIPv4);
+  const mappedHex = normalized.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mappedHex) {
+    const high = parseInt(mappedHex[1], 16);
+    const low = parseInt(mappedHex[2], 16);
+    return isPrivateIPv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
+  }
   return normalized === '::1'
     || normalized === '::'
     || normalized.startsWith('fc')
     || normalized.startsWith('fd')
     || normalized.startsWith('fe80:')
-    || normalized.startsWith('::ffff:127.')
-    || normalized.startsWith('::ffff:10.')
-    || normalized.startsWith('::ffff:192.168.');
+    || normalized.startsWith('ff');
 }
 
 function isPrivateAddress(address: string): boolean {
@@ -76,7 +82,7 @@ export async function assertPublicHttpUrl(rawUrl: string): Promise<URL> {
   }
 
   const parsed = new URL(normalized);
-  const hostname = parsed.hostname.toLowerCase();
+  const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
   if (PRIVATE_HOSTNAMES.has(hostname) || hostname.endsWith('.local')) {
     throw new Error('Private or local hostnames are not allowed');
   }

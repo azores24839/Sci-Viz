@@ -25,6 +25,15 @@ export interface ExtractedPage {
   images: ImageCandidate[];
 }
 
+export interface ExtractImagesOptions {
+  /**
+   * Survey mode favors recall: inspect the whole rendered page and let the
+   * conservative structural/size filters decide what is decorative. Curated
+   * mode preserves the source adapters' article-only scopes.
+   */
+  mode?: 'curated' | 'survey';
+}
+
 function extractContext($: CheerioRoot, el: Element, pageTitle: string, contentSelectors: string[]): string {
   const $el = $(el);
   const alt = $el.attr('alt') || '';
@@ -75,7 +84,9 @@ function extractContext($: CheerioRoot, el: Element, pageTitle: string, contentS
 }
 
 function parseSrcset(srcset: string): Array<{ url: string; width: number }> {
-  return srcset.split(', ')
+  // Browsers allow both `a.jpg 1x, b.jpg 2x` and `a.jpg 1x,b.jpg 2x`.
+  // Splitting only on comma+space joined the latter into an invalid URL.
+  return srcset.split(/\s*,\s*/)
     .map(entry => entry.trim())
     .filter(Boolean)
     .map(entry => {
@@ -126,9 +137,14 @@ function imageUrlFromResponsiveJson(rawSrc: string): string {
   }
 }
 
-export async function extractImagesFromPage(url: string, html: string): Promise<ExtractedPage> {
+export async function extractImagesFromPage(
+  url: string,
+  html: string,
+  options: ExtractImagesOptions = {},
+): Promise<ExtractedPage> {
   const $ = cheerio.load(html);
   const adapter = getStaticSourceAdapter(url);
+  const surveyMode = options.mode === 'survey';
   const contentSelectors = adapter?.contentSelectors || ['article', 'main', 'body'];
 
   const pageTitle = (adapter?.titleSelectors || ['h1', 'title'])
@@ -140,8 +156,10 @@ export async function extractImagesFromPage(url: string, html: string): Promise<
 
   const $bodyClone = $('body').clone();
   $bodyClone.find('script, style, noscript, iframe, svg').remove();
-  for (const selector of adapter?.excludeSelectors || []) {
-    $bodyClone.find(selector).remove();
+  if (!surveyMode) {
+    for (const selector of adapter?.excludeSelectors || []) {
+      $bodyClone.find(selector).remove();
+    }
   }
   const bodyText = $bodyClone.text().replace(/\s+/g, ' ').trim().substring(0, 1000);
 
@@ -174,16 +192,18 @@ export async function extractImagesFromPage(url: string, html: string): Promise<
     addCandidate(metaImage, pageTitle, null, null, [pageTitle, metaDescription].filter(Boolean).join(' | ').substring(0, 500));
   }
 
-  const roots = adapter?.contentSelectors?.length
+  const roots = !surveyMode && adapter?.contentSelectors?.length
     ? adapter.contentSelectors.map(selector => $(selector)).filter(root => root.length > 0)
     : [$('body')];
   const $scope = roots[0] || $('body');
 
-  for (const selector of adapter?.excludeSelectors || []) {
-    $scope.find(selector).remove();
+  if (!surveyMode) {
+    for (const selector of adapter?.excludeSelectors || []) {
+      $scope.find(selector).remove();
+    }
   }
 
-  const imageSelector = adapter?.imageSelectors?.join(', ') || 'img';
+  const imageSelector = surveyMode ? 'img' : adapter?.imageSelectors?.join(', ') || 'img';
   const isScoped = !$scope.is('body');
 
   $scope.find('picture source[srcset], picture source[data-srcset]').each((_, el) => {

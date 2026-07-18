@@ -59,6 +59,7 @@ async function performCloudOCR(imagePath: string): Promise<OCRResult> {
   try {
     const response = await fetch(apiUrl, {
       method: 'POST',
+      signal: AbortSignal.timeout(45_000),
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,

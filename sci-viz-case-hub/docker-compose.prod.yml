@@ -1,6 +1,6 @@
 services:
   sci-viz-hub:
-    image: ghcr.io/azores24839/sci-viz-case-hub:${CASE_HUB_IMAGE_TAG:-latest}
+    image: ghcr.io/azores24839/sci-viz-case-hub:${CASE_HUB_IMAGE_TAG:?CASE_HUB_IMAGE_TAG must be an immutable tested SHA tag}
     container_name: sci-viz-hub
     pull_policy: always
     restart: unless-stopped
@@ -14,6 +14,7 @@ services:
       DATABASE_URL: file:./prisma/dev.db
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in the production .env file}
       CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS must be set in the production .env file}
+      STUDIO_SERVICE_KEY: ${STUDIO_SERVICE_KEY:?STUDIO_SERVICE_KEY must be set in the production .env file}
     ports:
       - "${CASE_HUB_BIND_IP:-127.0.0.1}:${CASE_HUB_PORT:-3001}:3001"
     volumes:
@@ -26,6 +27,9 @@ services:
       - type: bind
         source: ${CASE_HUB_DATA_DIR:-./data}/journal_covers
         target: /app/journal_covers
+      - type: bind
+        source: ${CASE_HUB_DATA_DIR:-./data}/backups
+        target: /app/sci-viz-case-hub/server/backups
     read_only: true
     tmpfs:
       - /tmp:size=128m,mode=1777

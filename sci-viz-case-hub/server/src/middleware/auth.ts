@@ -1,7 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'change-me';
+import { getJwtSecret } from '../config/security.js';
 
 export interface AuthUser {
   id: string;
@@ -33,6 +32,14 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   }
 
   if (req.method === 'GET' && PUBLIC_READ_PATTERNS.some(pattern => pattern.test(req.path))) {
+    const optionalToken = req.cookies?.token;
+    if (optionalToken) {
+      try {
+        req.user = jwt.verify(optionalToken, getJwtSecret()) as AuthUser;
+      } catch {
+        // Public reads remain available when an optional session is absent or expired.
+      }
+    }
     return next();
   }
 
@@ -42,7 +49,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   }
 
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as AuthUser;
+    const payload = jwt.verify(token, getJwtSecret()) as AuthUser;
     req.user = payload;
     next();
   } catch {

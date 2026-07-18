@@ -3,24 +3,25 @@ import { prisma } from '../prisma.js';
 import { ensureDefaultCollectionKpis, getCollectionKpiProgress, getMostNeededKpis } from '../services/collectionKpi.js';
 import { isKpiDimension } from '../services/taxonomy.js';
 import { clampInt, toTrimmedString } from '../utils/httpSafety.js';
+import { sendInternalError } from '../middleware/requestContext.js';
 
 export const collectionRouter = Router();
 
-collectionRouter.post('/collection/kpis/init', async (_req: Request, res: Response) => {
+collectionRouter.post('/collection/kpis/init', async (req: Request, res: Response) => {
   try {
     await ensureDefaultCollectionKpis();
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'collection KPI initialization', error);
   }
 });
 
-collectionRouter.get('/collection/kpis', async (_req: Request, res: Response) => {
+collectionRouter.get('/collection/kpis', async (req: Request, res: Response) => {
   try {
     const progress = await getCollectionKpiProgress();
     res.json({ success: true, data: progress });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'collection KPI listing', error);
   }
 });
 
@@ -30,7 +31,7 @@ collectionRouter.get('/collection/kpis/needed', async (req: Request, res: Respon
     const needed = await getMostNeededKpis(limit);
     res.json({ success: true, data: needed });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'collection KPI needs', error);
   }
 });
 
@@ -62,7 +63,7 @@ collectionRouter.patch('/collection/kpis/:id', async (req: Request, res: Respons
     });
     res.json({ success: true, data: kpi });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'collection KPI update', error);
   }
 });
 
@@ -99,6 +100,6 @@ collectionRouter.post('/collection/kpis', async (req: Request, res: Response) =>
     });
     res.json({ success: true, data: kpi });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'collection KPI creation', error);
   }
 });

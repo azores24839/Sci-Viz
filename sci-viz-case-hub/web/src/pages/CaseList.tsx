@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { withBaseUrl } from '../baseUrl';
-import type { VisualCase, Pagination, CrawlSource } from '../types';
-import { REVIEW_STATUS_LABELS, MEDIA_TYPES, CONTENT_TYPES, DISCIPLINES, TECHNICAL_METHODS, DISTRIBUTION_MEDIUMS, FUNCTIONAL_PURPOSES, CAPTURE_TYPE_LABELS, CATEGORY_LABELS } from '../types';
+import type { VisualCase, Pagination, CrawlSource, SourceDistributionGroupKey } from '../types';
+import { REVIEW_STATUS_LABELS, MEDIA_TYPES, CONTENT_TYPES, DISCIPLINES, TECHNICAL_METHODS, DISTRIBUTION_MEDIUMS, FUNCTIONAL_PURPOSES, SOURCE_TYPE_OPTIONS } from '../types';
 import { theme } from '../theme';
 
 const STATUS_FILTERS: Array<{ key: string; label: string }> = [
@@ -17,7 +17,7 @@ const STATUS_FILTERS: Array<{ key: string; label: string }> = [
   { key: 'rejected', label: REVIEW_STATUS_LABELS.rejected },
 ];
 
-const DEFAULT_FILTERS: Record<string, string> = { review_status: 'approved' };
+const DEFAULT_FILTERS: Record<string, string> = { review_status: 'approved', sort: 'newest' };
 const CASE_BATCH_SIZE = 60;
 const FILTER_PARAM_KEYS = [
   'review_status',
@@ -34,6 +34,7 @@ const FILTER_PARAM_KEYS = [
   'ai_status',
   'rating',
   'source_domain',
+  'sort',
 ] as const;
 const SCROLL_RESTORE_PREFIX = 'case-list-scroll:';
 
@@ -56,7 +57,9 @@ function makeSearchParams(filters: Record<string, string>, page: number): URLSea
   const params = new URLSearchParams();
   FILTER_PARAM_KEYS.forEach(key => {
     const value = filters[key];
-    if (value && !(key === 'review_status' && value === DEFAULT_FILTERS.review_status)) {
+    if (value
+      && !(key === 'review_status' && value === DEFAULT_FILTERS.review_status)
+      && !(key === 'sort' && value === DEFAULT_FILTERS.sort)) {
       params.set(key, value);
     }
   });
@@ -118,6 +121,12 @@ function makeSourceLine(c: VisualCase): string {
 
 function makeCardMeta(c: VisualCase): string {
   return [makeSourceLine(c), c.discipline].filter(v => v && v !== '不确定').join(' · ');
+}
+
+function formatCreatedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '入库时间未知';
+  return `入库 ${date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })}`;
 }
 
 function normalizePrimaryTag(value: string): string {
@@ -188,9 +197,30 @@ const selectStyle: React.CSSProperties = {
   cursor: 'pointer',
 };
 
+const toolbarSelectStyle: React.CSSProperties = {
+  ...selectStyle,
+  height: 38,
+  width: '100%',
+  minWidth: 0,
+  maxWidth: 'none',
+};
+
 type CaseListProps = {
   isAdmin?: boolean;
 };
+
+type SourceOwnerGroup = {
+  key: string;
+  name: string;
+  kind: SourceDistributionGroupKey;
+  sources: CrawlSource[];
+};
+
+const SOURCE_GROUP_LABELS = Object.fromEntries(
+  SOURCE_TYPE_OPTIONS.map(option => [option.value, option.label]),
+) as Record<SourceDistributionGroupKey, string>;
+
+const SOURCE_GROUP_ORDER = SOURCE_TYPE_OPTIONS.map(option => option.value);
 
 export default function CaseList({ isAdmin = false }: CaseListProps) {
   const location = useLocation();
@@ -208,7 +238,6 @@ export default function CaseList({ isAdmin = false }: CaseListProps) {
   const [facetCounts, setFacetCounts] = useState<Record<string, Record<string, number>>>({});
   const [poolSources, setPoolSources] = useState<CrawlSource[]>([]);
   const [sourceDropdownOpen, setSourceDropdownOpen] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [managementMode, setManagementMode] = useState(false);
   const [selectedCaseIds, setSelectedCaseIds] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -217,31 +246,35 @@ export default function CaseList({ isAdmin = false }: CaseListProps) {
   const sourceNameSelected = new Set(
     (filters.source_name || '').split(',').filter(Boolean)
   );
+  const sourceOwnerCounts: Record<string, number> = facetCounts.sourceOwner || {};
 
-  const sourceNameCounts: Record<string, number> = facetCounts.sourceName || {};
-  const sourcesWithCases = poolSources.filter(source => (sourceNameCounts[source.name] || source.existingCases || 0) > 0);
-
-  const sourceGroups: Record<string, CrawlSource[]> = {};
-  sourcesWithCases.forEach(s => {
-    if (!sourceGroups[s.category]) sourceGroups[s.category] = [];
-    sourceGroups[s.category].push(s);
-  });
-
-  const categoryOrder = Object.keys(sourceGroups).sort();
-
-  const toggleSource = (name: string) => {
-    const selected = new Set((filters.source_name || '').split(',').filter(Boolean));
-    if (selected.has(name)) selected.delete(name);
-    else selected.add(name);
-    const value = [...selected].join(',');
-    setPage(1);
-    setFilters(f => {
-      const next = { ...f };
-      if (value) next.source_name = value;
-      else delete next.source_name;
-      return next;
+  const sourceOwnerByKey = new Map<string, SourceOwnerGroup>();
+  poolSources.forEach(source => {
+    const key = source.sourceOwnerKey || `source:${source.id}`;
+    const current = sourceOwnerByKey.get(key);
+    if (current) {
+      current.sources.push(source);
+      return;
+    }
+    sourceOwnerByKey.set(key, {
+      key,
+      name: source.sourceOwnerName || source.name,
+      kind: source.sourceDistributionGroup || 'other',
+      sources: [source],
     });
-  };
+  });
+  const sourceOwnerGroups = [...sourceOwnerByKey.values()]
+    .filter(owner => (sourceOwnerCounts[owner.key] || owner.sources.reduce((sum, source) => sum + (source.existingCases || 0), 0)) > 0)
+    .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+  const sourceGroups = new Map<SourceOwnerGroup['kind'], SourceOwnerGroup[]>();
+  sourceOwnerGroups.forEach(owner => {
+    const group = sourceGroups.get(owner.kind) || [];
+    group.push(owner);
+    sourceGroups.set(owner.kind, group);
+  });
+  const selectedSourceDisplayCount = sourceOwnerGroups.filter(owner =>
+    owner.sources.some(source => sourceNameSelected.has(source.name))
+  ).length;
 
   const toggleGroupSources = (names: string[], selectAll: boolean) => {
     const selected = new Set((filters.source_name || '').split(',').filter(Boolean));
@@ -443,7 +476,7 @@ export default function CaseList({ isAdmin = false }: CaseListProps) {
   };
 
   const activeFilterCount = Object.entries(filters)
-    .filter(([key, value]) => value && !(key === 'review_status' && value === 'approved'))
+    .filter(([key, value]) => value && !(key === 'review_status' && value === 'approved') && key !== 'sort')
     .length;
 
   const [imgErrors, setImgErrors] = useState<Set<string>>(new Set());
@@ -549,13 +582,15 @@ export default function CaseList({ isAdmin = false }: CaseListProps) {
         }
         .case-toolbar {
           display: grid;
-          grid-template-columns: minmax(260px, 1fr) minmax(150px, 190px) repeat(4, minmax(130px, 170px)) auto;
+          grid-template-columns: minmax(260px, 2fr) repeat(4, minmax(130px, 1fr));
           gap: 10px;
           align-items: center;
           margin-bottom: 12px;
         }
-        @media (max-width: 1180px) {
-          .case-toolbar { grid-template-columns: minmax(260px, 1fr) repeat(3, minmax(130px, 1fr)); }
+        .case-toolbar > * { min-width: 0; }
+        @media (max-width: 980px) {
+          .case-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .case-toolbar > input:first-child { grid-column: 1 / -1; }
         }
         @media (max-width: 767px) {
           .case-toolbar { grid-template-columns: 1fr; }
@@ -576,6 +611,15 @@ export default function CaseList({ isAdmin = false }: CaseListProps) {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <select
+            aria-label="案例排序"
+            value={filters.sort || 'newest'}
+            onChange={(e) => setFilter('sort', e.target.value)}
+            style={{ ...selectStyle, height: 34, minWidth: 112, maxWidth: 112 }}
+          >
+            <option value="newest">最新入库</option>
+            <option value="oldest">最早入库</option>
+          </select>
           <div style={{ fontSize: 13, color: theme.colors.text.tertiary }}>
             已显示 {displayedCount || '-'} / {pagination?.total ?? '-'} 条 · 已入库 {statusCounts.approved ?? '-'} 条
           </div>
@@ -621,19 +665,16 @@ export default function CaseList({ isAdmin = false }: CaseListProps) {
           <button
             onClick={() => setSourceDropdownOpen(o => !o)}
             style={{
-              ...selectStyle,
-              height: 38,
-              width: '100%',
-              maxWidth: 'none',
+              ...toolbarSelectStyle,
               textAlign: 'left',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}
           >
-            {sourceNameSelected.size > 0
-              ? `已选择 ${sourceNameSelected.size} 个来源`
-              : '全部来源'}
+            {selectedSourceDisplayCount > 0
+              ? `已选择 ${selectedSourceDisplayCount} 家机构`
+              : '全部机构'}
           </button>
           {sourceDropdownOpen && (
             <div style={{
@@ -651,16 +692,15 @@ export default function CaseList({ isAdmin = false }: CaseListProps) {
               overflowY: 'auto',
               padding: '8px 0',
             }}>
-              {categoryOrder.map(cat => {
-                const groupSources = sourceGroups[cat] || [];
-                if (groupSources.length === 0) return null;
-                const groupNames = groupSources.map(s => s.name);
-                const groupCaseCount = groupNames.reduce((sum, n) => sum + (sourceNameCounts[n] || 0), 0);
-                const allSelected = groupNames.length > 0 && groupNames.every(n => sourceNameSelected.has(n));
-                const someSelected = groupNames.some(n => sourceNameSelected.has(n));
-                const categoryLabel = CATEGORY_LABELS[cat] || cat;
+              {SOURCE_GROUP_ORDER.map(kind => {
+                const owners = sourceGroups.get(kind) || [];
+                if (owners.length === 0) return null;
+                const groupNames = [...new Set(owners.flatMap(owner => owner.sources.map(source => source.name)))];
+                const groupCaseCount = owners.reduce((sum, owner) => sum + (sourceOwnerCounts[owner.key] || 0), 0);
+                const allSelected = groupNames.length > 0 && groupNames.every(name => sourceNameSelected.has(name));
+                const someSelected = groupNames.some(name => sourceNameSelected.has(name));
                 return (
-                  <div key={cat}>
+                  <div key={kind}>
                     <label style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -678,18 +718,19 @@ export default function CaseList({ isAdmin = false }: CaseListProps) {
                         onChange={() => toggleGroupSources(groupNames, !allSelected)}
                         style={{ margin: 0, accentColor: theme.colors.text.primary }}
                       />
-                      <span>{cat}. {categoryLabel}</span>
+                      <span>{SOURCE_GROUP_LABELS[kind]}</span>
                       <span style={{ color: theme.colors.text.tertiary, fontSize: 12, fontWeight: 400 }}>
                         ({groupCaseCount})
                       </span>
                     </label>
-                    {groupSources.map(s => {
-                      const name = s.name;
-                      if (!name) return null;
-                      const checked = sourceNameSelected.has(name);
+                    {owners.map(owner => {
+                      const childNames = [...new Set(owner.sources.map(source => source.name))];
+                      const checked = childNames.length > 0 && childNames.every(childName => sourceNameSelected.has(childName));
+                      const partiallyChecked = childNames.some(childName => sourceNameSelected.has(childName));
+                      const count = sourceOwnerCounts[owner.key] || 0;
                       return (
                         <label
-                          key={s.id}
+                          key={owner.key}
                           style={{
                             display: 'flex',
                             alignItems: 'center',
@@ -703,10 +744,11 @@ export default function CaseList({ isAdmin = false }: CaseListProps) {
                           <input
                             type="checkbox"
                             checked={checked}
-                            onChange={() => toggleSource(name)}
+                            ref={element => { if (element) element.indeterminate = !checked && partiallyChecked; }}
+                            onChange={() => toggleGroupSources(childNames, !checked)}
                             style={{ margin: 0, accentColor: theme.colors.text.primary }}
                           />
-                          <span>{name}{sourceNameCounts[name] ? ` (${sourceNameCounts[name]})` : ''}</span>
+                          <span>{owner.name}{count ? ` (${count})` : ''}</span>
                         </label>
                       );
                     })}
@@ -716,68 +758,51 @@ export default function CaseList({ isAdmin = false }: CaseListProps) {
             </div>
           )}
         </div>
-        <select value={filters.media_type || ''} onChange={(e) => setFilter('media_type', e.target.value)} style={{ ...selectStyle, height: 38, maxWidth: 'none' }}>
+        <select value={filters.media_type || ''} onChange={(e) => setFilter('media_type', e.target.value)} style={toolbarSelectStyle}>
           <option value="">全部图像类型</option>
           {MEDIA_TYPES.map(t => {
             const count = facetCounts.mediaType?.[t];
             return <option key={t} value={t}>{t === '3D渲染' ? '3D建模' : t}{count !== undefined ? ` (${count})` : ''}</option>;
           })}
         </select>
-        <select value={filters.content_type || ''} onChange={(e) => setFilter('content_type', e.target.value)} style={{ ...selectStyle, height: 38, maxWidth: 'none' }}>
+        <select value={filters.content_type || ''} onChange={(e) => setFilter('content_type', e.target.value)} style={toolbarSelectStyle}>
           <option value="">全部内容主题</option>
           {CONTENT_TYPES.map(t => {
             const count = facetCounts.contentType?.[t];
             return <option key={t} value={t}>{t}{count !== undefined ? ` (${count})` : ''}</option>;
           })}
         </select>
-        <select value={filters.discipline || ''} onChange={(e) => setFilter('discipline', e.target.value)} style={{ ...selectStyle, height: 38, maxWidth: 'none' }}>
+        <select value={filters.discipline || ''} onChange={(e) => setFilter('discipline', e.target.value)} style={toolbarSelectStyle}>
           <option value="">全部学科</option>
           {DISCIPLINES.map(t => {
             const count = facetCounts.discipline?.[t];
             return <option key={t} value={t}>{t}{count !== undefined ? ` (${count})` : ''}</option>;
           })}
         </select>
-        <select value={filters.technical_method || ''} onChange={(e) => setFilter('technical_method', e.target.value)} style={{ ...selectStyle, height: 38, maxWidth: 'none' }}>
+        <select value={filters.technical_method || ''} onChange={(e) => setFilter('technical_method', e.target.value)} style={toolbarSelectStyle}>
           <option value="">全部技术手段</option>
           {TECHNICAL_METHODS.map(t => {
             const count = facetCounts.technicalMethod?.[t];
             return <option key={t} value={t}>{t}{count !== undefined ? ` (${count})` : ''}</option>;
           })}
         </select>
-        <select value={filters.distribution_medium || ''} onChange={(e) => setFilter('distribution_medium', e.target.value)} style={{ ...selectStyle, height: 38, maxWidth: 'none' }}>
+        <select value={filters.distribution_medium || ''} onChange={(e) => setFilter('distribution_medium', e.target.value)} style={toolbarSelectStyle}>
           <option value="">全部传播媒介</option>
           {DISTRIBUTION_MEDIUMS.map(t => {
             const count = facetCounts.distributionMedium?.[t];
             return <option key={t} value={t}>{t}{count !== undefined ? ` (${count})` : ''}</option>;
           })}
         </select>
-        <select value={filters.functional_purpose || ''} onChange={(e) => setFilter('functional_purpose', e.target.value)} style={{ ...selectStyle, height: 38, maxWidth: 'none' }}>
+        <select value={filters.functional_purpose || ''} onChange={(e) => setFilter('functional_purpose', e.target.value)} style={toolbarSelectStyle}>
           <option value="">全部功能维度</option>
           {FUNCTIONAL_PURPOSES.map(t => {
             const count = facetCounts.functionalPurpose?.[t];
             return <option key={t} value={t}>{t}{count !== undefined ? ` (${count})` : ''}</option>;
           })}
         </select>
-        <button
-          onClick={() => setAdvancedOpen(o => !o)}
-          style={{
-            height: 38,
-            padding: '0 14px',
-            borderRadius: 8,
-            border: `1px solid ${advancedOpen || activeFilterCount > 0 ? theme.colors.text.primary : theme.colors.border}`,
-            background: advancedOpen ? theme.colors.text.primary : theme.colors.bgCard,
-            color: advancedOpen ? theme.colors.bgCard : theme.colors.text.secondary,
-            cursor: 'pointer',
-            fontSize: 13,
-            fontWeight: 600,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          更多筛选{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
-        </button>
       </div>
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: advancedOpen ? 12 : 22 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 22 }}>
         {quickFilters.map(q => (
           <button
             key={q.label}
@@ -816,57 +841,6 @@ export default function CaseList({ isAdmin = false }: CaseListProps) {
           </button>
         )}
       </div>
-
-      {advancedOpen && (
-        <div style={{
-          background: theme.colors.bgCard,
-          border: `1px solid ${theme.colors.borderLight}`,
-          borderRadius: theme.radius.lg,
-          padding: 14,
-          marginBottom: 22,
-        }}>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-            {STATUS_FILTERS.map(sf => {
-              const count = statusCounts[sf.key || 'all'];
-              const active = sf.key === (filters.review_status || '');
-              return (
-                <button
-                  key={sf.key}
-                  onClick={() => setFilter('review_status', sf.key)}
-                  style={{
-                    height: 30,
-                    padding: '0 12px',
-                    borderRadius: 9999,
-                    border: `1px solid ${active ? theme.colors.text.primary : theme.colors.border}`,
-                    cursor: 'pointer',
-                    fontSize: 12,
-                    fontWeight: 500,
-                    background: active ? theme.colors.text.primary : theme.colors.bgCard,
-                    color: active ? theme.colors.bgCard : theme.colors.text.secondary,
-                  }}
-                >
-                  {sf.label}{count !== undefined ? ` (${count})` : ''}
-                </button>
-              );
-            })}
-          </div>
-
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <select value={filters.capture_type || ''} onChange={(e) => setFilter('capture_type', e.target.value)} style={selectStyle}>
-              <option value="">全部采集方式</option>
-              {Object.entries(CAPTURE_TYPE_LABELS).map(([k, v]) => {
-                const count = facetCounts.captureType?.[k];
-                return <option key={k} value={k}>{v}{count !== undefined ? ` (${count})` : ''}</option>;
-              })}
-            </select>
-            <select value={filters.ocr_status || ''} onChange={(e) => setFilter('ocr_status', e.target.value)} style={selectStyle}>
-              <option value="">全部OCR状态</option>
-              <option value="has_text">已识别文字</option>
-              <option value="no_text">无OCR文字</option>
-            </select>
-          </div>
-        </div>
-      )}
 
       {isAdmin && managementMode && (
         <div style={{
@@ -1153,10 +1127,18 @@ export default function CaseList({ isAdmin = false }: CaseListProps) {
               </div>
 
               <div style={{
+                fontSize: 10,
+                color: theme.colors.text.tertiary,
+                marginTop: 4,
+              }}>
+                {formatCreatedAt(c.createdAt)}
+              </div>
+
+              <div style={{
                 display: 'flex',
                 flexWrap: 'wrap',
                 gap: 4,
-                marginTop: 7,
+                marginTop: 6,
                 height: 18,
                 overflow: 'hidden',
               }}>

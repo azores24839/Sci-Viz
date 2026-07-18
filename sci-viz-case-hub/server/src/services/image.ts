@@ -14,10 +14,14 @@ const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads');
 const ORIGINALS_DIR = path.join(UPLOAD_DIR, 'originals');
 const THUMBNAILS_DIR = path.join(UPLOAD_DIR, 'thumbnails');
 
-const MIN_IMAGE_SIZE = 10 * 1024;
+// A byte-size floor only catches truncated/non-image payloads. Real safety and
+// usefulness are determined below from decoded format and pixel dimensions.
+const MIN_IMAGE_SIZE = 256;
 const MAX_IMAGE_SIZE = 15 * 1024 * 1024;
+const MAX_IMAGE_PIXELS = 40_000_000;
+const MAX_IMAGE_DIMENSION = 20_000;
 const SKIP_CONTENT_TYPES = ['image/svg+xml', 'image/x-icon', 'image/vnd.microsoft.icon'];
-const ALLOWED_IMAGE_FORMATS = new Set(['jpeg', 'png', 'webp', 'gif']);
+const ALLOWED_IMAGE_FORMATS = new Set(['jpeg', 'png', 'webp', 'gif', 'heif', 'heic', 'avif']);
 
 export interface SavedImage {
   imagePath: string;
@@ -25,6 +29,13 @@ export interface SavedImage {
   imageHash: string;
   ossImageUrl?: string;
   ossThumbUrl?: string;
+}
+
+export class ImageValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ImageValidationError';
+  }
 }
 
 export async function ensureUploadDirs() {
@@ -50,11 +61,18 @@ export async function saveImage(
 
   await fs.writeFile(imagePath, buffer);
 
-  const thumbBuffer = await sharp(buffer)
-    .resize(300, 200, { fit: 'cover' })
-    .jpeg({ quality: 80 })
-    .toBuffer();
-  await fs.writeFile(thumbnailPath, thumbBuffer);
+  let thumbBuffer: Buffer;
+  try {
+    thumbBuffer = await sharp(buffer, { limitInputPixels: MAX_IMAGE_PIXELS })
+      .resize(300, 200, { fit: 'cover' })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+    await fs.writeFile(thumbnailPath, thumbBuffer);
+  } catch (error) {
+    await fs.unlink(imagePath).catch(() => {});
+    await fs.unlink(thumbnailPath).catch(() => {});
+    throw error;
+  }
 
   const result: SavedImage = {
     imagePath: `/uploads/originals/${filename}`,
@@ -97,20 +115,29 @@ export async function deleteSavedImage(imagePath: string, thumbnailPath: string)
 
 export async function validateImageBuffer(buffer: Buffer): Promise<{ width: number; height: number }> {
   if (buffer.length < MIN_IMAGE_SIZE) {
-    throw new Error(`Image too small: ${buffer.length} bytes (min ${MIN_IMAGE_SIZE})`);
+    throw new ImageValidationError(`Image too small: ${buffer.length} bytes (min ${MIN_IMAGE_SIZE})`);
   }
   if (buffer.length > MAX_IMAGE_SIZE) {
-    throw new Error(`Image too large: ${buffer.length} bytes (max ${MAX_IMAGE_SIZE})`);
+    throw new ImageValidationError(`Image too large: ${buffer.length} bytes (max ${MAX_IMAGE_SIZE})`);
   }
-  const metadata = await sharp(buffer).metadata();
+  let metadata: Awaited<ReturnType<ReturnType<typeof sharp>['metadata']>>;
+  try {
+    metadata = await sharp(buffer, { limitInputPixels: MAX_IMAGE_PIXELS }).metadata();
+  } catch {
+    throw new ImageValidationError('Invalid or unsafe image data');
+  }
   if (!metadata.format || !ALLOWED_IMAGE_FORMATS.has(metadata.format)) {
-    throw new Error(`Unsupported image format: ${metadata.format || 'unknown'}`);
+    throw new ImageValidationError(`Unsupported image format: ${metadata.format || 'unknown'}`);
   }
   if (!metadata.width || !metadata.height) {
-    throw new Error('Could not determine image dimensions');
+    throw new ImageValidationError('Could not determine image dimensions');
   }
-  if (metadata.width < 100 || metadata.height < 100) {
-    throw new Error(`Image dimensions too small: ${metadata.width}x${metadata.height}`);
+  const area = metadata.width * metadata.height;
+  if ((metadata.width < 96 && metadata.height < 96) || area < 8_000) {
+    throw new ImageValidationError(`Image dimensions too small: ${metadata.width}x${metadata.height}`);
+  }
+  if (metadata.width > MAX_IMAGE_DIMENSION || metadata.height > MAX_IMAGE_DIMENSION || metadata.width * metadata.height > MAX_IMAGE_PIXELS) {
+    throw new ImageValidationError(`Image dimensions are too large: ${metadata.width}x${metadata.height}`);
   }
   return { width: metadata.width, height: metadata.height };
 }
@@ -134,7 +161,7 @@ function normalizeExt(contentType: string): string {
   }
 }
 
-export async function saveImageFromUrl(imageUrl: string): Promise<SavedImage> {
+export async function saveImageFromUrl(imageUrl: string, externalSignal?: AbortSignal): Promise<SavedImage> {
   let parsedUrl = await assertPublicHttpUrl(imageUrl);
   let response: Response | null = null;
 
@@ -143,8 +170,11 @@ export async function saveImageFromUrl(imageUrl: string): Promise<SavedImage> {
     const timeout = setTimeout(() => controller.abort(), 30000);
 
     try {
+      const fetchSignal = externalSignal
+        ? AbortSignal.any([externalSignal, controller.signal])
+        : controller.signal;
       response = await fetch(parsedUrl.href, {
-        signal: controller.signal,
+        signal: fetchSignal,
         redirect: 'manual',
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',

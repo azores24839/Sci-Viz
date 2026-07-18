@@ -1,130 +1,35 @@
 import { Router } from 'express';
+import { sendInternalError } from '../middleware/requestContext.js';
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import sharp from 'sharp';
 import { prisma } from '../prisma.js';
 import { backupDatabase } from '../utils/backup.js';
 import { analyzeImage, classifyMediaType } from '../services/vision.js';
 import { normalizeTaxonomyValue } from '../services/taxonomy.js';
-import { getVisionConfig, getVisionHeaders } from '../services/visionConfig.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const SERVER_ROOT = path.join(__dirname, '..');
-const REPO_ROOT = path.join(__dirname, '..', '..', '..');
-const OCR_BINARY = path.join(SERVER_ROOT, '.tmp', 'ocr_image');
-const OCR_SWIFT_SCRIPT = path.join(SERVER_ROOT, 'scripts', 'ocr_image.swift');
-const execFileAsync = promisify(execFile);
+import { normalizeCaseIds } from '../services/processingInput.js';
+import {
+  cancelOcrJob,
+  createOcrJob,
+  findLocalImage,
+  getLatestOcrJob,
+  getOcrJob,
+  isActiveOcrStatus,
+} from '../services/ocrJobs.js';
+import {
+  cancelAnalysisJob,
+  createAnalysisJob,
+  getAnalysisJob,
+  getLatestAnalysisJob,
+} from '../services/analysisJobs.js';
 
 export const processingRouter = Router();
-
-function localPathFromWebPath(webPath: string): string {
-  if (!webPath) return '';
-  if (webPath.startsWith('/uploads/')) {
-    return path.join(SERVER_ROOT, webPath.replace(/^\//, ''));
-  }
-  if (webPath.startsWith('/journal_covers/')) {
-    return path.join(REPO_ROOT, webPath.replace(/^\//, ''));
-  }
-  return '';
-}
-
-function mimeType(filePath: string): string {
-  const ext = filePath.split('.').pop()?.toLowerCase() || '';
-  if (ext === 'png') return 'image/png';
-  if (ext === 'webp') return 'image/webp';
-  if (ext === 'gif') return 'image/gif';
-  return 'image/jpeg';
-}
-
-function cleanOcrText(text: string): string {
-  return text
-    .replace(/```[\s\S]*?```/g, block => block.replace(/```[a-z]*\n?/gi, '').replace(/```/g, ''))
-    .replace(/^["']|["']$/g, '')
-    .replace(/\r/g, '')
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-    .join('\n')
-    .trim();
-}
-
-async function ocrLocalImage(filePath: string): Promise<string> {
-  try {
-    await fs.promises.access(OCR_BINARY);
-    const { stdout } = await execFileAsync(OCR_BINARY, [filePath], {
-      maxBuffer: 1024 * 1024 * 4,
-      timeout: 30000,
-    });
-    return cleanOcrText(stdout);
-  } catch {
-    const { stdout } = await execFileAsync('swift', [OCR_SWIFT_SCRIPT, filePath], {
-      maxBuffer: 1024 * 1024 * 4,
-      timeout: 30000,
-    });
-    return cleanOcrText(stdout);
-  }
-}
-
-async function ocrRemoteImage(imageUrl: string, context: string): Promise<string> {
-  const config = getVisionConfig();
-  if (!config.url || !config.key || config.key.includes('your-')) {
-    return '';
-  }
-
-  const response = await fetch(config.url, {
-    method: 'POST',
-    headers: {
-      ...getVisionHeaders(config.key),
-    },
-    body: JSON.stringify({
-      model: config.ocrModel,
-      messages: [
-        {
-          role: 'system',
-          content: 'You are an OCR engine. Extract visible text from the image. Return plain text only. Keep line breaks where useful. Do not describe the image. If there is no readable text, return an empty string.',
-        },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: `Extract all visible text from this image.${context ? `\nContext: ${context}` : ''}` },
-            { type: 'image_url', image_url: { url: imageUrl } },
-          ],
-        },
-      ],
-      temperature: 0,
-      max_tokens: 500,
-    }),
-  });
-
-  if (!response.ok) return '';
-  const data = await response.json() as {
-    choices?: Array<{ message?: { content?: string | null; reasoning?: string | null } }>;
-  };
-  return cleanOcrText(data.choices?.[0]?.message?.content || '');
-}
-
-async function findLocalImage(c: { imagePath: string; thumbnailPath: string }): Promise<string> {
-  for (const webPath of [c.imagePath, c.thumbnailPath]) {
-    if (!webPath) continue;
-    const filePath = localPathFromWebPath(webPath);
-    if (!filePath) continue;
-    try {
-      await fs.promises.access(filePath);
-      return filePath;
-    } catch {}
-  }
-  return '';
-}
 
 // POST /api/processing/quality-check
 processingRouter.post('/processing/quality-check', async (req, res) => {
   try {
-    const { scope, caseIds } = req.body;
-    const backupPath = backupDatabase();
+    const caseIds = normalizeCaseIds(req.body?.caseIds);
+    if (!caseIds) return res.status(400).json({ success: false, error: 'caseIds 必须是不超过 200 项的有效字符串数组' });
+    await backupDatabase();
 
     let cases: Array<{ id: string; imagePath: string; thumbnailPath: string; imageUrl: string }>;
 
@@ -204,104 +109,129 @@ processingRouter.post('/processing/quality-check', async (req, res) => {
 
     res.json({
       success: true,
-      backupPath,
+      backupCreated: true,
       summary: { total: cases.length, ok, broken, lowQuality },
     });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+  } catch (err: unknown) {
+    sendInternalError(req, res, 'image quality processing', err);
   }
 });
 
-// POST /api/processing/ocr
+// POST /api/processing/ocr/jobs - starts a durable background OCR job.
+processingRouter.post('/processing/ocr/jobs', async (req, res) => {
+  try {
+    const caseIds = normalizeCaseIds(req.body?.caseIds);
+    if (!caseIds) return res.status(400).json({ success: false, error: 'caseIds 必须是不超过 200 项的有效字符串数组' });
+    const result = await createOcrJob(caseIds);
+    return res.status(result.created ? 202 : 200).json({ success: true, data: result.job, existing: !result.created });
+  } catch (err: unknown) {
+    return sendInternalError(req, res, 'start OCR job', err);
+  }
+});
+
+// GET /api/processing/ocr/jobs/latest - restores progress after navigation or refresh.
+processingRouter.get('/processing/ocr/jobs/latest', async (req, res) => {
+  try {
+    return res.json({ success: true, data: await getLatestOcrJob() });
+  } catch (err: unknown) {
+    return sendInternalError(req, res, 'get latest OCR job', err);
+  }
+});
+
+processingRouter.get('/processing/ocr/jobs/:jobId', async (req, res) => {
+  try {
+    const job = await getOcrJob(req.params.jobId);
+    if (!job) return res.status(404).json({ success: false, error: 'OCR 任务不存在' });
+    return res.json({ success: true, data: job });
+  } catch (err: unknown) {
+    return sendInternalError(req, res, 'get OCR job', err);
+  }
+});
+
+processingRouter.post('/processing/ocr/jobs/:jobId/cancel', async (req, res) => {
+  try {
+    const job = await cancelOcrJob(req.params.jobId);
+    if (!job) return res.status(404).json({ success: false, error: 'OCR 任务不存在' });
+    return res.json({ success: true, data: job });
+  } catch (err: unknown) {
+    return sendInternalError(req, res, 'cancel OCR job', err);
+  }
+});
+
+// Legacy synchronous endpoint. It now uses the same durable worker and active-job lock.
 processingRouter.post('/processing/ocr', async (req, res) => {
   try {
-    const { scope, caseIds } = req.body;
-    const backupPath = backupDatabase();
-
-    let cases: Array<{
-      id: string;
-      imagePath: string;
-      thumbnailPath: string;
-      imageUrl: string;
-      pageTitle: string;
-      caseTitle: string;
-      contextText: string;
-    }>;
-
-    if (caseIds?.length) {
-      cases = await prisma.visualCase.findMany({
-        where: { id: { in: caseIds } },
-        select: {
-          id: true, imagePath: true, thumbnailPath: true, imageUrl: true,
-          pageTitle: true, caseTitle: true, contextText: true,
-        },
-      });
-    } else {
-      cases = await prisma.visualCase.findMany({
-        where: {
-          ocrText: '',
-          reviewStatus: { notIn: ['rejected'] },
-        },
-        select: {
-          id: true, imagePath: true, thumbnailPath: true, imageUrl: true,
-          pageTitle: true, caseTitle: true, contextText: true,
-        },
-        take: 200,
-      });
+    const caseIds = normalizeCaseIds(req.body?.caseIds);
+    if (!caseIds) return res.status(400).json({ success: false, error: 'caseIds 必须是不超过 200 项的有效字符串数组' });
+    const result = await createOcrJob(caseIds);
+    if (!result.created && isActiveOcrStatus(result.job.status)) {
+      return res.status(409).json({ success: false, error: '已有 OCR 任务正在运行', data: result.job });
     }
 
-    let updated = 0, skipped = 0, failed = 0;
-
-    for (let i = 0; i < cases.length; i++) {
-      const c = cases[i];
-      try {
-        const localImage = await findLocalImage(c);
-        if (localImage) {
-          const text = await ocrLocalImage(localImage);
-          if (text) {
-            await prisma.visualCase.update({
-              where: { id: c.id },
-              data: { ocrText: text },
-            });
-            updated++;
-          } else {
-            skipped++;
-          }
-        } else if (c.imageUrl) {
-          const context = [c.caseTitle, c.pageTitle, c.contextText].filter(Boolean).join('\n').slice(0, 1200);
-          const text = await ocrRemoteImage(c.imageUrl, context);
-          if (text) {
-            await prisma.visualCase.update({
-              where: { id: c.id },
-              data: { ocrText: text },
-            });
-            updated++;
-          } else {
-            skipped++;
-          }
-        } else {
-          failed++;
-        }
-      } catch {
-        failed++;
-      }
+    let job = result.job;
+    while (isActiveOcrStatus(job.status)) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const latest = await getOcrJob(job.id);
+      if (!latest) return res.status(500).json({ success: false, error: 'OCR 任务状态丢失' });
+      job = latest;
     }
-
-    res.json({
+    if (job.status === 'failed') return res.status(500).json({ success: false, error: job.error || 'OCR 任务失败' });
+    return res.json({
       success: true,
-      backupPath,
-      summary: { total: cases.length, updated, skipped, failed },
+      backupCreated: true,
+      summary: { total: job.total, updated: job.updated, skipped: job.skipped, failed: job.failed },
     });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+  } catch (err: unknown) {
+    return sendInternalError(req, res, 'OCR processing', err);
+  }
+});
+
+// Durable Qwen image-understanding jobs. OCR text is optional context, never a prerequisite.
+processingRouter.post('/processing/analysis/jobs', async (req, res) => {
+  try {
+    const caseIds = normalizeCaseIds(req.body?.caseIds);
+    if (!caseIds) return res.status(400).json({ success: false, error: 'caseIds 必须是不超过 200 项的有效字符串数组' });
+    const result = await createAnalysisJob(caseIds);
+    return res.status(result.created ? 202 : 200).json({ success: true, data: result.job, existing: !result.created });
+  } catch (err: unknown) {
+    return sendInternalError(req, res, 'start Qwen analysis job', err);
+  }
+});
+
+processingRouter.get('/processing/analysis/jobs/latest', async (req, res) => {
+  try {
+    return res.json({ success: true, data: await getLatestAnalysisJob() });
+  } catch (err: unknown) {
+    return sendInternalError(req, res, 'get latest Qwen analysis job', err);
+  }
+});
+
+processingRouter.get('/processing/analysis/jobs/:jobId', async (req, res) => {
+  try {
+    const job = await getAnalysisJob(req.params.jobId);
+    if (!job) return res.status(404).json({ success: false, error: 'Qwen 分析任务不存在' });
+    return res.json({ success: true, data: job });
+  } catch (err: unknown) {
+    return sendInternalError(req, res, 'get Qwen analysis job', err);
+  }
+});
+
+processingRouter.post('/processing/analysis/jobs/:jobId/cancel', async (req, res) => {
+  try {
+    const job = await cancelAnalysisJob(req.params.jobId);
+    if (!job) return res.status(404).json({ success: false, error: 'Qwen 分析任务不存在' });
+    return res.json({ success: true, data: job });
+  } catch (err: unknown) {
+    return sendInternalError(req, res, 'cancel Qwen analysis job', err);
   }
 });
 
 // POST /api/processing/classify
 processingRouter.post('/processing/classify', async (req, res) => {
   try {
-    const { scope, caseIds } = req.body;
-    const backupPath = backupDatabase();
+    const caseIds = normalizeCaseIds(req.body?.caseIds);
+    if (!caseIds) return res.status(400).json({ success: false, error: 'caseIds 必须是不超过 200 项的有效字符串数组' });
+    await backupDatabase();
 
     let cases: Array<{
       id: string;
@@ -387,18 +317,20 @@ processingRouter.post('/processing/classify', async (req, res) => {
 
     res.json({
       success: true,
-      backupPath,
+      backupCreated: true,
       summary: { total: cases.length, classified, skipped, failed },
     });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+  } catch (err: unknown) {
+    sendInternalError(req, res, 'classification processing', err);
   }
 });
 
 // POST /api/processing/reclassify-media-type
 processingRouter.post('/processing/reclassify-media-type', async (req, res) => {
   try {
-    const { caseIds, limit = 100 } = req.body;
+    const caseIds = normalizeCaseIds(req.body?.caseIds);
+    if (!caseIds) return res.status(400).json({ success: false, error: 'caseIds 必须是不超过 200 项的有效字符串数组' });
+    const limit = Math.min(Math.max(Number(req.body?.limit) || 100, 1), 500);
 
     let cases: Array<{
       id: string;
@@ -467,13 +399,13 @@ processingRouter.post('/processing/reclassify-media-type', async (req, res) => {
       success: true,
       summary: { total: cases.length, updated, skipped, failed },
     });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+  } catch (err: unknown) {
+    sendInternalError(req, res, 'media type reclassification', err);
   }
 });
 
 // GET /api/processing/queue-status - returns counts for kanban panels
-processingRouter.get('/processing/queue-status', async (_req, res) => {
+processingRouter.get('/processing/queue-status', async (req, res) => {
   try {
     const [
       pendingQuality,
@@ -488,12 +420,8 @@ processingRouter.get('/processing/queue-status', async (_req, res) => {
       prisma.visualCase.count({ where: { ocrText: '', reviewStatus: { notIn: ['rejected'] } } }),
       prisma.visualCase.count({
         where: {
-          ocrText: { not: '' },
-          reviewStatus: { in: ['pending_ai_analysis', 'needs_review', 'low_confidence_review'] },
-          OR: [
-            { mediaType: '' },
-            { mediaType: '不确定' },
-          ],
+          reviewStatus: { in: ['pending_ai_analysis', 'analysis_failed'] },
+          OR: [{ imagePath: { not: '' } }, { thumbnailPath: { not: '' } }, { imageUrl: { not: '' } }],
         },
       }),
       prisma.visualCase.count({ where: { reviewStatus: 'needs_review' } }),
@@ -508,7 +436,7 @@ processingRouter.get('/processing/queue-status', async (_req, res) => {
         panels: [
           { key: 'pending_quality', label: '待质量检查', count: pendingQuality, description: '新采集但未确认图片是否可用' },
           { key: 'pending_ocr', label: '待 OCR', count: pendingOcr, description: '图片可用，但 OCR 文本为空' },
-          { key: 'pending_classify', label: '待分类', count: pendingClassify, description: '有图片和 OCR，但 AI 分类不完整' },
+          { key: 'pending_classify', label: '待 Qwen 分析', count: pendingClassify, description: '直接理解图片内容；OCR 文字仅作辅助' },
           { key: 'needs_review', label: '待确认', count: needsReview, description: 'AI 分析完成，等待人工确认' },
           { key: 'low_confidence', label: '需人工判断', count: lowConfidence, description: 'AI 结果不确定，需要人看' },
           { key: 'approved', label: '已入库', count: approved, description: '已通过审核，案例库可见' },
@@ -516,7 +444,7 @@ processingRouter.get('/processing/queue-status', async (_req, res) => {
         ],
       },
     });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+  } catch (err: unknown) {
+    sendInternalError(req, res, 'processing queue status', err);
   }
 });

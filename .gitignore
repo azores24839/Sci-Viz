@@ -1,8 +1,10 @@
 journal_covers/
 *.db-shm
 *.db-wal
-**/.playwright-cli/*.log
-**/.playwright-cli/*.yml
+# Playwright CLI produces disposable logs, snapshots, and screenshots.
+# Ignore the whole runtime directory so generated PNG files cannot be
+# accidentally committed. This does not delete any existing files.
+**/.playwright-cli/
 .DS_Store
 # 密钥和敏感配置
 .env
@@ -10,3 +12,7 @@ journal_covers/
 *.swp
 *.save
 nasa_svs_output/
+
+# Local storage inventories can contain tens of thousands of paths.
+# Keep them on disk for recovery/audit use without bloating Git.
+/local-audits/

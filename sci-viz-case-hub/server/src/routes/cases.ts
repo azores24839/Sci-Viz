@@ -1,15 +1,20 @@
 import { Router, Request, Response } from 'express';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../prisma.js';
-import { clampInt, toTrimmedString } from '../utils/httpSafety.js';
+import { clampInt, normalizeHttpUrl, toTrimmedString } from '../utils/httpSafety.js';
 import { remapImagePath } from '../services/oss.js';
 import { deleteSavedImage } from '../services/image.js';
 import { classifyEnterpriseCase, makeEnterpriseCompanyWhere } from '../services/enterpriseTaxonomy.js';
+import { toPublicCaseDto } from '../services/publicCase.js';
+import { sendInternalError } from '../middleware/requestContext.js';
+import { inferSourceOwner } from '../services/sourceOwner.js';
 
 function remapCase(c: Record<string, any>) {
-  c.imagePath = remapImagePath(c.imagePath);
-  c.thumbnailPath = remapImagePath(c.thumbnailPath);
-  return c;
+  return {
+    ...c,
+    imagePath: remapImagePath(c.imagePath),
+    thumbnailPath: remapImagePath(c.thumbnailPath),
+  };
 }
 
 export const casesRouter = Router();
@@ -105,7 +110,10 @@ async function buildWhere(query: Record<string, unknown>, exclude: string[] = []
   if (!exclude.includes('technical_method') && query.technical_method) where.technicalMethod = query.technical_method;
   if (!exclude.includes('distribution_medium') && query.distribution_medium) where.distributionMedium = query.distribution_medium;
   if (!exclude.includes('functional_purpose') && query.functional_purpose) where.functionalPurpose = query.functional_purpose;
-  if (query.review_status) where.reviewStatus = query.review_status;
+  if (query.review_status) {
+    const statuses = String(query.review_status).split(',').map(value => value.trim()).filter(Boolean);
+    where.reviewStatus = statuses.length === 1 ? statuses[0] : { in: statuses };
+  }
   if (query.rating) {
     const parsedRating = clampInt(query.rating, 0, 0, 5);
     if (parsedRating > 0) where.rating = parsedRating;
@@ -143,11 +151,19 @@ async function buildWhere(query: Record<string, unknown>, exclude: string[] = []
   return where;
 }
 
+async function buildVisibleWhere(query: Record<string, unknown>, exclude: string[], publicRequest: boolean) {
+  const where = await buildWhere(query, exclude);
+  if (publicRequest) where.reviewStatus = 'approved';
+  return where;
+}
+
 casesRouter.get('/cases', async (req: Request, res: Response) => {
   try {
     const { page = '1', limit = '20' } = req.query;
+    const createdAtOrder = req.query.sort === 'oldest' ? 'asc' : 'desc';
 
-    const where = await buildWhere(req.query as Record<string, unknown>);
+    const publicRequest = !req.user;
+    const where = await buildVisibleWhere(req.query as Record<string, unknown>, [], publicRequest);
 
     const currentPage = clampInt(page, 1, 1, 10000);
     const take = clampInt(limit, 20, 1, 100);
@@ -158,14 +174,14 @@ casesRouter.get('/cases', async (req: Request, res: Response) => {
         where,
         skip,
         take,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: createdAtOrder },
       }),
       prisma.visualCase.count({ where }),
     ]);
 
     res.json({
       success: true,
-      data: cases.map(remapCase),
+      data: cases.map(remapCase).map(entry => publicRequest ? toPublicCaseDto(entry) : entry),
       pagination: {
         total,
         page: currentPage,
@@ -174,39 +190,47 @@ casesRouter.get('/cases', async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'cases route', error);
   }
 });
 
 casesRouter.get('/cases/facet-counts', async (req: Request, res: Response) => {
   try {
     const q = req.query as Record<string, unknown>;
+    const publicRequest = !req.user;
 
     const [mediaTypeCounts, disciplineCounts, technicalMethodCounts, distributionMediumCounts, functionalPurposeCounts, contentTypeCounts, captureTypeCounts, sourceDomainCounts] = await Promise.all([
-      prisma.visualCase.groupBy({ by: ['mediaType'], where: await buildWhere(q, ['media_type']), _count: { _all: true } }),
-      prisma.visualCase.groupBy({ by: ['discipline'], where: await buildWhere(q, ['discipline']), _count: { _all: true } }),
-      prisma.visualCase.groupBy({ by: ['technicalMethod'], where: await buildWhere(q, ['technical_method']), _count: { _all: true } }),
-      prisma.visualCase.groupBy({ by: ['distributionMedium'], where: await buildWhere(q, ['distribution_medium']), _count: { _all: true } }),
-      prisma.visualCase.groupBy({ by: ['functionalPurpose'], where: await buildWhere(q, ['functional_purpose']), _count: { _all: true } }),
-      prisma.visualCase.groupBy({ by: ['contentType'], where: await buildWhere(q, ['content_type']), _count: { _all: true } }),
-      prisma.visualCase.groupBy({ by: ['captureType'], where: await buildWhere(q, ['capture_type']), _count: { _all: true } }),
-      prisma.visualCase.groupBy({ by: ['sourceDomain'], where: await buildWhere(q, ['source_domain']), _count: { _all: true } }),
+      prisma.visualCase.groupBy({ by: ['mediaType'], where: await buildVisibleWhere(q, ['media_type'], publicRequest), _count: { _all: true } }),
+      prisma.visualCase.groupBy({ by: ['discipline'], where: await buildVisibleWhere(q, ['discipline'], publicRequest), _count: { _all: true } }),
+      prisma.visualCase.groupBy({ by: ['technicalMethod'], where: await buildVisibleWhere(q, ['technical_method'], publicRequest), _count: { _all: true } }),
+      prisma.visualCase.groupBy({ by: ['distributionMedium'], where: await buildVisibleWhere(q, ['distribution_medium'], publicRequest), _count: { _all: true } }),
+      prisma.visualCase.groupBy({ by: ['functionalPurpose'], where: await buildVisibleWhere(q, ['functional_purpose'], publicRequest), _count: { _all: true } }),
+      prisma.visualCase.groupBy({ by: ['contentType'], where: await buildVisibleWhere(q, ['content_type'], publicRequest), _count: { _all: true } }),
+      prisma.visualCase.groupBy({ by: ['captureType'], where: await buildVisibleWhere(q, ['capture_type'], publicRequest), _count: { _all: true } }),
+      prisma.visualCase.groupBy({ by: ['sourceDomain'], where: await buildVisibleWhere(q, ['source_domain'], publicRequest), _count: { _all: true } }),
     ]);
 
-    const baseWhere = await buildWhere(q, ['source_name']);
-    const allSources = await prisma.crawlSource.findMany({ where: { enabled: true }, select: { name: true, url: true } });
-    const sourceNameCounts: Record<string, number> = {};
-    for (const src of allSources) {
-      if (!src.name) continue;
-      const sourceNameWhere = await makeSourceNameWhere([src.name]);
-      if (!sourceNameWhere) continue;
-      const cnt = await prisma.visualCase.count({
-        where: { AND: [baseWhere, sourceNameWhere] },
-      });
-      if (cnt > 0) sourceNameCounts[src.name] = cnt;
+    const baseWhere = await buildVisibleWhere(q, ['source_name'], publicRequest);
+    const allSources = await prisma.crawlSource.findMany({
+      where: { enabled: true },
+      select: { name: true, url: true, category: true, sourceType: true },
+    });
+    const sourceOwnerNames = new Map<string, string[]>();
+    for (const source of allSources) {
+      const owner = inferSourceOwner(source);
+      const names = sourceOwnerNames.get(owner.ownerKey) || [];
+      names.push(source.name);
+      sourceOwnerNames.set(owner.ownerKey, names);
+    }
+    const sourceOwnerCounts: Record<string, number> = {};
+    for (const [ownerKey, names] of sourceOwnerNames) {
+      const ownerWhere = await makeSourceNameWhere(names);
+      if (!ownerWhere) continue;
+      const count = await prisma.visualCase.count({ where: { AND: [baseWhere, ownerWhere] } });
+      if (count > 0) sourceOwnerCounts[ownerKey] = count;
     }
 
-    const enterpriseCompanyBaseWhere = await buildWhere(q, ['enterprise_company']);
+    const enterpriseCompanyBaseWhere = await buildVisibleWhere(q, ['enterprise_company'], publicRequest);
     const enterpriseCases = await prisma.visualCase.findMany({
       where: enterpriseCompanyBaseWhere,
       select: { sourceDomain: true, sourceUrl: true, userHint: true, pageTitle: true, caseTitle: true, contextText: true },
@@ -246,13 +270,14 @@ casesRouter.get('/cases/facet-counts', async (req: Request, res: Response) => {
         contentType: contentTypeMap,
         captureType: toMap(captureTypeCounts, 'captureType'),
         sourceDomain: toMap(sourceDomainCounts, 'sourceDomain'),
-        sourceName: sourceNameCounts,
+        sourceName: {},
+        sourceOwner: sourceOwnerCounts,
         enterpriseCompany: enterpriseCompanyCounts,
         enterprisePageType: enterprisePageTypeCounts,
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'cases route', error);
   }
 });
 
@@ -273,7 +298,7 @@ casesRouter.post('/cases/batch/approve', async (req: Request, res: Response) => 
 
     res.json({ success: true, data: { approved: result.count } });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'cases route', error);
   }
 });
 
@@ -312,22 +337,27 @@ casesRouter.post('/cases/batch/delete', async (req: Request, res: Response) => {
 
     res.json({ success: true, data: { deleted: result.count, requested: ids.length } });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'cases route', error);
   }
 });
 
 casesRouter.get('/cases/:id', async (req: Request, res: Response) => {
   try {
-    const caseEntry = await prisma.visualCase.findUnique({
-      where: { id: req.params.id },
+    const publicRequest = !req.user;
+    const caseEntry = await prisma.visualCase.findFirst({
+      where: {
+        id: req.params.id,
+        ...(publicRequest ? { reviewStatus: 'approved' } : {}),
+      },
     });
     if (!caseEntry) {
       res.status(404).json({ success: false, error: 'Case not found' });
       return;
     }
-    res.json({ success: true, data: remapCase(caseEntry) });
+    const remapped = remapCase(caseEntry);
+    res.json({ success: true, data: publicRequest ? toPublicCaseDto(remapped) : remapped });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'cases route', error);
   }
 });
 
@@ -335,6 +365,7 @@ casesRouter.patch('/cases/:id', async (req: Request, res: Response) => {
   try {
     const allowedFields = [
       'title', 'mediaType', 'contentType', 'discipline', 'technicalMethod', 'distributionMedium',
+      'functionalPurpose',
       'composition', 'colorTone', 'useCase', 'aiSummary', 'caseTitle', 'borrowablePoints',
       'riskNotes', 'confidence', 'reviewStatus', 'rating', 'manualNotes',
       'videoUrl', 'videoPlatform', 'videoDuration',
@@ -349,6 +380,21 @@ casesRouter.patch('/cases/:id', async (req: Request, res: Response) => {
       }
     }
 
+    if (req.body.sourceUrl !== undefined) {
+      const rawSourceUrl = toTrimmedString(req.body.sourceUrl, 2048);
+      if (!rawSourceUrl) {
+        updateData.sourceUrl = '';
+        updateData.sourceDomain = '';
+      } else {
+        const normalizedSourceUrl = normalizeHttpUrl(rawSourceUrl);
+        if (!normalizedSourceUrl) {
+          return res.status(400).json({ success: false, error: '来源网址必须是有效的 HTTP 或 HTTPS 地址' });
+        }
+        updateData.sourceUrl = normalizedSourceUrl;
+        updateData.sourceDomain = sourceDomainFromUrl(normalizedSourceUrl);
+      }
+    }
+
     const caseEntry = await prisma.visualCase.update({
       where: { id: req.params.id },
       data: updateData,
@@ -356,7 +402,7 @@ casesRouter.patch('/cases/:id', async (req: Request, res: Response) => {
 
     res.json({ success: true, data: caseEntry });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'cases route', error);
   }
 });
 
@@ -382,6 +428,6 @@ casesRouter.delete('/cases/:id', async (req: Request, res: Response) => {
 
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+    sendInternalError(req, res, 'cases route', error);
   }
 });

@@ -7,6 +7,7 @@ import { REVIEW_STATUS_LABELS, MEDIA_TYPES, CONTENT_TYPES, DISCIPLINES, TECHNICA
 import { theme } from '../theme';
 import { Card, StatusBadge } from '../components';
 import { VideoPlayer } from '../components/VideoPlayer';
+import './CaseDetail.css';
 
 function normalizeContentTypeLabel(value: string): string {
   if (value === '科研人员') return '单人肖像';
@@ -90,7 +91,7 @@ export default function CaseDetail({ isAdmin = false }: CaseDetailProps) {
 
   const field = (label: string, key: keyof VisualCase, options?: readonly string[]) => (
     <div style={{ marginBottom: 12 }}>
-      <label style={{
+      <label htmlFor={editing ? `case-detail-${String(key)}` : undefined} style={{
         display: 'block',
         fontSize: theme.typography.size.xs,
         color: theme.colors.text.tertiary,
@@ -101,6 +102,8 @@ export default function CaseDetail({ isAdmin = false }: CaseDetailProps) {
       </label>
       {editing && options ? (
         <select
+          id={`case-detail-${String(key)}`}
+          name={String(key)}
           value={String(form[key] ?? c[key] ?? '')}
           onChange={(e) => setForm(f => ({ ...f, [key]: e.target.value }))}
           style={inputStyle}
@@ -109,12 +112,14 @@ export default function CaseDetail({ isAdmin = false }: CaseDetailProps) {
         </select>
       ) : editing ? (
         <input
+          id={`case-detail-${String(key)}`}
+          name={String(key)}
           value={String(form[key] ?? c[key] ?? '')}
           onChange={(e) => setForm(f => ({ ...f, [key]: e.target.value }))}
           style={inputStyle}
         />
       ) : (
-        <div style={{ fontSize: theme.typography.size.base, color: theme.colors.text.primary }}>
+        <div className="case-detail-field-value" style={{ fontSize: theme.typography.size.base, color: theme.colors.text.primary }}>
           {key === 'contentType'
             ? normalizeContentTypeLabel(String(c[key] ?? '-'))
             : String(c[key] ?? '-')}
@@ -159,7 +164,7 @@ export default function CaseDetail({ isAdmin = false }: CaseDetailProps) {
   };
 
   return (
-    <div>
+    <div className="case-detail-page">
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
         <button onClick={goBackToList} style={btnBase}>
           ← 返回列表
@@ -195,8 +200,8 @@ export default function CaseDetail({ isAdmin = false }: CaseDetailProps) {
         )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
-        <div>
+      <div className="case-detail-layout">
+        <div className="case-detail-column">
           <Card padding={0} style={{ overflow: 'hidden' }}>
             {c.captureType === 'video' && c.videoUrl ? (
               <VideoPlayer
@@ -224,7 +229,7 @@ export default function CaseDetail({ isAdmin = false }: CaseDetailProps) {
           </Card>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="case-detail-column case-detail-info-column">
           <Card>
             <h3 style={{ fontSize: theme.typography.size.lg, fontWeight: 600, marginBottom: 12, color: theme.colors.text.primary }}>
               来源信息
@@ -233,7 +238,7 @@ export default function CaseDetail({ isAdmin = false }: CaseDetailProps) {
             {field('封面/案例标题', 'caseTitle')}
             {field('网页标题', 'pageTitle')}
             <div style={{ marginBottom: 12 }}>
-              <label style={{
+              <label htmlFor={editing ? 'case-detail-review-status' : undefined} style={{
                 display: 'block',
                 fontSize: theme.typography.size.xs,
                 color: theme.colors.text.tertiary,
@@ -247,6 +252,7 @@ export default function CaseDetail({ isAdmin = false }: CaseDetailProps) {
                   href={c.sourceUrl}
                   target="_blank"
                   rel="noopener noreferrer"
+                  className="case-detail-source-link"
                   style={{ fontSize: theme.typography.size.base, color: theme.colors.accent }}
                 >
                   {c.sourceUrl}
@@ -316,7 +322,7 @@ export default function CaseDetail({ isAdmin = false }: CaseDetailProps) {
             <h3 style={{ fontSize: theme.typography.size.lg, fontWeight: 600, marginBottom: 12, color: theme.colors.text.primary }}>
               AI 分类结果
             </h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+            <div className="case-detail-classification-grid">
               {field('呈现方式', 'mediaType', MEDIA_TYPES)}
               {field('内容类型', 'contentType', CONTENT_TYPES)}
               {field('学科领域', 'discipline', DISCIPLINES)}
@@ -378,6 +384,8 @@ export default function CaseDetail({ isAdmin = false }: CaseDetailProps) {
               </label>
               {editing ? (
                 <select
+                  id="case-detail-review-status"
+                  name="reviewStatus"
                   value={form.reviewStatus ?? c.reviewStatus}
                   onChange={(e) => setForm(f => ({ ...f, reviewStatus: e.target.value as ReviewStatus }))}
                   style={inputStyle}
@@ -391,7 +399,7 @@ export default function CaseDetail({ isAdmin = false }: CaseDetailProps) {
               )}
             </div>
             <div style={{ marginBottom: 12 }}>
-              <label style={{
+              <label htmlFor={editing ? 'case-detail-rating' : undefined} style={{
                 display: 'block',
                 fontSize: theme.typography.size.xs,
                 color: theme.colors.text.tertiary,
@@ -402,6 +410,8 @@ export default function CaseDetail({ isAdmin = false }: CaseDetailProps) {
               </label>
               {editing ? (
                 <select
+                  id="case-detail-rating"
+                  name="rating"
                   value={String(form.rating ?? c.rating)}
                   onChange={(e) => setForm(f => ({ ...f, rating: parseInt(e.target.value) }))}
                   style={inputStyle}

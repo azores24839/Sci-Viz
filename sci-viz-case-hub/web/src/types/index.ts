@@ -63,6 +63,63 @@ export interface ApiResponse<T> {
   error?: string;
 }
 
+export interface OcrJobErrorDetail {
+  caseId: string;
+  caseTitle: string;
+  code: string;
+  message: string;
+}
+
+export interface OcrJob {
+  id: string;
+  status: 'queued' | 'running' | 'cancelling' | 'completed' | 'cancelled' | 'failed';
+  stage: 'preparing' | 'backing_up' | 'ocr' | 'finished';
+  total: number;
+  processed: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  progress: number;
+  currentCaseId: string;
+  currentCaseTitle: string;
+  currentMethod: 'locating' | 'local' | 'remote' | 'remote_fallback' | 'existing' | '';
+  errors: OcrJobErrorDetail[];
+  error: string;
+  cancelRequested: boolean;
+  createdAt: string;
+  startedAt: string | null;
+  heartbeatAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface AnalysisJobErrorDetail {
+  caseId: string;
+  caseTitle: string;
+  code: string;
+  message: string;
+}
+
+export interface AnalysisJob {
+  id: string;
+  status: 'queued' | 'running' | 'cancelling' | 'completed' | 'cancelled' | 'failed';
+  stage: 'preparing' | 'backing_up' | 'analyzing' | 'finished';
+  total: number;
+  processed: number;
+  analyzed: number;
+  skipped: number;
+  failed: number;
+  progress: number;
+  currentCaseId: string;
+  currentCaseTitle: string;
+  errors: AnalysisJobErrorDetail[];
+  error: string;
+  cancelRequested: boolean;
+  createdAt: string;
+  startedAt: string | null;
+  heartbeatAt: string | null;
+  finishedAt: string | null;
+}
+
 export interface InsightDistributionItem {
   label: string;
   count: number;
@@ -132,8 +189,23 @@ export interface CrawlResult {
   pageTitle: string;
   candidateImageCount: number;
   filteredImageCount: number;
+  filterReasons: ImageFilterReasons;
   createdCaseCount: number;
+  duplicateImageCount: number;
+  cappedImageCount: number;
+  failedImageCount: number;
+  createdCases: CrawlCreatedCase[];
   errors: string[];
+  notices: string[];
+}
+
+export interface CrawlCreatedCase {
+  id: string;
+  pageTitle: string;
+  sourceUrl: string;
+  imageUrl: string;
+  imagePath: string;
+  thumbnailPath: string;
 }
 
 export interface CrawlSummary {
@@ -142,8 +214,19 @@ export interface CrawlSummary {
   failedPageCount: number;
   candidateImageCount: number;
   filteredImageCount: number;
+  filterReasons: ImageFilterReasons;
   createdCaseCount: number;
+  duplicateImageCount: number;
+  cappedImageCount: number;
   failedImageCount: number;
+}
+
+export interface ImageFilterReasons {
+  missingSourceCount: number;
+  inlineDataCount: number;
+  unsupportedFormatCount: number;
+  tooSmallCount: number;
+  duplicateUrlCount: number;
 }
 
 export interface CrawlResponse {
@@ -156,6 +239,58 @@ export interface NetworkTestResponse {
   success: boolean;
   status: number;
   message: string;
+}
+
+export interface SiteDiscoveryPage {
+  url: string;
+  title: string;
+  depth: number;
+  imageCount: number;
+  interactiveCount: number;
+}
+
+export interface SiteDiscoveryResult {
+  rootUrl: string;
+  hostname: string;
+  pageLimit: number;
+  depthLimit: number;
+  scannedPageCount: number;
+  discoveredPageCount: number;
+  rawImageCount: number;
+  estimatedImageCount: number;
+  filteredImageCount: number;
+  duplicateAcrossPageCount: number;
+  interactiveCount: number;
+  limitReached: boolean;
+  pages: SiteDiscoveryPage[];
+  urls: string[];
+  warnings: string[];
+}
+
+export type UrlCrawlTaskStatus = 'queued' | 'running' | 'cancelling' | 'completed' | 'failed' | 'cancelled';
+export type UrlCrawlTaskStage = 'queued' | 'reading_pages' | 'processing_images' | 'finalizing' | 'completed' | 'failed' | 'cancelled';
+
+export interface UrlCrawlTask {
+  id: string;
+  status: UrlCrawlTaskStatus;
+  stage: UrlCrawlTaskStage;
+  totalPageCount: number;
+  processedPageCount: number;
+  failedPageCount: number;
+  activeUrls: string[];
+  candidateImageCount: number;
+  processedImageCount: number;
+  createdCaseCount: number;
+  duplicateImageCount: number;
+  filteredImageCount: number;
+  cappedImageCount: number;
+  failedImageCount: number;
+  createdAt: string;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt: string;
+  error: string;
+  result?: CrawlResponse;
 }
 
 export interface CollectionKpiProgress {
@@ -180,7 +315,7 @@ export const REVIEW_STATUS_LABELS: Record<ReviewStatus, string> = {
   low_confidence_review: '重点复核',
   approved: '已入库',
   rejected: '已丢弃',
-  analysis_failed: '处理失败',
+  analysis_failed: '分析异常',
   source_missing: '缺少来源',
 };
 
@@ -228,16 +363,6 @@ export const CAPTURE_TYPE_LABELS: Record<string, string> = {
   video: '视频',
 };
 
-export const SOURCE_TYPE_OPTIONS = [
-  { value: '', label: '不指定' },
-  { value: 'journal_cover', label: '期刊封面' },
-  { value: 'research_institution', label: '研究机构' },
-  { value: 'lab_website', label: '实验室网站' },
-  { value: 'visualization_company', label: '可视化公司' },
-  { value: 'media', label: '媒体' },
-  { value: 'other', label: '其他' },
-];
-
 export interface CrawlSource {
   id: number;
   name: string;
@@ -246,6 +371,11 @@ export interface CrawlSource {
   enterpriseCompany?: string;
   enterpriseCompanyKey?: string;
   sourcePageType?: string;
+  sourceOwnerName?: string;
+  sourceOwnerKey?: string;
+  sourceOwnerKind?: 'university' | 'company' | 'research_institute' | 'government' | 'publisher_media' | 'platform' | 'other';
+  sourceOwnerDomain?: string;
+  sourceDistributionGroup?: SourceDistributionGroupKey;
   category: string;
   sourceType: string;
   adapterType: string;
@@ -263,16 +393,59 @@ export interface CrawlSource {
   existingCases: number;
 }
 
+export type SourceDistributionGroupKey =
+  | 'domestic_university'
+  | 'international_university'
+  | 'enterprise'
+  | 'research_institute'
+  | 'journal_media'
+  | 'gallery_open'
+  | 'other';
+
+export const SOURCE_TYPE_OPTIONS: ReadonlyArray<{ value: SourceDistributionGroupKey; label: string }> = [
+  { value: 'domestic_university', label: '中国高校' },
+  { value: 'international_university', label: '国外高校' },
+  { value: 'enterprise', label: '企业' },
+  { value: 'research_institute', label: '科研机构/实验室' },
+  { value: 'journal_media', label: '期刊/媒体' },
+  { value: 'gallery_open', label: '图库/开放资源' },
+  { value: 'other', label: '其他' },
+];
+
+export interface SourceDistributionGroup {
+  key: SourceDistributionGroupKey;
+  label: string;
+  sourceCount: number;
+  sourcePercent: number;
+  mediaCount: number;
+  mediaPercent: number;
+}
+
+export interface SourceDistributionSummary {
+  totalSources: number;
+  totalMedia: number;
+  unmatchedMedia: number;
+  groups: SourceDistributionGroup[];
+}
+
 export interface CrawlJob {
   id: number;
   sourceId: number;
-  status: 'pending' | 'discovering' | 'crawling' | 'completed' | 'failed';
+  status: 'pending' | 'discovering' | 'crawling' | 'completed' | 'partial' | 'failed';
   discoveredUrls: string;
   crawledUrls: string;
   totalCount: number;
   crawledCount: number;
   newCases: number;
   error: string;
+  warning: string;
+  mode: 'incremental' | 'full';
+  trigger: 'manual' | 'batch' | 'schedule' | 'retry';
+  downloadedImages: number;
+  duplicateImages: number;
+  failedPages: number;
+  failedImages: number;
+  sourceName?: string;
   createdAt: string;
   updatedAt: string;
 }

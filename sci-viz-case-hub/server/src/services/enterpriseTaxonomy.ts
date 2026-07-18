@@ -41,6 +41,7 @@ type CompanyRule = {
 };
 
 const COMPANY_RULES: CompanyRule[] = [
+  { companyName: 'Johnson & Johnson', companyKey: 'johnson-and-johnson', patterns: [/johnson\s*(?:&|and)\s*johnson/i, /jnj\.com/i] },
   { companyName: 'Boston Scientific', companyKey: 'boston-scientific', patterns: [/boston\s+scientific/i, /bostonscientific\.com/i] },
   { companyName: 'Boston Dynamics', companyKey: 'boston-dynamics', patterns: [/boston\s+dynamics/i, /bostondynamics\.com/i] },
   { companyName: 'Siemens Healthineers', companyKey: 'siemens-healthineers', patterns: [/siemens\s+healthineers/i, /siemens-healthineers\.com/i] },

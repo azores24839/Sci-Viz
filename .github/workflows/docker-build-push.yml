@@ -1,6 +1,10 @@
 name: Build, Push and Deploy Case Hub
 
 on:
+  pull_request:
+    paths:
+      - "sci-viz-case-hub/**"
+      - ".github/workflows/docker-build-push.yml"
   push:
     branches:
       - main
@@ -14,47 +18,98 @@ env:
   IMAGE_NAME: azores24839/sci-viz-case-hub
 
 jobs:
-  build-and-push:
+  quality:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    concurrency:
+      group: case-hub-quality-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            sci-viz-case-hub/server/package-lock.json
+            sci-viz-case-hub/web/package-lock.json
+      - name: Install server dependencies
+        run: npm ci
+        working-directory: sci-viz-case-hub/server
+      - name: Install web dependencies
+        run: npm ci
+        working-directory: sci-viz-case-hub/web
+      - name: Test and build server
+        run: npm run check
+        working-directory: sci-viz-case-hub/server
+      - name: Build web
+        run: npm run build
+        working-directory: sci-viz-case-hub/web
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+        working-directory: sci-viz-case-hub/server
+      - name: Validate production Compose
+        env:
+          CASE_HUB_IMAGE_TAG: ${{ github.sha }}
+          CASE_HUB_ENV_FILE: .env.production.example
+          JWT_SECRET: ci-only-jwt-secret-that-is-at-least-32-characters
+          CORS_ORIGINS: https://case-hub.example.test
+          STUDIO_SERVICE_KEY: ci-only-studio-secret-that-is-at-least-32-characters
+        run: docker compose -f docker-compose.prod.yml config -q
+        working-directory: sci-viz-case-hub
+
+  build-and-push:
+    needs: quality
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: case-hub-image-${{ github.ref }}
+      cancel-in-progress: true
     permissions:
       contents: read
       packages: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=sha,prefix=,format=short
-            type=raw,value=latest
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: ./sci-viz-case-hub
           file: ./sci-viz-case-hub/Dockerfile
           build-args: |
             VITE_BASE_URL=/sciviz/
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          provenance: mode=max
+          sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Scan the immutable image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
 
   deploy:
     needs: build-and-push
@@ -62,13 +117,17 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    concurrency:
+      group: case-hub-production
+      cancel-in-progress: false
+    environment: production
 
     steps:
       - name: Checkout deployment files
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Copy production Compose file
-        uses: appleboy/scp-action@v1
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1
         with:
           host: ${{ vars.CASE_HUB_SSH_HOST }}
           username: ${{ vars.CASE_HUB_SSH_USERNAME }}
@@ -79,7 +138,7 @@ jobs:
           strip_components: 1
 
       - name: Pull and restart Case Hub
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
         with:
           host: ${{ vars.CASE_HUB_SSH_HOST }}
           username: ${{ vars.CASE_HUB_SSH_USERNAME }}
@@ -88,7 +147,26 @@ jobs:
           script: |
             set -eu
             cd ${{ vars.CASE_HUB_COMPOSE_DIR }}
+            export CASE_HUB_IMAGE_TAG='${{ github.sha }}'
+            previous_image="$(docker inspect --format '{{.Image}}' sci-viz-hub 2>/dev/null || true)"
+            docker compose -f docker-compose.prod.yml config -q
             docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            if ! docker compose -f docker-compose.prod.yml up -d --remove-orphans --wait --wait-timeout 120; then
+              docker compose -f docker-compose.prod.yml logs --tail=200 || true
+              if [ -n "$previous_image" ]; then
+                docker image tag "$previous_image" "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+                docker compose -f docker-compose.prod.yml up -d --force-recreate --pull never --wait --wait-timeout 120 || true
+              fi
+              exit 1
+            fi
+            published_port="$(docker compose -f docker-compose.prod.yml port sci-viz-hub 3001 | tail -n 1 | sed 's/.*://')"
+            if ! curl --fail --silent --show-error "http://127.0.0.1:${published_port}/api/health" >/dev/null; then
+              docker compose -f docker-compose.prod.yml logs --tail=200 || true
+              if [ -n "$previous_image" ]; then
+                docker image tag "$previous_image" "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+                docker compose -f docker-compose.prod.yml up -d --force-recreate --pull never --wait --wait-timeout 120 || true
+              fi
+              exit 1
+            fi
             docker image prune -f
             docker compose -f docker-compose.prod.yml ps
