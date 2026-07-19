@@ -1,5 +1,5 @@
 FROM node:24-slim AS build
-ARG VITE_BASE_URL=/sciviz/
+ARG VITE_BASE_URL=/
 ENV VITE_BASE_URL=$VITE_BASE_URL
 RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app/sci-viz-case-hub
