@@ -1,4 +1,4 @@
-import { Prisma, type VisualCase } from '@prisma/client';
+import { Prisma, PrismaClientKnownRequestError, type VisualCase } from '@prisma/client';
 import { prisma } from '../prisma.js';
 
 export type ImageHashMatch =
@@ -16,11 +16,28 @@ export async function ensureImageDedupeSchema(): Promise<void> {
         "deletedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    await prisma.$executeRawUnsafe(`
-      CREATE UNIQUE INDEX IF NOT EXISTS "VisualCase_imageHash_unique_nonempty"
-      ON "VisualCase"("imageHash")
-      WHERE "imageHash" <> ''
-    `);
+    const rows = await prisma.$queryRaw<Array<{ name: string }>>`
+      SELECT name FROM sqlite_master WHERE type='table' AND name='VisualCase'
+    `;
+    if (rows.length > 0) {
+      try {
+        await prisma.$executeRawUnsafe(`
+          CREATE UNIQUE INDEX IF NOT EXISTS "VisualCase_imageHash_unique_nonempty"
+          ON "VisualCase"("imageHash")
+          WHERE "imageHash" <> ''
+        `);
+      } catch (error) {
+        if (error instanceof PrismaClientKnownRequestError && error.code === 'P2010') {
+          console.warn(
+            '[dedupe] existing duplicate imageHash values prevent unique index creation; ' +
+            'deduplication will still work via exact-match queries. ' +
+            'Run cleanupDuplicates.ts to resolve historical duplicates.'
+          );
+        } else {
+          throw error;
+        }
+      }
+    }
   })();
   await ensureSchemaPromise;
 }

@@ -36,7 +36,7 @@ RUN mkdir -p /app/prisma-template && cp /app/sci-viz-case-hub/server/prisma/sche
 RUN chmod +x /usr/local/bin/start-case-hub
 
 ENV PORT=3001
-ENV DATABASE_URL="file:./prisma/dev.db"
+ENV DATABASE_URL="file:/app/sci-viz-case-hub/server/prisma/dev.db"
 ENV JWT_SECRET="change-me-in-production"
 ENV CORS_ORIGINS="http://localhost:3001,http://localhost:5173"
 

@@ -14,6 +14,8 @@ if [ ! -f prisma/dev.db ]; then
   fi
   npx prisma db push --skip-generate
   node dist/seed.js
+else
+  npx prisma db push --skip-generate
 fi
 
 exec node dist/index.js
