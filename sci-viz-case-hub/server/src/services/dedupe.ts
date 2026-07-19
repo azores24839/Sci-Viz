@@ -1,4 +1,4 @@
-import { Prisma, PrismaClientKnownRequestError, type VisualCase } from '@prisma/client';
+import { Prisma, type VisualCase } from '@prisma/client';
 import { prisma } from '../prisma.js';
 
 export type ImageHashMatch =
@@ -27,7 +27,7 @@ export async function ensureImageDedupeSchema(): Promise<void> {
           WHERE "imageHash" <> ''
         `);
       } catch (error) {
-        if (error instanceof PrismaClientKnownRequestError && error.code === 'P2010') {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2010') {
           console.warn(
             '[dedupe] existing duplicate imageHash values prevent unique index creation; ' +
             'deduplication will still work via exact-match queries. ' +
