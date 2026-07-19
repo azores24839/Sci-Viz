@@ -5,6 +5,7 @@ import { Card } from '../components';
 import type { CrawlSource, CrawlJob, SourceDistributionGroupKey, SourceDistributionSummary } from '../types';
 import { SOURCE_TYPE_LABELS } from '../types';
 import UrlCrawlPage from './UrlCrawlPage';
+import './PoolPage.css';
 
 function sourceTypeLabel(st: string): string {
   return SOURCE_TYPE_LABELS[st] || st.replace(/_/g, ' ');
@@ -23,6 +24,45 @@ const JOB_STATUS_LABEL: Record<string, string> = {
 };
 
 type SourceOwnerKind = NonNullable<CrawlSource['sourceOwnerKind']>;
+
+const COMPOSITION_FILTERS: Array<{ label: string; ownerKind: SourceOwnerKind | null }> = [
+  { label: '全部', ownerKind: null },
+  { label: '高校', ownerKind: 'university' },
+  { label: '企业', ownerKind: 'company' },
+  { label: '科研机构', ownerKind: 'research_institute' },
+  { label: '媒体', ownerKind: 'publisher_media' },
+];
+
+function DistributionIcon({ group }: { group: SourceDistributionGroupKey }) {
+  const common = {
+    width: 18,
+    height: 18,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.9,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  };
+
+  if (group === 'domestic_university' || group === 'international_university') {
+    return <svg {...common}><path d="m3 9 9-5 9 5-9 5-9-5Z"/><path d="M7 11.5v4.2c2.8 2 7.2 2 10 0v-4.2"/><path d="M21 9v6"/></svg>;
+  }
+  if (group === 'enterprise') {
+    return <svg {...common}><rect x="4" y="7" width="16" height="12" rx="2"/><path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7M4 12h16M10 12v2h4v-2"/></svg>;
+  }
+  if (group === 'research_institute') {
+    return <svg {...common}><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3"/><path d="M8 15h8"/></svg>;
+  }
+  if (group === 'journal_media') {
+    return <svg {...common}><path d="M6 3h9l3 3v15H6z"/><path d="M15 3v4h4M9 11h6M9 15h6"/></svg>;
+  }
+  if (group === 'gallery_open') {
+    return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m5 18 5-5 3 3 2-2 4 4"/></svg>;
+  }
+  return <svg {...common}><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/></svg>;
+}
 
 const OWNER_KIND_META: Array<{ key: SourceOwnerKind; label: string }> = [
   { key: 'university', label: '高校' },
@@ -67,17 +107,22 @@ function DistributionMetric({
   color: string;
 }) {
   return (
-    <span style={{ minWidth: 0 }}>
-      <span style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-        <span style={{ fontSize: theme.typography.size.base, fontWeight: 600 }}>
-          {value.toLocaleString()} {unit}
-        </span>
-        <span style={{ fontSize: theme.typography.size.xs, color: theme.colors.text.secondary }}>
-          {percent.toFixed(1)}%
-        </span>
+    <span className="pool-composition-metric">
+      <span className="pool-composition-value">{value.toLocaleString()} {unit}</span>
+      <span className="pool-composition-track" aria-hidden="true">
+        <span style={{ width: `${Math.max(0, Math.min(100, percent))}%`, background: color }} />
       </span>
-      <span style={{ display: 'block', height: 3, marginTop: 5, borderRadius: 2, background: theme.colors.borderLight, overflow: 'hidden' }}>
-        <span style={{ display: 'block', width: `${Math.max(0, Math.min(100, percent))}%`, height: '100%', background: color }} />
+      <span className="pool-composition-percent">{percent.toFixed(1)}%</span>
+    </span>
+  );
+}
+
+function DistributionShare({ percent }: { percent: number }) {
+  return (
+    <span className="pool-composition-share">
+      <span>{percent.toFixed(1)}%</span>
+      <span className="pool-composition-share-track" aria-hidden="true">
+        <span style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} />
       </span>
     </span>
   );
@@ -249,6 +294,19 @@ export default function PoolPage() {
     }))
     .filter(group => group.sources.length > 0), [ownerGroups, activeOwnerKind, activeDistributionGroup]);
 
+  const ownerGroupsByDistribution = useMemo(() => {
+    const groups = new Map<SourceDistributionGroupKey, SourceOwnerGroup[]>();
+    ownerGroups.forEach(ownerGroup => {
+      const distributionGroup = ownerGroup.sources[0]?.sourceDistributionGroup;
+      if (!distributionGroup) return;
+      const entries = groups.get(distributionGroup) || [];
+      entries.push(ownerGroup);
+      groups.set(distributionGroup, entries);
+    });
+    groups.forEach(entries => entries.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')));
+    return groups;
+  }, [ownerGroups]);
+
   const filteredSources = filteredOwnerGroups.flatMap(group => group.sources);
   const batchSources = activeOwnerKind || activeDistributionGroup
     ? filteredSources.filter(source => source.enabled && (source.crawlAvailability || 'auto') === 'auto')
@@ -318,29 +376,11 @@ export default function PoolPage() {
           来源池
         </h1>
         <div style={{ display: 'flex', gap: 8 }}>
-          {(activeOwnerKind || activeDistributionGroup) && <button
-            onClick={startBatchCrawl}
-            disabled={batchStarting || batchSources.length === 0}
-            style={{
-              padding: '8px 16px', borderRadius: theme.radius.md, border: 'none',
-              cursor: batchStarting || batchSources.length === 0 ? 'not-allowed' : 'pointer',
-              background: theme.colors.text.primary, color: theme.colors.bgCard,
-              fontSize: theme.typography.size.sm, fontWeight: 600,
-              opacity: batchStarting || batchSources.length === 0 ? 0.5 : 1,
-            }}
-          >
-            {batchStarting ? '正在加入队列…' : `更新当前分组（${batchSources.length}）`}
-          </button>}
           <button
             onClick={() => setShowUrlCrawl(true)}
-            style={{
-              padding: '6px 14px', borderRadius: theme.radius.md,
-              border: `1px solid ${theme.colors.border}`, cursor: 'pointer',
-              background: theme.colors.bgCard, color: theme.colors.text.secondary,
-              fontSize: theme.typography.size.sm, fontWeight: 500,
-            }}
+            className="pool-url-crawl-button"
           >
-            输入网址采集
+            输入网页采集
           </button>
         </div>
       </div>
@@ -355,71 +395,138 @@ export default function PoolPage() {
         </div>
       )}
 
-      <Card padding={20} style={{ marginBottom: 16 }}>
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: theme.typography.size.lg, fontWeight: 600, color: theme.colors.text.primary }}>
-              机构构成
+      <Card padding={0} style={{ marginBottom: 16 }}>
+        <section
+          className="pool-composition"
+          aria-labelledby="pool-composition-title"
+          onClick={() => {
+            if (activeOwnerKind !== null || activeDistributionGroup !== null) {
+              setActiveOwnerKind(null);
+              setActiveDistributionGroup(null);
+            }
+          }}
+        >
+        <header className="pool-composition-header">
+          <div className="pool-composition-heading">
+            <div className="pool-composition-title-row">
+              <span className="pool-composition-title-mark" aria-hidden="true" />
+              <h2 id="pool-composition-title">机构构成</h2>
             </div>
-            {sourceDistribution && (
-              <div style={{ fontSize: theme.typography.size.sm, color: theme.colors.text.secondary }}>
-                {sourceDistribution.totalSources.toLocaleString()} 家机构 · {sourceDistribution.totalMedia.toLocaleString()} 张关联媒体
+            <p>机构已合并同一组织下的不同采集入口。媒体按来源域名归属，每张只计算一次；点击一行可筛选下方机构。</p>
+          </div>
+          {sourceDistribution && (
+            activeOwnerKind || activeDistributionGroup ? (
+              <button
+                type="button"
+                onClick={event => { event.stopPropagation(); void startBatchCrawl(); }}
+                disabled={batchStarting || batchSources.length === 0}
+                style={{
+                  padding: '8px 16px', borderRadius: theme.radius.md, border: 'none',
+                  cursor: batchStarting || batchSources.length === 0 ? 'not-allowed' : 'pointer',
+                  background: theme.colors.text.primary, color: theme.colors.bgCard,
+                  fontSize: theme.typography.size.sm, fontWeight: 600,
+                  opacity: batchStarting || batchSources.length === 0 ? 0.5 : 1,
+                }}
+              >
+                {batchStarting ? '正在加入队列…' : `更新当前分组（${batchSources.length}）`}
+              </button>
+            ) : (
+              <div className="pool-composition-total" aria-label="机构构成总计">
+                <strong>{sourceDistribution.totalSources.toLocaleString()}</strong> 家机构
+                <span aria-hidden="true">·</span>
+                <strong>{sourceDistribution.totalMedia.toLocaleString()}</strong> 张关联媒体
               </div>
-            )}
-          </div>
-          <div style={{ marginTop: 3, fontSize: theme.typography.size.sm, color: theme.colors.text.secondary }}>
-            机构已合并同一组织下的不同采集入口。媒体按来源域名归属，每张只计算一次；点击一行可筛选下方机构。
-          </div>
+            )
+          )}
+        </header>
+
+        <div className="pool-composition-filters" aria-label="按机构类型快速筛选">
+          {COMPOSITION_FILTERS.map(filter => {
+            const active = activeDistributionGroup === null && activeOwnerKind === filter.ownerKind;
+            return (
+              <button
+                key={filter.label}
+                type="button"
+                aria-pressed={active}
+                className={active ? 'is-active' : ''}
+                onClick={(event) => {
+                  // Prevent the card's blank-area clear handler from firing.
+                  // The chip itself is the intentional filter interaction.
+                  event.stopPropagation();
+                  setActiveOwnerKind(filter.ownerKind);
+                  setActiveDistributionGroup(null);
+                }}
+              >
+                {filter.label}
+              </button>
+            );
+          })}
         </div>
+
         {distributionLoading ? (
-          <div style={{ fontSize: theme.typography.size.sm, color: theme.colors.text.tertiary }}>正在统计来源...</div>
+          <div className="pool-composition-state">正在统计来源…</div>
         ) : distributionError || !sourceDistribution ? (
-          <div style={{ fontSize: theme.typography.size.sm, color: theme.colors.text.tertiary }}>
+          <div className="pool-composition-state">
             暂时无法读取来源构成，来源列表的其他功能不受影响。
           </div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <div style={{ minWidth: 620 }}>
-            <div style={{
-              display: 'grid', gridTemplateColumns: 'minmax(150px, 1.2fr) minmax(180px, 1fr) minmax(180px, 1fr)',
-              gap: 16, padding: '0 12px 7px', color: theme.colors.text.tertiary,
-              fontSize: theme.typography.size.xs, fontWeight: 600,
-            }}>
-              <span>机构类型</span><span>机构数量</span><span>媒体数量</span>
+          <div className="pool-composition-scroll">
+            <div className="pool-composition-table" aria-label="机构与关联媒体分布">
+            <div className="pool-composition-columns">
+              <span>机构类型</span>
+              <span>机构数量 <span className="pool-info" title="该类型的独立机构数及其占全部机构的比例">ⓘ</span></span>
+              <span>媒体数量 <span className="pool-sort" title="媒体数量及其占已匹配媒体的比例">↕</span></span>
+              <span>占比 <span className="pool-info" title="该类型媒体数占已匹配媒体总数的比例">ⓘ</span></span>
             </div>
-            <div style={{ display: 'grid', gap: 6 }}>
+            <div className="pool-composition-rows">
               {sourceDistribution.groups.map(group => {
                 const active = activeDistributionGroup === group.key;
+                const sourceNames = ownerGroupsByDistribution.get(group.key) || [];
                 return (
-                  <button
-                    key={group.key}
-                    onClick={() => {
-                      setActiveOwnerKind(null);
-                      setActiveDistributionGroup(active ? null : group.key);
-                    }}
-                    style={{
-                      display: 'grid', gridTemplateColumns: 'minmax(150px, 1.2fr) minmax(180px, 1fr) minmax(180px, 1fr)',
-                      gap: 16, alignItems: 'center', width: '100%', padding: '10px 12px', textAlign: 'left',
-                      borderRadius: theme.radius.md, border: `1px solid ${active ? theme.colors.accent : 'transparent'}`,
-                      background: active ? theme.colors.accentBg : theme.colors.bgSubtle,
-                      color: theme.colors.text.primary, cursor: 'pointer',
-                    }}
-                  >
-                    <span style={{ fontSize: theme.typography.size.base, fontWeight: 600 }}>{group.label}</span>
-                    <DistributionMetric value={group.sourceCount} unit="个" percent={group.sourcePercent} color="#6476d3" />
-                    <DistributionMetric value={group.mediaCount} unit="张" percent={group.mediaPercent} color="#9b6bb5" />
-                  </button>
+                  <div key={group.key} className={`pool-composition-entry${active ? ' is-active' : ''}`}>
+                    <button
+                      className={`pool-composition-row${active ? ' is-active' : ''}`}
+                      aria-expanded={active}
+                      aria-controls={`pool-composition-sources-${group.key}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setActiveOwnerKind(null);
+                        setActiveDistributionGroup(active ? null : group.key);
+                      }}
+                    >
+                      <span className="pool-composition-label">
+                        <span className="pool-composition-icon"><DistributionIcon group={group.key} /></span>
+                        <strong>{group.label}</strong>
+                      </span>
+                      <span><DistributionMetric value={group.sourceCount} unit="个" percent={group.sourcePercent} color="#1769e8" /></span>
+                      <span><DistributionMetric value={group.mediaCount} unit="张" percent={group.mediaPercent} color="#9655d8" /></span>
+                      <span><DistributionShare percent={group.mediaPercent} /></span>
+                      <span className="pool-composition-chevron" aria-hidden="true">›</span>
+                    </button>
+                    {active && (
+                      <div id={`pool-composition-sources-${group.key}`} className="pool-composition-sources">
+                        <span className="pool-composition-sources-label">该分类来源</span>
+                        {sourceNames.length > 0 ? (
+                          <div className="pool-composition-source-tags">
+                            {sourceNames.map(source => <span key={source.key}>{source.name}</span>)}
+                          </div>
+                        ) : <span className="pool-composition-sources-empty">暂无可显示的来源名称</span>}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
             {sourceDistribution.unmatchedMedia > 0 && (
-              <div style={{ marginTop: 9, fontSize: theme.typography.size.xs, color: theme.colors.text.tertiary }}>
-                另有 {sourceDistribution.unmatchedMedia.toLocaleString()} 张媒体尚未匹配到启用来源，不计入上方媒体比例。
+              <div className="pool-composition-note">
+                <span aria-hidden="true">ⓘ</span>
+                另有 <strong>{sourceDistribution.unmatchedMedia.toLocaleString()}</strong> 张媒体无法可靠判断来源归属，已留待人工处理，不计入上方比例。
               </div>
             )}
             </div>
           </div>
         )}
+        </section>
       </Card>
 
       <div style={{

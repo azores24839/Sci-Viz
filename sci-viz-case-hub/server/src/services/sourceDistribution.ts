@@ -1,3 +1,5 @@
+import { inferSourceOwner, type SourceOwnerKind } from './sourceOwner.js';
+
 export type SourceDistributionGroupKey =
   | 'domestic_university'
   | 'international_university'
@@ -55,6 +57,37 @@ function normalizeDomain(value: string): string {
   } catch {
     return trimmed.replace(/^www\./, '').split('/')[0];
   }
+}
+
+function groupForOwnerKind(kind: SourceOwnerKind, domain: string): SourceDistributionGroupKey | null {
+  if (kind === 'university') return domain.endsWith('.edu.cn') ? 'domestic_university' : 'international_university';
+  if (kind === 'company') return 'enterprise';
+  if (kind === 'research_institute' || kind === 'government') return 'research_institute';
+  if (kind === 'publisher_media') return 'journal_media';
+  if (kind === 'platform') return 'gallery_open';
+  return null;
+}
+
+/**
+ * Conservative fallback for media domains that do not yet have a CrawlSource.
+ * Only domains whose type is unambiguous are classified automatically; all
+ * others stay unmatched so they can be assigned by a person.
+ */
+export function classifyMediaSourceDomain(value: string): SourceDistributionGroupKey | null {
+  const domain = normalizeDomain(value);
+  if (!domain) return null;
+
+  const owner = inferSourceOwner({ name: domain, url: `https://${domain}` });
+  const ownerGroup = groupForOwnerKind(owner.ownerKind, domain);
+  if (ownerGroup) return ownerGroup;
+
+  if (domain.endsWith('.edu.cn')) return 'domestic_university';
+  if (domain.endsWith('.edu') || domain.endsWith('.ac.uk') || domain.endsWith('.edu.sg')) return 'international_university';
+  if (/(^|\.)(bilibili\.com|youtube\.com|weixin\.qq\.com)$/.test(domain)) return 'gallery_open';
+  if (/(^|\.)(asus\.com|nio\.cn)$/.test(domain)) return 'enterprise';
+  if (/(^|\.)(wateronline\.com)$/.test(domain)) return 'journal_media';
+
+  return null;
 }
 
 export function classifySourceDistributionGroup(source: SourceDistributionSource): SourceDistributionGroupKey {
@@ -115,13 +148,19 @@ export function calculateSourceDistribution(
     SOURCE_DISTRIBUTION_GROUPS.map(group => [group.key, { ...group, sourceCount: 0, sourcePercent: 0, mediaCount: 0, mediaPercent: 0 }]),
   );
   const domainVotes = new Map<string, Map<SourceDistributionGroupKey, number>>();
+  const ownerVotes = new Map<string, Map<SourceDistributionGroupKey, number>>();
   const ownersByGroup = new Map<SourceDistributionGroupKey, Set<string>>(
     SOURCE_DISTRIBUTION_GROUPS.map(group => [group.key, new Set<string>()]),
   );
 
   for (const source of sources) {
     const key = classifySourceDistributionGroup(source);
-    ownersByGroup.get(key)!.add(source.sourceOwnerKey || normalizeDomain(source.url) || source.url);
+    const inferredOwner = inferSourceOwner(source);
+    const ownerKey = source.sourceOwnerKey || inferredOwner.ownerKey || normalizeDomain(source.url) || source.url;
+    ownersByGroup.get(key)!.add(ownerKey);
+    const ownerGroupVotes = ownerVotes.get(ownerKey) || new Map<SourceDistributionGroupKey, number>();
+    ownerGroupVotes.set(key, (ownerGroupVotes.get(key) || 0) + 1);
+    ownerVotes.set(ownerKey, ownerGroupVotes);
     const domain = normalizeDomain(source.url);
     if (!domain) continue;
     const votes = domainVotes.get(domain) || new Map<SourceDistributionGroupKey, number>();
@@ -140,20 +179,35 @@ export function calculateSourceDistribution(
     if (winner) domainGroups.set(domain, winner);
   }
 
+  const ownerGroups = new Map<string, SourceDistributionGroupKey>();
+  for (const [ownerKey, votes] of ownerVotes) {
+    const winner = [...votes.entries()].sort((a, b) =>
+      b[1] - a[1] || (groupOrder.get(a[0]) || 0) - (groupOrder.get(b[0]) || 0),
+    )[0]?.[0];
+    if (winner) ownerGroups.set(ownerKey, winner);
+  }
+
   let totalMedia = 0;
   let unmatchedMedia = 0;
   for (const item of mediaByDomain) {
     const count = Math.max(0, item.count);
-    const key = domainGroups.get(normalizeDomain(item.sourceDomain));
+    const normalizedDomain = normalizeDomain(item.sourceDomain);
+    const mediaOwner = inferSourceOwner({ name: normalizedDomain, url: `https://${normalizedDomain}` });
+    const key = domainGroups.get(normalizedDomain)
+      || ownerGroups.get(mediaOwner.ownerKey)
+      || classifyMediaSourceDomain(normalizedDomain);
     if (!key) {
       unmatchedMedia += count;
       continue;
     }
+    ownersByGroup.get(key)!.add(mediaOwner.ownerKey || normalizedDomain);
     rows.get(key)!.mediaCount += count;
     totalMedia += count;
   }
 
-  const totalSources = new Set(sources.map(source => source.sourceOwnerKey || normalizeDomain(source.url) || source.url)).size;
+  for (const [key, owners] of ownersByGroup) rows.get(key)!.sourceCount = owners.size;
+
+  const totalSources = new Set([...ownersByGroup.values()].flatMap(owners => [...owners])).size;
   const groups = SOURCE_DISTRIBUTION_GROUPS.map(({ key }) => rows.get(key)!).map(group => ({
     ...group,
     sourcePercent: percent(group.sourceCount, totalSources),

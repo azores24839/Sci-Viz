@@ -43,6 +43,21 @@ MIN_IMAGE_HEIGHT = 100
 MIN_IMAGE_SIZE_BYTES = 10 * 1024
 
 
+def assert_visual_case_datetime_storage(conn: sqlite3.Connection) -> None:
+    """拒绝在已混入非毫秒时间戳的库上继续写入。"""
+    invalid_count = conn.execute("""
+        SELECT COUNT(*)
+        FROM VisualCase
+        WHERE typeof(createdAt) != 'integer'
+           OR typeof(updatedAt) != 'integer'
+    """).fetchone()[0]
+    if invalid_count:
+        raise RuntimeError(
+            f"VisualCase 存在 {invalid_count} 条非 INTEGER 的 createdAt/updatedAt。"
+            "请先运行 npm run db:normalize-date-storage -- --execute。"
+        )
+
+
 # ========== 页面抓取 ==========
 
 def scrape_gallery_page(max_scrolls: int = 10, headless: bool = True):
@@ -363,6 +378,7 @@ def ingest_to_db(cards: list, db_path: Path, dry_run=False):
 
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA journal_mode=WAL")
+    assert_visual_case_datetime_storage(conn)
     cursor = conn.cursor()
 
     inserted = 0
@@ -425,7 +441,8 @@ def ingest_to_db(cards: list, db_path: Path, dry_run=False):
         if author:
             user_hint += f" / by {author}"
 
-        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        # Prisma 在 SQLite 中将 DateTime 存为 Unix 毫秒整数；原生写入必须保持一致。
+        now = int(time.time() * 1000)
 
         cursor.execute("""
             INSERT INTO VisualCase (
