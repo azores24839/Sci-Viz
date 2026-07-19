@@ -66,6 +66,9 @@ export async function uploadBufferToOss(
 }
 
 export function getOssPublicUrl(ossKey: string): string {
+  const publicBaseUrl = (process.env.OSS_PUBLIC_BASE_URL || '').trim().replace(/\/$/, '');
+  if (publicBaseUrl) return `${publicBaseUrl}/${ossKey}`;
+
   const config = getOssConfig();
   if (!config) return '';
 
@@ -80,10 +83,15 @@ export function makeOssKey(dir: string, filename: string): string {
 
 export function remapImagePath(localPath: string): string {
   if (!localPath || !localPath.startsWith('/uploads/')) return localPath;
-  const config = getOssConfig();
-  if (!config) return localPath;
+
+  // Saving/uploading credentials do not guarantee that an object is publicly
+  // readable yet. Keep local URLs by default so a failed or pending OSS upload
+  // cannot make newly captured images disappear from review.
+  const publicBaseUrl = (process.env.OSS_PUBLIC_BASE_URL || '').trim().replace(/\/$/, '');
+  if (!publicBaseUrl) return localPath;
+
   const relative = localPath.replace(/^\/uploads\//, '');
-  return getOssPublicUrl(relative);
+  return `${publicBaseUrl}/${relative}`;
 }
 
 export async function ossFileExists(ossKey: string): Promise<boolean> {

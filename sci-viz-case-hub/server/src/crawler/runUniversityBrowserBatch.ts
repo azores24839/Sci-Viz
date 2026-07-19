@@ -30,6 +30,33 @@ type RenderedPage = {
 
 const TARGETS: UniversityBrowserTarget[] = [
   {
+    key: 'melbourne-newsroom',
+    sourceName: 'Melbourne Research News',
+    sourceType: 'university_research_portal',
+    listUrls: ['https://www.unimelb.edu.au/newsroom/news'],
+    allowedHosts: ['www.unimelb.edu.au'],
+    articlePatterns: [/\/newsroom\/news\/20\d{2}\//i],
+    preferredLinkPatterns: [/\b(research|medical|health|engineering|science|cancer|technology|climate)\b/i],
+  },
+  {
+    key: 'sydney-engineering',
+    sourceName: 'University of Sydney News',
+    sourceType: 'university_research_portal',
+    listUrls: ['https://www.sydney.edu.au/engineering/news-and-events/news.html'],
+    allowedHosts: ['www.sydney.edu.au'],
+    articlePatterns: [/\/news-opinion\/news\/20\d{2}\/.+\.html$/i],
+    preferredLinkPatterns: [/\b(research|engineering|quantum|chip|ai|robot|medical|health|materials)\b/i],
+  },
+  {
+    key: 'penn-engineering',
+    sourceName: 'Penn Engineering News',
+    sourceType: 'university_research_portal',
+    listUrls: ['https://news.seas.upenn.edu/'],
+    allowedHosts: ['news.seas.upenn.edu'],
+    articlePatterns: [/\/news\/.+\/$/i],
+    preferredLinkPatterns: [/\b(research|engineering|robot|material|chip|ai|medical|health)\b/i],
+  },
+  {
     key: 'eth-ai',
     sourceName: 'ETH AI Center',
     sourceType: 'research_center',

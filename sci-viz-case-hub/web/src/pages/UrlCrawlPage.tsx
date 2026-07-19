@@ -16,6 +16,9 @@ interface CrawlSummary {
   duplicateImageCount: number;
   cappedImageCount: number;
   failedImageCount: number;
+  caseLimit?: number | null;
+  reachedCaseLimit?: boolean;
+  unprocessedPageCount?: number;
   deletedCaseCount?: number;
 }
 
@@ -65,8 +68,6 @@ export default function UrlCrawlPage() {
     results: CrawlPageResult[];
   }>({ summary: null, results: [] });
   const [error, setError] = useState('');
-  const [networkStatus, setNetworkStatus] = useState<{ success: boolean; message: string } | null>(null);
-  const [networkLoading, setNetworkLoading] = useState(false);
   const [cookie, setCookie] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [deletingCaseIds, setDeletingCaseIds] = useState<string[]>([]);
@@ -127,7 +128,7 @@ export default function UrlCrawlPage() {
     };
   }, [crawlTaskId]);
 
-  const previewSite = async (preset: 'standard' | 'deep' = 'standard') => {
+  const previewSite = async (preset: 'standard' | 'deep' | 'full' = 'standard') => {
     if (!sourceName.trim()) {
       setError('请填写来源名称');
       return;
@@ -212,18 +213,6 @@ export default function UrlCrawlPage() {
     setResult({ summary: null, results: [] });
   };
 
-  const handleTestNetwork = async () => {
-    setNetworkLoading(true);
-    setNetworkStatus(null);
-    try {
-      const res = await api.testNetwork();
-      setNetworkStatus({ success: res.success, message: res.message });
-    } catch (err) {
-      setNetworkStatus({ success: false, message: (err as Error).message });
-    }
-    setNetworkLoading(false);
-  };
-
   const handleDeleteCollectedCase = async (item: CrawlCreatedCase) => {
     const confirmed = window.confirm('确定删除这张图片吗？数据库记录、原图和缩略图都会被删除。');
     if (!confirmed) return;
@@ -292,50 +281,7 @@ export default function UrlCrawlPage() {
         }}>
           网页采集助手
         </h1>
-        <button
-          onClick={handleTestNetwork}
-          disabled={networkLoading}
-          style={{
-            padding: '6px 14px',
-            borderRadius: theme.radius.md,
-            border: `1px solid ${theme.colors.border}`,
-            cursor: 'pointer',
-            background: theme.colors.bgCard,
-            color: theme.colors.text.secondary,
-            fontSize: theme.typography.size.sm,
-            fontWeight: 500,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
-        >
-          <span style={{
-            width: 6,
-            height: 6,
-            borderRadius: '50%',
-            background: networkStatus
-              ? (networkStatus.success ? theme.colors.green : theme.colors.red)
-              : theme.colors.text.tertiary,
-            flexShrink: 0,
-          }} />
-          {networkLoading ? '检测中...' : '测试网络'}
-        </button>
       </div>
-
-      {networkStatus && (
-        <div style={{
-          padding: '10px 14px',
-          borderRadius: theme.radius.md,
-          fontSize: theme.typography.size.sm,
-          marginBottom: 16,
-          background: networkStatus.success ? theme.colors.greenBg : theme.colors.redBg,
-          border: `1px solid ${networkStatus.success ? theme.colors.greenBorder : theme.colors.redBorder}`,
-          color: networkStatus.success ? theme.colors.green : theme.colors.red,
-        }}>
-          {networkStatus.success ? '✓ ' : '✗ '}
-          {networkStatus.message}
-        </div>
-      )}
 
       {error && (
         <div style={{
@@ -443,17 +389,6 @@ export default function UrlCrawlPage() {
                 lineHeight: 1.6,
               }}
             />
-            <div style={{
-              marginTop: 8,
-              padding: '8px 10px',
-              borderRadius: theme.radius.md,
-              background: theme.colors.bgSubtle,
-              fontSize: theme.typography.size.xs,
-              color: theme.colors.text.secondary,
-              lineHeight: 1.55,
-            }}>
-              系统会先抽查最多 50 个同站网页。诊断后再决定只采当前页、采集已发现范围，或继续扩大检查。
-            </div>
           </div>
 
           <div style={{ marginTop: 8 }}>
@@ -568,8 +503,8 @@ export default function UrlCrawlPage() {
               preview={sitePreview}
               onCollect={() => collectPages(sitePreview.urls)}
               onCollectCurrent={() => collectPages(sitePreview.urls.slice(0, 1))}
-              onExpand={sitePreview.limitReached && sitePreview.pageLimit < 200
-                ? () => previewSite('deep')
+              onExpand={sitePreview.limitReached && sitePreview.pageLimit < 1000
+                ? () => previewSite(sitePreview.pageLimit < 200 ? 'deep' : 'full')
                 : undefined}
             />
           )}
@@ -1042,7 +977,13 @@ function SitePreviewCard({
             <strong style={{ fontSize: theme.typography.size.base, color: assessment.color }}>
               {assessment.title}
             </strong>
-            <span style={{ fontSize: 10, color: theme.colors.text.tertiary }}>基于静态页面抽查</span>
+            <span style={{ fontSize: 10, color: theme.colors.text.tertiary }}>
+              {preview.browserRenderedPageCount > 0
+                ? '已自动渲染动态页面'
+                : preview.embeddedImageCount > 0
+                  ? '基于静态页面及内嵌数据抽查'
+                  : '基于静态页面抽查'}
+            </span>
           </div>
           <div style={{ marginTop: 4, fontSize: theme.typography.size.xs, color: theme.colors.text.secondary, lineHeight: 1.55 }}>
             {assessment.description}
@@ -1073,8 +1014,23 @@ function SitePreviewCard({
           {preview.limitReached
             ? `已发现至少 ${Math.max(preview.discoveredPageCount, preview.scannedPageCount)} 个同站网页，当前只抽查了前 ${preview.pageLimit} 个；这不是网站总量。`
             : `当前路径下发现了 ${preview.discoveredPageCount} 个同站网页，已完成可发现范围检查。`}
+          {preview.estimatedTotalImageCount > preview.estimatedImageCount
+            ? ` 按本次抽样密度粗略估算，至少约 ${preview.estimatedTotalImageCount} 张有效候选图；全站采集最多入库 500 张，达到上限会停止并提示仍有页面未采。`
+            : ' 全站采集最多入库 500 张，达到上限会停止并提示仍有页面未采。'}
           {preview.rawImageCount > preview.estimatedImageCount
             ? ` 原始发现 ${preview.rawImageCount} 张，已排除 ${preview.filteredImageCount} 张无效候选和 ${preview.duplicateAcrossPageCount} 张跨页重复图片。`
+            : ''}
+          {preview.embeddedImageCount > 0
+            ? ` 已从页面内嵌数据识别 ${preview.embeddedImageCount} 个图片引用和 ${preview.embeddedLinkCount} 个同站网页入口。`
+            : ''}
+          {preview.dynamicShellCount > 0
+            ? ` 有 ${preview.dynamicShellCount} 个页面疑似只返回 JavaScript 空壳，当前数量不能代表其真实图片内容。`
+            : ''}
+          {preview.browserRenderedPageCount > 0
+            ? ` 已自动渲染 ${preview.browserRenderedPageCount} 个动态页面。`
+            : ''}
+          {preview.browserRenderFailureCount > 0
+            ? ` 另有 ${preview.browserRenderFailureCount} 个页面动态渲染失败，已保留静态扫描结果。`
             : ''}
           {preview.interactiveCount > 0 && ' HTML 中已经包含的 Tab 内容会一起采集；点击后才联网加载的内容可能需要单独适配。'}
         </div>
@@ -1096,7 +1052,7 @@ function SitePreviewCard({
               fontSize: theme.typography.size.sm, fontWeight: 600,
             }}
           >
-            采集已检查的 {preview.urls.length} 个网页 · 约 {preview.estimatedImageCount} 张候选图
+            采集已检查的 {preview.urls.length} 个网页 · 最多入库 500 张
           </button>
           <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
             <button
@@ -1202,6 +1158,16 @@ function assessSitePreview(preview: SiteDiscoveryResult) {
   const imageCount = preview.estimatedImageCount;
   const readablePages = Math.max(1, preview.scannedPageCount);
   const imagesPerPage = imageCount / readablePages;
+
+  if (imageCount === 0 && preview.dynamicShellCount > 0) {
+    return {
+      title: '静态扫描无法判断图片潜力',
+      description: '页面内容需要 JavaScript 运行后才出现，当前的 0 张不是网站真实图片数量。该来源需要动态页面适配后再采集。',
+      color: theme.colors.orange,
+      background: theme.colors.orangeBg,
+      border: theme.colors.orangeBorder,
+    };
+  }
 
   if (imageCount === 0 && preview.warnings.length > 0) {
     return {
@@ -1471,7 +1437,9 @@ function CollectionSummary({ summary }: { summary: CrawlSummary }) {
             fontWeight: 600,
             color: theme.colors.text.primary,
           }}>
-            {hasPageFailures ? '采集完成，部分网页未读取' : '采集完成'}
+            {summary.reachedCaseLimit
+              ? '已达到 500 张上限，网站尚未采完'
+              : hasPageFailures ? '采集完成，部分网页未读取' : '采集完成'}
           </h3>
         </div>
         {summary.fetchedPageCount > 0 && (
@@ -1480,6 +1448,11 @@ function CollectionSummary({ summary }: { summary: CrawlSummary }) {
           </span>
         )}
       </div>
+      {summary.reachedCaseLimit && (
+        <div style={{ padding: '10px 20px', background: theme.colors.orangeBg, color: '#8a5f1b', fontSize: theme.typography.size.xs }}>
+          本次最多入库 {summary.caseLimit || 500} 张，已停止继续处理；仍有 {summary.unprocessedPageCount || '部分'} 个网页未采，可在下一批继续。
+        </div>
+      )}
 
       <div style={{ padding: '22px 20px 20px' }}>
         {summary.candidateImageCount > 0 ? (

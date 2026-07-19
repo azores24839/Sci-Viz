@@ -117,3 +117,28 @@ test('survey extraction splits srcset candidates even without a space after the 
     'https://cdn.example.com/photo-large.jpg',
   ]);
 });
+
+test('survey extraction recovers images serialized in an SPA/CMS shell', async () => {
+  const html = `
+    <html><head><title>Dynamic university home</title></head><body>
+      <div id="root"></div>
+      <script>
+        main.cards = [
+          { image: '/_upload/article/images/a/hero.jpg', href: '/2026/0718/c1/page.htm' },
+          { image: '/_upload/article/images/b/research.png', href: '/news/list.htm' }
+        ];
+      </script>
+      <img src="/_visitcount" width="0" height="0">
+    </body></html>`;
+  const page = await extractImagesFromPage('https://example.edu/', html, { mode: 'survey' });
+
+  assert.equal(page.embeddedImageCount, 2);
+  assert.deepEqual(page.images.map(item => item.src), [
+    'https://example.edu/_visitcount',
+    'https://example.edu/_upload/article/images/a/hero.jpg',
+    'https://example.edu/_upload/article/images/b/research.png',
+  ]);
+  const filtered = filterImageCandidates(page.images);
+  assert.equal(filtered.valid.length, 2);
+  assert.equal(filtered.reasonCounts.tooSmallCount, 1);
+});

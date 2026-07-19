@@ -16,6 +16,7 @@ const SITE_PRESETS = {
   quick: { pageLimit: 20, depthLimit: 1 },
   standard: { pageLimit: 50, depthLimit: 2 },
   deep: { pageLimit: 200, depthLimit: 3 },
+  full: { pageLimit: 1000, depthLimit: 5 },
 } as const;
 
 const CRAWL_SOURCE_METADATA: Record<SourceDistributionGroupKey, { category: string; sourceType: string }> = {
@@ -105,7 +106,7 @@ crawlRouter.post('/crawl/site/run', async (req: Request, res: Response) => {
     }
     const rootUrl = normalizeHttpUrl(req.body?.rootUrl);
     const requestedUrls = Array.isArray(req.body?.urls)
-      ? req.body.urls.map(normalizeHttpUrl).filter(Boolean).slice(0, 200) as string[]
+      ? req.body.urls.map(normalizeHttpUrl).filter(Boolean).slice(0, 1000) as string[]
       : [];
     if (!rootUrl || requestedUrls.length === 0) {
       res.status(400).json({ success: false, error: '请先完成网站范围扫描' });
@@ -138,7 +139,7 @@ crawlRouter.post('/crawl/site/tasks', async (req: Request, res: Response) => {
     }
     const rootUrl = normalizeHttpUrl(req.body?.rootUrl);
     const requestedUrls = Array.isArray(req.body?.urls)
-      ? req.body.urls.map(normalizeHttpUrl).filter(Boolean).slice(0, 200) as string[]
+      ? req.body.urls.map(normalizeHttpUrl).filter(Boolean).slice(0, 1000) as string[]
       : [];
     if (!rootUrl || requestedUrls.length === 0) {
       res.status(400).json({ success: false, error: '请先完成网站范围扫描' });
@@ -155,6 +156,7 @@ crawlRouter.post('/crawl/site/tasks', async (req: Request, res: Response) => {
       sourceName: source.name,
       sourceType: source.group,
       cookie: typeof req.body?.cookie === 'string' ? req.body.cookie : '',
+      maxCreatedCases: 500,
     });
     res.status(202).json({ success: true, data: task });
   } catch (error) {

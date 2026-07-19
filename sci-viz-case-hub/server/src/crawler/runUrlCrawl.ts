@@ -12,6 +12,11 @@ import { runAnalysis } from '../services/analysisRunner.js';
 import { assertPublicHttpUrl, readTextWithLimit } from '../utils/httpSafety.js';
 import { findDuplicateCase } from '../services/dedupe.js';
 import { scoreSurveyImage } from './collectionScoring.js';
+import {
+  createBrowserPageRenderer,
+  shouldUseBrowserRendering,
+  type BrowserPageRenderer,
+} from './browserPageRenderer.js';
 
 const AUTH_DOMAINS = [
   'idp.', 'login.', 'auth.', 'sso.', 'account.', 'signin.', 'sign-in.',
@@ -60,10 +65,38 @@ export type CrawlProgressEvent =
 export interface RunUrlCrawlOptions {
   signal?: AbortSignal;
   onProgress?: (event: CrawlProgressEvent) => void;
+  /** Maximum number of new cases to create for one task. */
+  maxCreatedCases?: number;
+  /** Allows batch collection to defer AI analysis until images are safely in the case library. */
+  enqueueAnalysis?: boolean;
+}
+
+interface CrawlCaseBudget {
+  limit: number;
+  remaining: number;
+  tryReserve: () => boolean;
+  release: () => void;
+}
+
+function createCaseBudget(limit?: number): CrawlCaseBudget | undefined {
+  if (!Number.isFinite(limit) || !limit || limit < 1) return undefined;
+  let remaining = Math.floor(limit);
+  return {
+    limit: remaining,
+    get remaining() { return remaining; },
+    tryReserve() {
+      if (remaining < 1) return false;
+      remaining -= 1;
+      return true;
+    },
+    release() { remaining += 1; },
+  };
 }
 
 interface ProcessSingleUrlOptions extends RunUrlCrawlOptions {
   dedupContext?: CrawlDedupContext;
+  browserRenderer?: BrowserPageRenderer;
+  caseBudget?: CrawlCaseBudget;
 }
 
 export class CrawlCancelledError extends Error {
@@ -168,6 +201,9 @@ export interface CrawlSummary {
   duplicateImageCount: number;
   cappedImageCount: number;
   failedImageCount: number;
+  caseLimit: number | null;
+  reachedCaseLimit: boolean;
+  unprocessedPageCount: number;
 }
 
 export interface CrawlResponse {
@@ -198,13 +234,11 @@ export async function processSingleUrl(
 
   try {
     let parsedUrl = await assertPublicHttpUrl(url);
+    const cookieOrigin = parsedUrl.origin;
 
     const fetchHeaders: Record<string, string> = {
       'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
     };
-    if (cookie?.trim()) {
-      fetchHeaders['Cookie'] = cookie.trim();
-    }
 
     let response: Response | null = null;
     for (let redirectCount = 0; redirectCount < 5; redirectCount++) {
@@ -219,7 +253,10 @@ export async function processSingleUrl(
         response = await fetch(parsedUrl.href, {
           signal: fetchSignal,
           redirect: 'manual',
-          headers: fetchHeaders,
+          headers: {
+            ...fetchHeaders,
+            ...(cookie?.trim() && parsedUrl.origin === cookieOrigin ? { Cookie: cookie.trim() } : {}),
+          },
         });
       } catch (fetchErr) {
         throwIfCancelled(options.signal);
@@ -278,9 +315,9 @@ export async function processSingleUrl(
       throw new Error(`Unexpected content type: ${contentType}`);
     }
 
-    const html = await readTextWithLimit(response);
+    let html = await readTextWithLimit(response);
 
-    const extracted = await extractImagesFromPage(url, html, { mode: 'survey' });
+    let extracted = await extractImagesFromPage(parsedUrl.href, html, { mode: 'survey' });
     pageTitle = extracted.pageTitle;
 
     const authPageMsg = detectAuthPage(html, pageTitle);
@@ -300,6 +337,45 @@ export async function processSingleUrl(
         errors: [authPageMsg],
         notices: [],
       };
+    }
+
+    const staticFiltered = filterImageCandidates(extracted.images);
+    if (options.browserRenderer
+      && shouldUseBrowserRendering(html, staticFiltered.valid.length, extracted.embeddedImageCount)) {
+      try {
+        const rendered = await options.browserRenderer.render(parsedUrl.href, {
+          cookie,
+          signal: options.signal,
+        });
+        const authRedirectMsg = detectAuthRedirect(url, rendered.finalUrl);
+        if (authRedirectMsg) {
+          return {
+            url,
+            status: 'auth_required',
+            pageTitle,
+            candidateImageCount: 0,
+            filteredImageCount: 0,
+            filterReasons,
+            createdCaseCount: 0,
+            duplicateImageCount: 0,
+            cappedImageCount: 0,
+            failedImageCount: 0,
+            createdCases,
+            errors: [authRedirectMsg],
+            notices,
+          };
+        }
+        parsedUrl = await assertPublicHttpUrl(rendered.finalUrl);
+        html = rendered.html;
+        extracted = await extractImagesFromPage(parsedUrl.href, html, { mode: 'survey' });
+        pageTitle = extracted.pageTitle || rendered.title;
+        const renderedAuthPageMsg = detectAuthPage(html, pageTitle);
+        if (renderedAuthPageMsg) throw new Error(renderedAuthPageMsg);
+        notices.push('已自动使用浏览器渲染动态页面');
+      } catch (error) {
+        if (options.signal?.aborted) throw new CrawlCancelledError();
+        notices.push(`动态渲染不可用，已保留静态扫描结果：${(error as Error).message}`);
+      }
     }
 
     candidateImageCount = extracted.images.length;
@@ -355,6 +431,13 @@ export async function processSingleUrl(
 
     for (const scored of selectedImages) {
       throwIfCancelled(options.signal);
+      if (options.caseBudget?.remaining === 0) {
+        const skipped = selectedImages.length - selectedImages.indexOf(scored);
+        cappedImageCount += skipped;
+        notices.push(`Reached task image limit (${options.caseBudget.limit}); remaining images on this page were not collected.`);
+        reportProgress(options, { type: 'images_processed', url, count: skipped, outcome: 'capped' });
+        break;
+      }
       const img = scored.image;
       let imageResult;
       try {
@@ -395,6 +478,7 @@ export async function processSingleUrl(
         continue;
       }
 
+      let budgetReserved = false;
       try {
         if (options.dedupContext?.imageHashes.has(imageResult.imageHash)) {
           duplicateImageCount++;
@@ -413,6 +497,15 @@ export async function processSingleUrl(
           reportProgress(options, { type: 'images_processed', url, count: 1, outcome: 'duplicate' });
           continue;
         }
+
+        if (!options.caseBudget?.tryReserve() && options.caseBudget) {
+          cappedImageCount++;
+          await deleteSavedImage(imageResult.imagePath, imageResult.thumbnailPath);
+          notices.push(`Task image limit (${options.caseBudget.limit}) reached: ${img.src}`);
+          reportProgress(options, { type: 'images_processed', url, count: 1, outcome: 'capped' });
+          continue;
+        }
+        budgetReserved = Boolean(options.caseBudget);
 
         const contextParts = [
           img.contextText,
@@ -444,6 +537,7 @@ export async function processSingleUrl(
         });
 
         createdCaseCount++;
+        budgetReserved = false;
         createdCases.push({
           id: caseEntry.id,
           pageTitle,
@@ -454,8 +548,11 @@ export async function processSingleUrl(
         });
         reportProgress(options, { type: 'images_processed', url, count: 1, outcome: 'created' });
 
-        runAnalysis(caseEntry.id, imageResult.imagePath, pageTitle, url, contextParts);
+        if (options.enqueueAnalysis !== false) {
+          runAnalysis(caseEntry.id, imageResult.imagePath, pageTitle, url, contextParts);
+        }
       } catch (createErr) {
+        if (options.caseBudget && budgetReserved) options.caseBudget.release();
         options.dedupContext?.imageHashes.delete(imageResult.imageHash);
         failedImageCount++;
         errors.push(`Case creation failed: ${img.src} - ${(createErr as Error).message}`);
@@ -511,21 +608,36 @@ export async function runUrlCrawl(
 
   const limit = pLimit(2);
   const dedupContext = createCrawlDedupContext();
+  const browserRenderer = createBrowserPageRenderer();
+  const caseBudget = createCaseBudget(options.maxCreatedCases);
 
-  const results = await Promise.all(
-    validUrls.map(url =>
-      limit(async () => {
-        throwIfCancelled(options.signal);
-        reportProgress(options, { type: 'page_started', url });
-        const result = await processSingleUrl(url, sourceName, sourceType, cookie, {
-          ...options,
-          dedupContext,
+  let results: CrawlPageResult[];
+  try {
+    const collected: CrawlPageResult[] = [];
+    let nextIndex = 0;
+    const worker = async () => {
+      while (nextIndex < validUrls.length && caseBudget?.remaining !== 0) {
+        const url = validUrls[nextIndex++];
+        const result = await limit(async () => {
+          throwIfCancelled(options.signal);
+          reportProgress(options, { type: 'page_started', url });
+          const pageResult = await processSingleUrl(url, sourceName, sourceType, cookie, {
+            ...options,
+            dedupContext,
+            browserRenderer,
+            caseBudget,
+          });
+          reportProgress(options, { type: 'page_completed', url, result: pageResult });
+          return pageResult;
         });
-        reportProgress(options, { type: 'page_completed', url, result });
-        return result;
-      })
-    )
-  );
+        collected.push(result);
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    results = collected;
+  } finally {
+    await browserRenderer.close();
+  }
 
   const authRequiredCount = results.filter(r => r.status === 'auth_required').length;
 
@@ -546,6 +658,9 @@ export async function runUrlCrawl(
     duplicateImageCount: results.reduce((s, r) => s + r.duplicateImageCount, 0),
     cappedImageCount: results.reduce((s, r) => s + r.cappedImageCount, 0),
     failedImageCount: results.reduce((s, r) => s + r.failedImageCount, 0),
+    caseLimit: caseBudget?.limit ?? null,
+    reachedCaseLimit: Boolean(caseBudget && caseBudget.remaining === 0),
+    unprocessedPageCount: validUrls.length - results.length,
   };
 
   return { success: true, summary, results };

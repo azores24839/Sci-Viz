@@ -1,6 +1,7 @@
 import * as cheerio from 'cheerio';
 import type { Element } from 'domhandler';
 import { getStaticSourceAdapter } from './staticSourceAdapters.js';
+import { extractEmbeddedImageUrls } from './extractEmbeddedPageData.js';
 type CheerioRoot = ReturnType<typeof cheerio.load>;
 
 const PLACEHOLDER_PATTERNS = [
@@ -23,6 +24,7 @@ export interface ExtractedPage {
   metaDescription: string;
   bodyText: string;
   images: ImageCandidate[];
+  embeddedImageCount: number;
 }
 
 export interface ExtractImagesOptions {
@@ -259,5 +261,14 @@ export async function extractImagesFromPage(
     }
   });
 
-  return { pageTitle, metaDescription, bodyText, images };
+  let embeddedImageCount = 0;
+  if (surveyMode) {
+    for (const src of extractEmbeddedImageUrls(html, baseUrl)) {
+      const before = images.length;
+      addCandidate(src, pageTitle, null, null, [pageTitle, 'Embedded page data'].filter(Boolean).join(' | '));
+      if (images.length > before) embeddedImageCount++;
+    }
+  }
+
+  return { pageTitle, metaDescription, bodyText, images, embeddedImageCount };
 }

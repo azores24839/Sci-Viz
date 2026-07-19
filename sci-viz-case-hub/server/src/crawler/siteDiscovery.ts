@@ -2,6 +2,8 @@ import * as cheerio from 'cheerio';
 import { extractImagesFromPage } from './extractImagesFromPage.js';
 import { canonicalImageUrl, filterImageCandidates } from './filterImageCandidates.js';
 import { assertPublicHttpUrl, readTextWithLimit } from '../utils/httpSafety.js';
+import { extractEmbeddedPageLinks } from './extractEmbeddedPageData.js';
+import { createBrowserPageRenderer, shouldUseBrowserRendering } from './browserPageRenderer.js';
 
 const SKIP_PATH = /\/(login|signin|sign-in|register|account|cart|checkout|privacy|terms|search)(\/|$)/i;
 const SKIP_EXTENSION = /\.(?:jpg|jpeg|png|gif|webp|avif|svg|ico|pdf|zip|rar|docx?|xlsx?|pptx?|mp4|mov|avi|css|js|json|xml)(?:$|\?)/i;
@@ -13,6 +15,8 @@ export interface SiteDiscoveryPage {
   depth: number;
   imageCount: number;
   interactiveCount: number;
+  embeddedImageCount: number;
+  browserRendered: boolean;
 }
 
 export interface SiteDiscoveryResult {
@@ -24,9 +28,15 @@ export interface SiteDiscoveryResult {
   discoveredPageCount: number;
   rawImageCount: number;
   estimatedImageCount: number;
+  estimatedTotalImageCount: number;
   filteredImageCount: number;
   duplicateAcrossPageCount: number;
   interactiveCount: number;
+  embeddedImageCount: number;
+  embeddedLinkCount: number;
+  dynamicShellCount: number;
+  browserRenderedPageCount: number;
+  browserRenderFailureCount: number;
   limitReached: boolean;
   pages: SiteDiscoveryPage[];
   urls: string[];
@@ -52,8 +62,24 @@ function canonicalPageUrl(rawUrl: string): string | null {
   }
 }
 
+export function isUnresolvedDynamicShell(
+  html: string,
+  validImageCount: number,
+  embeddedImageCount: number,
+): boolean {
+  if (embeddedImageCount > 0 || validImageCount > 0) return false;
+  const $ = cheerio.load(html);
+  const $bodyWithoutScripts = $('body').clone();
+  $bodyWithoutScripts.find('script, style, noscript, iframe, svg').remove();
+  const meaningfulBodyText = $bodyWithoutScripts.text().replace(/\s+/g, ' ').trim();
+  return $('#root, #__next, #app, [data-reactroot]').length > 0
+    && $('a[href]').length === 0
+    && meaningfulBodyText.length < 200;
+}
+
 async function fetchHtml(rawUrl: string, cookie?: string) {
   let checked = await assertPublicHttpUrl(rawUrl);
+  const cookieOrigin = checked.origin;
   for (let redirects = 0; redirects < 5; redirects++) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20_000);
@@ -64,7 +90,7 @@ async function fetchHtml(rawUrl: string, cookie?: string) {
         signal: controller.signal,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/125 Safari/537.36',
-          ...(cookie?.trim() ? { Cookie: cookie.trim() } : {}),
+          ...(cookie?.trim() && checked.origin === cookieOrigin ? { Cookie: cookie.trim() } : {}),
         },
       });
     } finally {
@@ -89,8 +115,8 @@ export async function discoverSite(
   options: { pageLimit: number; depthLimit: number; cookie?: string },
 ): Promise<SiteDiscoveryResult> {
   const rootChecked = await assertPublicHttpUrl(rawRootUrl);
-  const pageLimit = Math.max(1, Math.min(200, Math.trunc(options.pageLimit)));
-  const depthLimit = Math.max(0, Math.min(3, Math.trunc(options.depthLimit)));
+  const pageLimit = Math.max(1, Math.min(1000, Math.trunc(options.pageLimit)));
+  const depthLimit = Math.max(0, Math.min(5, Math.trunc(options.depthLimit)));
   const queue: Array<{ url: string; depth: number }> = [{ url: rootChecked.href, depth: 0 }];
   const queued = new Set<string>([canonicalPageUrl(rootChecked.href) || rootChecked.href]);
   const pages: SiteDiscoveryPage[] = [];
@@ -102,8 +128,15 @@ export async function discoverSite(
   let rawImageCount = 0;
   let filteredImageCount = 0;
   let duplicateAcrossPageCount = 0;
+  let embeddedImageCount = 0;
+  let embeddedLinkCount = 0;
+  let dynamicShellCount = 0;
+  let browserRenderedPageCount = 0;
+  let browserRenderFailureCount = 0;
+  const browserRenderer = createBrowserPageRenderer();
 
-  while (queue.length > 0 && pages.length < pageLimit) {
+  try {
+    while (queue.length > 0 && pages.length < pageLimit) {
     const batch = queue.splice(0, Math.min(DISCOVERY_CONCURRENCY, pageLimit - pages.length));
     const fetchedBatch = await Promise.all(batch.map(async current => {
       try {
@@ -124,9 +157,31 @@ export async function discoverSite(
         allowedHost = hostKey(new URL(fetched.finalUrl).hostname);
         resolvedRootUrl = fetched.finalUrl;
       }
-      const extracted = await extractImagesFromPage(fetched.finalUrl, fetched.html, { mode: 'survey' });
+      let pageUrl = fetched.finalUrl;
+      let pageHtml = fetched.html;
+      let extracted = await extractImagesFromPage(pageUrl, pageHtml, { mode: 'survey' });
+      let filtered = filterImageCandidates(extracted.images);
+      let browserRendered = false;
+      if (shouldUseBrowserRendering(pageHtml, filtered.valid.length, extracted.embeddedImageCount)) {
+        try {
+          const rendered = await browserRenderer.render(pageUrl, { cookie: options.cookie });
+          if (hostKey(new URL(rendered.finalUrl).hostname) !== allowedHost) {
+            throw new Error('动态渲染跳转到了站外地址');
+          }
+          pageUrl = rendered.finalUrl;
+          pageHtml = rendered.html;
+          extracted = await extractImagesFromPage(pageUrl, pageHtml, { mode: 'survey' });
+          filtered = filterImageCandidates(extracted.images);
+          browserRendered = true;
+          browserRenderedPageCount++;
+          if (current.depth === 0) resolvedRootUrl = pageUrl;
+        } catch (error) {
+          browserRenderFailureCount++;
+          if (warnings.length < 8) warnings.push(`${pageUrl}：动态渲染失败（${(error as Error).message}）`);
+        }
+      }
+      embeddedImageCount += extracted.embeddedImageCount;
       rawImageCount += extracted.images.length;
-      const filtered = filterImageCandidates(extracted.images);
       filteredImageCount += filtered.filteredCount;
       const uniqueImages = filtered.valid.filter(image => {
         const key = canonicalImageUrl(image.src);
@@ -137,22 +192,29 @@ export async function discoverSite(
         seenImages.add(key);
         return true;
       });
-      const $ = cheerio.load(fetched.html);
+      const $ = cheerio.load(pageHtml);
+      const unresolvedDynamicShell = isUnresolvedDynamicShell(
+        pageHtml,
+        filtered.valid.length,
+        extracted.embeddedImageCount,
+      );
+      if (unresolvedDynamicShell) dynamicShellCount++;
       const interactiveCount = $('[role="tab"], button[aria-controls], a[aria-controls], details').length;
       pages.push({
-        url: fetched.finalUrl,
-        title: extracted.pageTitle || new URL(fetched.finalUrl).hostname,
+        url: pageUrl,
+        title: extracted.pageTitle || new URL(pageUrl).hostname,
         depth: current.depth,
         imageCount: uniqueImages.length,
         interactiveCount,
+        embeddedImageCount: extracted.embeddedImageCount,
+        browserRendered,
       });
 
       if (current.depth >= depthLimit) continue;
-      $('a[href]').each((_, element) => {
-        const href = $(element).attr('href');
+      const enqueueHref = (href: string | undefined, embedded = false) => {
         if (!href) return;
         let absolute: string;
-        try { absolute = new URL(href, fetched.finalUrl).href; } catch { return; }
+        try { absolute = new URL(href, pageUrl).href; } catch { return; }
         const canonical = canonicalPageUrl(absolute);
         if (!canonical || queued.has(canonical)) return;
         const url = new URL(canonical);
@@ -161,9 +223,21 @@ export async function discoverSite(
         queued.add(canonical);
         queue.push({ url: canonical, depth: current.depth + 1 });
         discoveredPageCount++;
-      });
+        if (embedded) embeddedLinkCount++;
+      };
+      $('a[href]').each((_, element) => enqueueHref($(element).attr('href')));
+      for (const href of extractEmbeddedPageLinks(pageHtml, pageUrl)) {
+        enqueueHref(href, true);
+      }
     }
   }
+  } finally {
+    await browserRenderer.close();
+  }
+
+  const estimatedTotalImageCount = pages.length > 0
+    ? Math.max(seenImages.size, Math.round((seenImages.size / pages.length) * Math.max(discoveredPageCount, pages.length)))
+    : 0;
 
   return {
     rootUrl: resolvedRootUrl,
@@ -174,9 +248,15 @@ export async function discoverSite(
     discoveredPageCount,
     rawImageCount,
     estimatedImageCount: seenImages.size,
+    estimatedTotalImageCount,
     filteredImageCount,
     duplicateAcrossPageCount,
     interactiveCount: pages.reduce((sum, page) => sum + page.interactiveCount, 0),
+    embeddedImageCount,
+    embeddedLinkCount,
+    dynamicShellCount,
+    browserRenderedPageCount,
+    browserRenderFailureCount,
     limitReached: queue.length > 0,
     pages,
     urls: pages.map(page => page.url),

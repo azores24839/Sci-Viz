@@ -38,6 +38,7 @@ interface CreateUrlCrawlTaskInput {
   sourceName: string;
   sourceType: string;
   cookie: string;
+  maxCreatedCases?: number;
 }
 
 interface StoredTask {
@@ -140,6 +141,7 @@ async function executeTask(task: StoredTask) {
       task.input.cookie,
       {
         signal: task.controller.signal,
+        maxCreatedCases: task.input.maxCreatedCases,
         onProgress: event => applyUrlCrawlProgress(snapshot, event),
       },
     );
