@@ -65,6 +65,8 @@ jobs:
     needs: quality
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    outputs:
+      image_version: ${{ steps.meta.outputs.version }}
     concurrency:
       group: case-hub-image-${{ github.ref }}
       cancel-in-progress: true
@@ -114,7 +116,7 @@ jobs:
       - name: Scan the immutable image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
           format: table
           exit-code: "1"
           ignore-unfixed: true
@@ -149,7 +151,6 @@ jobs:
           strip_components: 1
 
       - name: Pull and restart Case Hub
-<<<<<<< HEAD
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
 
         with:
@@ -160,14 +161,14 @@ jobs:
           script: |
             set -eu
             cd ${{ vars.CASE_HUB_COMPOSE_DIR }}
-            export CASE_HUB_IMAGE_TAG='${{ github.sha }}'
+            export CASE_HUB_IMAGE_TAG='${{ needs.build-and-push.outputs.image_version }}'
             previous_image="$(docker inspect --format '{{.Image}}' sci-viz-hub 2>/dev/null || true)"
             docker compose -f docker-compose.prod.yml config -q
             docker compose -f docker-compose.prod.yml pull
             if ! docker compose -f docker-compose.prod.yml up -d --remove-orphans --wait --wait-timeout 120; then
               docker compose -f docker-compose.prod.yml logs --tail=200 || true
               if [ -n "$previous_image" ]; then
-                docker image tag "$previous_image" "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+                docker image tag "$previous_image" "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_version }}"
                 docker compose -f docker-compose.prod.yml up -d --force-recreate --pull never --wait --wait-timeout 120 || true
               fi
               exit 1
@@ -176,7 +177,7 @@ jobs:
             if ! curl --fail --silent --show-error "http://127.0.0.1:${published_port}/api/health" >/dev/null; then
               docker compose -f docker-compose.prod.yml logs --tail=200 || true
               if [ -n "$previous_image" ]; then
-                docker image tag "$previous_image" "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+                docker image tag "$previous_image" "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_version }}"
                 docker compose -f docker-compose.prod.yml up -d --force-recreate --pull never --wait --wait-timeout 120 || true
               fi
               exit 1
