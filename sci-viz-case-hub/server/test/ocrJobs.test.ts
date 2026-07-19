@@ -3,6 +3,7 @@ import path from 'node:path';
 import test from 'node:test';
 import type { OcrJob } from '@prisma/client';
 import { isActiveOcrStatus, localPathFromWebPath, toOcrJobSnapshot } from '../src/services/ocrJobs.js';
+import { isAppleVisionOcrEnabled } from '../src/services/ocrPolicy.js';
 
 function jobFixture(overrides: Partial<OcrJob> = {}): OcrJob {
   const now = new Date('2026-07-17T12:00:00.000Z');
@@ -66,3 +67,8 @@ test('OCR local paths resolve to real server roots and reject traversal', () => 
   assert.equal(localPathFromWebPath('https://example.com/image.jpg'), '');
 });
 
+test('Apple Vision OCR only enables on an explicit true value', () => {
+  assert.equal(isAppleVisionOcrEnabled(''), false);
+  assert.equal(isAppleVisionOcrEnabled('false'), false);
+  assert.equal(isAppleVisionOcrEnabled('true'), true);
+});

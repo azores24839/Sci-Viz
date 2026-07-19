@@ -14,6 +14,7 @@ export interface VisualCase {
   videoDuration: number;
   contextText: string;
   ocrText: string;
+  ocrProcessedAt?: string | null;
   captureType: string;
   userHint: string;
   collectionScore: number;
@@ -42,6 +43,7 @@ export interface VisualCase {
 
 export type ReviewStatus =
   | 'pending_ai_analysis'
+  | 'pending_ocr'
   | 'needs_review'
   | 'low_confidence_review'
   | 'approved'
@@ -61,6 +63,15 @@ export interface ApiResponse<T> {
   data: T;
   pagination?: Pagination;
   error?: string;
+}
+
+export interface UserApiConfig {
+  configured: boolean;
+  provider: 'openrouter' | 'dashscope' | 'custom';
+  endpoint: string;
+  model: string;
+  keyHint: string;
+  source: 'personal' | 'server' | 'none';
 }
 
 export interface OcrJobErrorDetail {
@@ -247,6 +258,8 @@ export interface SiteDiscoveryPage {
   depth: number;
   imageCount: number;
   interactiveCount: number;
+  embeddedImageCount: number;
+  browserRendered: boolean;
 }
 
 export interface SiteDiscoveryResult {
@@ -258,9 +271,15 @@ export interface SiteDiscoveryResult {
   discoveredPageCount: number;
   rawImageCount: number;
   estimatedImageCount: number;
+  estimatedTotalImageCount: number;
   filteredImageCount: number;
   duplicateAcrossPageCount: number;
   interactiveCount: number;
+  embeddedImageCount: number;
+  embeddedLinkCount: number;
+  dynamicShellCount: number;
+  browserRenderedPageCount: number;
+  browserRenderFailureCount: number;
   limitReached: boolean;
   pages: SiteDiscoveryPage[];
   urls: string[];
@@ -311,6 +330,7 @@ export interface CollectionKpiProgress {
 
 export const REVIEW_STATUS_LABELS: Record<ReviewStatus, string> = {
   pending_ai_analysis: '待识别',
+  pending_ocr: '等待 OCR',
   needs_review: '待确认',
   low_confidence_review: '重点复核',
   approved: '已入库',

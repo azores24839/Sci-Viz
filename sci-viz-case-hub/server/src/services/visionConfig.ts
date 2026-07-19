@@ -1,7 +1,15 @@
 export const DEFAULT_VISION_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 export const DEFAULT_VISION_MODEL = 'qwen/qwen2.5-vl-72b-instruct';
 
-export function getVisionConfig() {
+export interface VisionApiConfig {
+  url: string;
+  key: string;
+  model: string;
+  ocrModel: string;
+  provider: string;
+}
+
+export function getVisionConfig(): VisionApiConfig {
   return {
     url: process.env.VISION_API_URL || DEFAULT_VISION_API_URL,
     key: process.env.OPENROUTER_API_KEY || process.env.VISION_API_KEY || '',

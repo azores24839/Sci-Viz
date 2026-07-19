@@ -2,6 +2,7 @@ import { Prisma, type AnalysisJob } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { backupDatabase } from '../utils/backup.js';
 import { runVisionAnalysis } from './analysisRunner.js';
+import { resolveVisionConfig } from './userApiCredentials.js';
 
 const ACTIVE_KEY = 'qwen-vision';
 const ACTIVE_STATUSES = ['queued', 'running', 'cancelling'];
@@ -111,6 +112,7 @@ async function runAnalysisJob(jobId: string): Promise<void> {
   }
 
   try {
+    const visionConfig = await resolveVisionConfig(job.ownerUserId);
     job = await prisma.analysisJob.update({
       where: { id: job.id },
       data: {
@@ -163,6 +165,9 @@ async function runAnalysisJob(jobId: string): Promise<void> {
         && visualCase.confidence > 0
         && Boolean(visualCase.aiSummary && visualCase.functionalPurpose && visualCase.distributionMedium && visualCase.technicalMethod);
       if (alreadyAnalyzed) {
+        if (visualCase.reviewStatus === 'pending_ocr') {
+          await prisma.visualCase.update({ where: { id: caseId }, data: { reviewStatus: 'needs_review' } });
+        }
         await prisma.analysisJob.update({
           where: { id: job.id },
           data: { nextIndex: index + 1, processedCount: { increment: 1 }, analyzedCount: { increment: 1 }, heartbeatAt: new Date() },
@@ -185,6 +190,7 @@ async function runAnalysisJob(jobId: string): Promise<void> {
           visualCase.sourceUrl,
           visualCase.contextText,
           visualCase.ocrText,
+          visionConfig,
         );
         if (result.success) {
           await prisma.analysisJob.update({
@@ -193,8 +199,9 @@ async function runAnalysisJob(jobId: string): Promise<void> {
           });
         } else {
           job = await prisma.analysisJob.findUniqueOrThrow({ where: { id: job.id } });
-          const message = result.reviewStatus === 'source_missing' ? '缺少来源，分析结果待人工处理' : 'Qwen 未返回有效的图片分析结果';
-          await recordFailure(job, index, errorDetail(caseId, caseTitle, 'QWEN_ANALYSIS_FAILED', message));
+          const message = result.errorMessage
+            || (result.reviewStatus === 'source_missing' ? '缺少来源，分析结果待人工处理' : 'Qwen 未返回有效的图片分析结果');
+          await recordFailure(job, index, errorDetail(caseId, caseTitle, result.errorCode || 'QWEN_ANALYSIS_FAILED', message));
         }
       } catch (error) {
         console.error(`[analysis-job:${job.id}] case ${caseId} failed`, error);
@@ -227,7 +234,7 @@ export function launchAnalysisJob(jobId: string): void {
   });
 }
 
-export async function createAnalysisJob(caseIds: string[]): Promise<{ job: AnalysisJobSnapshot; created: boolean }> {
+export async function createAnalysisJob(caseIds: string[], ownerUserId = '', statuses?: string[]): Promise<{ job: AnalysisJobSnapshot; created: boolean }> {
   const existing = await prisma.analysisJob.findUnique({ where: { activeKey: ACTIVE_KEY } });
   if (existing) return { job: toAnalysisJobSnapshot(existing), created: false };
 
@@ -235,12 +242,12 @@ export async function createAnalysisJob(caseIds: string[]): Promise<{ job: Analy
     ? await prisma.visualCase.findMany({ where: { id: { in: caseIds } }, select: { id: true } })
     : await prisma.visualCase.findMany({
         where: {
-          reviewStatus: { in: ['pending_ai_analysis', 'analysis_failed'] },
+          reviewStatus: { in: statuses?.length ? statuses : ['pending_ai_analysis'] },
           OR: [{ imagePath: { not: '' } }, { thumbnailPath: { not: '' } }, { imageUrl: { not: '' } }],
         },
         orderBy: { updatedAt: 'asc' },
         select: { id: true },
-        take: 50,
+        take: 2000,
       });
   const found = new Set(candidates.map(candidate => candidate.id));
   const frozenIds = caseIds.length > 0 ? caseIds.filter(id => found.has(id)) : candidates.map(candidate => candidate.id);
@@ -253,6 +260,7 @@ export async function createAnalysisJob(caseIds: string[]): Promise<{ job: Analy
         totalCount: frozenIds.length,
         status: frozenIds.length > 0 ? 'queued' : 'completed',
         stage: frozenIds.length > 0 ? 'preparing' : 'finished',
+        ownerUserId,
         finishedAt: frozenIds.length > 0 ? null : new Date(),
       },
     });
@@ -310,4 +318,3 @@ export async function recoverAnalysisJobs(): Promise<void> {
 export function isActiveAnalysisStatus(status: string): boolean {
   return ACTIVE_STATUSES.includes(status);
 }
-

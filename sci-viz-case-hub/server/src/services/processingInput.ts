@@ -18,3 +18,13 @@ export function normalizeCaseIds(value: unknown, maxItems = 200): string[] | nul
   }
   return ids;
 }
+
+export function normalizeReviewStatuses(value: unknown, allowed: readonly string[]): string[] | null | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const allowedSet = new Set(allowed);
+  if (value.some(item => typeof item !== 'string')) return null;
+  const statuses = [...new Set((value as string[]).map(item => item.trim()))];
+  if (statuses.length === 0 || statuses.some(status => !status || !allowedSet.has(status))) return null;
+  return statuses;
+}

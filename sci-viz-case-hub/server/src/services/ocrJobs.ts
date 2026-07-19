@@ -7,6 +7,9 @@ import { Prisma, type OcrJob } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { backupDatabase } from '../utils/backup.js';
 import { getVisionConfig, getVisionHeaders } from './visionConfig.js';
+import { resolveVisionConfig } from './userApiCredentials.js';
+import { isAppleVisionOcrEnabled } from './ocrPolicy.js';
+import type { VisionApiConfig } from './visionConfig.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,6 +22,7 @@ const execFileAsync = promisify(execFile);
 const ACTIVE_KEY = 'global';
 const ACTIVE_STATUSES = ['queued', 'running', 'cancelling'];
 const MAX_ERROR_DETAILS = 25;
+const APPLE_VISION_OCR_ENABLED = isAppleVisionOcrEnabled();
 
 export interface OcrJobErrorDetail {
   caseId: string;
@@ -130,8 +134,21 @@ async function ocrLocalImage(filePath: string): Promise<string> {
   }
 }
 
-async function ocrRemoteImage(imageUrl: string, context: string): Promise<string> {
-  const config = getVisionConfig();
+function localImageMimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.gif') return 'image/gif';
+  return 'image/jpeg';
+}
+
+async function localImageToDataUrl(filePath: string): Promise<string> {
+  const buffer = await fs.promises.readFile(filePath);
+  return `data:${localImageMimeType(filePath)};base64,${buffer.toString('base64')}`;
+}
+
+async function ocrRemoteImage(imageUrl: string, context: string, configOverride?: VisionApiConfig): Promise<string> {
+  const config = configOverride ?? getVisionConfig();
   if (!config.url || !config.key || config.key.includes('your-')) {
     throw new PublicOcrError('REMOTE_CONFIG_MISSING', '远程 OCR 尚未配置');
   }
@@ -253,6 +270,7 @@ async function runOcrJob(jobId: string): Promise<void> {
   }
 
   try {
+    const visionConfig = await resolveVisionConfig(job.ownerUserId);
     job = await prisma.ocrJob.update({
       where: { id: job.id },
       data: {
@@ -284,7 +302,7 @@ async function runOcrJob(jobId: string): Promise<void> {
         where: { id: caseId },
         select: {
           id: true, imagePath: true, thumbnailPath: true, imageUrl: true,
-          pageTitle: true, caseTitle: true, title: true, contextText: true, ocrText: true,
+          pageTitle: true, caseTitle: true, title: true, contextText: true, ocrText: true, reviewStatus: true,
         },
       });
       const caseTitle = visualCase?.caseTitle || visualCase?.title || visualCase?.pageTitle || `案例 ${index + 1}`;
@@ -306,16 +324,25 @@ async function runOcrJob(jobId: string): Promise<void> {
 
       // A restarted worker may revisit the one item whose OCR write committed just before shutdown.
       if (visualCase.ocrText) {
-        await prisma.ocrJob.update({
-          where: { id: job.id },
-          data: {
-            nextIndex: index + 1,
-            processedCount: { increment: 1 },
-            updatedCount: { increment: 1 },
-            currentMethod: 'existing',
-            heartbeatAt: new Date(),
-          },
-        });
+        await prisma.$transaction([
+          prisma.visualCase.update({
+            where: { id: visualCase.id },
+            data: {
+              ocrProcessedAt: new Date(),
+              ...(visualCase.reviewStatus === 'pending_ocr' ? { reviewStatus: 'needs_review' } : {}),
+            },
+          }),
+          prisma.ocrJob.update({
+            where: { id: job.id },
+            data: {
+              nextIndex: index + 1,
+              processedCount: { increment: 1 },
+              updatedCount: { increment: 1 },
+              currentMethod: 'existing',
+              heartbeatAt: new Date(),
+            },
+          }),
+        ]);
         continue;
       }
 
@@ -323,7 +350,8 @@ async function runOcrJob(jobId: string): Promise<void> {
         const localImage = await findLocalImage(visualCase);
         let text = '';
         let method = '';
-        if (localImage) {
+        const context = [visualCase.caseTitle, visualCase.pageTitle, visualCase.contextText].filter(Boolean).join('\n').slice(0, 1200);
+        if (APPLE_VISION_OCR_ENABLED && localImage) {
           method = 'local';
           await prisma.ocrJob.update({ where: { id: job.id }, data: { currentMethod: method, heartbeatAt: new Date() } });
           try {
@@ -332,21 +360,27 @@ async function runOcrJob(jobId: string): Promise<void> {
             if (!visualCase.imageUrl) throw localError;
             method = 'remote_fallback';
             await prisma.ocrJob.update({ where: { id: job.id }, data: { currentMethod: method, heartbeatAt: new Date() } });
-            const context = [visualCase.caseTitle, visualCase.pageTitle, visualCase.contextText].filter(Boolean).join('\n').slice(0, 1200);
-            text = await ocrRemoteImage(visualCase.imageUrl, context);
+            text = await ocrRemoteImage(visualCase.imageUrl, context, visionConfig);
           }
-        } else if (visualCase.imageUrl) {
+        } else if (visualCase.imageUrl || localImage) {
           method = 'remote';
           await prisma.ocrJob.update({ where: { id: job.id }, data: { currentMethod: method, heartbeatAt: new Date() } });
-          const context = [visualCase.caseTitle, visualCase.pageTitle, visualCase.contextText].filter(Boolean).join('\n').slice(0, 1200);
-          text = await ocrRemoteImage(visualCase.imageUrl, context);
+          const imageInput = visualCase.imageUrl || await localImageToDataUrl(localImage);
+          text = await ocrRemoteImage(imageInput, context, visionConfig);
         } else {
           throw new PublicOcrError('NO_IMAGE', '没有可用于 OCR 的图片');
         }
 
         if (text) {
           await prisma.$transaction([
-            prisma.visualCase.update({ where: { id: visualCase.id }, data: { ocrText: text } }),
+            prisma.visualCase.update({
+              where: { id: visualCase.id },
+              data: {
+                ocrText: text,
+                ocrProcessedAt: new Date(),
+                ...(visualCase.reviewStatus === 'pending_ocr' ? { reviewStatus: 'needs_review' } : {}),
+              },
+            }),
             prisma.ocrJob.update({
               where: { id: job.id },
               data: {
@@ -359,16 +393,25 @@ async function runOcrJob(jobId: string): Promise<void> {
             }),
           ]);
         } else {
-          await prisma.ocrJob.update({
-            where: { id: job.id },
-            data: {
-              nextIndex: index + 1,
-              processedCount: { increment: 1 },
-              skippedCount: { increment: 1 },
-              currentMethod: method,
-              heartbeatAt: new Date(),
-            },
-          });
+          await prisma.$transaction([
+            prisma.visualCase.update({
+              where: { id: visualCase.id },
+              data: {
+                ocrProcessedAt: new Date(),
+                ...(visualCase.reviewStatus === 'pending_ocr' ? { reviewStatus: 'needs_review' } : {}),
+              },
+            }),
+            prisma.ocrJob.update({
+              where: { id: job.id },
+              data: {
+                nextIndex: index + 1,
+                processedCount: { increment: 1 },
+                skippedCount: { increment: 1 },
+                currentMethod: method,
+                heartbeatAt: new Date(),
+              },
+            }),
+          ]);
         }
       } catch (error) {
         console.error(`[ocr-job:${job.id}] case ${caseId} failed`, error);
@@ -402,7 +445,7 @@ export function launchOcrJob(jobId: string): void {
   });
 }
 
-export async function createOcrJob(caseIds: string[]): Promise<{ job: OcrJobSnapshot; created: boolean }> {
+export async function createOcrJob(caseIds: string[], ownerUserId = '', statuses?: string[]): Promise<{ job: OcrJobSnapshot; created: boolean }> {
   const existing = await prisma.ocrJob.findUnique({ where: { activeKey: ACTIVE_KEY } });
   if (existing) return { job: toOcrJobSnapshot(existing), created: false };
 
@@ -412,10 +455,14 @@ export async function createOcrJob(caseIds: string[]): Promise<{ job: OcrJobSnap
         select: { id: true },
       })
     : await prisma.visualCase.findMany({
-        where: { ocrText: '', reviewStatus: { notIn: ['rejected'] } },
+        where: {
+          ocrText: '',
+          ocrProcessedAt: null,
+          reviewStatus: statuses?.length ? { in: statuses } : { notIn: ['rejected'] },
+        },
         orderBy: { createdAt: 'asc' },
         select: { id: true },
-        take: 200,
+        take: 2000,
       });
   const found = new Set(candidates.map(candidate => candidate.id));
   const frozenIds = caseIds.length > 0 ? caseIds.filter(id => found.has(id)) : candidates.map(candidate => candidate.id);
@@ -429,6 +476,7 @@ export async function createOcrJob(caseIds: string[]): Promise<{ job: OcrJobSnap
         status: frozenIds.length > 0 ? 'queued' : 'completed',
         stage: frozenIds.length > 0 ? 'preparing' : 'finished',
         processedCount: 0,
+        ownerUserId,
         finishedAt: frozenIds.length > 0 ? null : new Date(),
       },
     });

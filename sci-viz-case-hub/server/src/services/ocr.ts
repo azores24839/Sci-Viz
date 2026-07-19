@@ -1,6 +1,7 @@
 import { execFile } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { isAppleVisionOcrEnabled } from './ocrPolicy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,6 +49,9 @@ function runAppleVisionOCR(imagePath: string): Promise<string> {
 export async function performOCR(imagePath: string): Promise<OCRResult> {
   if (isCloudConfigured()) {
     return performCloudOCR(imagePath);
+  }
+  if (!isAppleVisionOcrEnabled()) {
+    return { ocr_text: '' };
   }
   const text = await runAppleVisionOCR(imagePath);
   return { ocr_text: text };

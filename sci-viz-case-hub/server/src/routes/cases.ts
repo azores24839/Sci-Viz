@@ -135,6 +135,10 @@ async function buildWhere(query: Record<string, unknown>, exclude: string[] = []
   if (query.capture_type) where.captureType = query.capture_type;
   if (query.ocr_status === 'has_text') where.ocrText = { not: '' };
   if (query.ocr_status === 'no_text') where.ocrText = '';
+  if (query.ocr_status === 'unprocessed') {
+    where.ocrText = '';
+    where.ocrProcessedAt = null;
+  }
   if (query.ai_status === 'analyzed') where.confidence = { not: 0 };
   if (query.ai_status === 'unanalyzed') where.confidence = 0;
   const searchText = toTrimmedString(query.search, 100);
@@ -283,13 +287,39 @@ casesRouter.get('/cases/facet-counts', async (req: Request, res: Response) => {
 
 casesRouter.post('/cases/batch/approve', async (req: Request, res: Response) => {
   try {
-    const { statuses } = req.body;
-    const where: Record<string, unknown> = {};
-    if (Array.isArray(statuses) && statuses.length > 0) {
-      where.reviewStatus = { in: statuses };
-    } else {
-      where.reviewStatus = { in: ['needs_review', 'low_confidence_review'] };
+    const allowedStatuses = new Set(['needs_review', 'low_confidence_review']);
+    const rawStatuses: unknown = req.body?.statuses;
+    if (rawStatuses !== undefined && (!Array.isArray(rawStatuses) || rawStatuses.some(status => typeof status !== 'string'))) {
+      res.status(400).json({ success: false, error: 'Invalid review statuses' });
+      return;
     }
+    const statuses: string[] = Array.isArray(rawStatuses)
+      ? [...new Set(rawStatuses)] as string[]
+      : ['needs_review', 'low_confidence_review'];
+    if (statuses.length === 0 || statuses.some(status => !allowedStatuses.has(status))) {
+      res.status(400).json({ success: false, error: 'Invalid review statuses' });
+      return;
+    }
+    const rawIds: unknown = req.body?.ids;
+    if (rawIds !== undefined && (!Array.isArray(rawIds) || rawIds.some(id => typeof id !== 'string'))) {
+      res.status(400).json({ success: false, error: 'Invalid case ids' });
+      return;
+    }
+    const ids = Array.isArray(rawIds)
+      ? [...new Set(rawIds.map(id => id.trim()).filter(Boolean))]
+      : [];
+    if (rawIds !== undefined && ids.length === 0) {
+      res.status(400).json({ success: false, error: 'No case ids provided' });
+      return;
+    }
+    if (ids.length > 2000) {
+      res.status(400).json({ success: false, error: '一次最多入库 2000 个案例' });
+      return;
+    }
+    const where: Record<string, unknown> = {
+      reviewStatus: { in: statuses },
+      ...(ids.length > 0 ? { id: { in: ids } } : {}),
+    };
 
     const result = await prisma.visualCase.updateMany({
       where,
@@ -302,18 +332,46 @@ casesRouter.post('/cases/batch/approve', async (req: Request, res: Response) => 
   }
 });
 
+// Move pre-reviewed captures into the durable OCR queue.  This is deliberately
+// separate from creating an OCR job: a reviewer can continue paging through a
+// large capture set while earlier selections wait safely for a later batch.
+casesRouter.post('/cases/batch/queue-ocr', async (req: Request, res: Response) => {
+  try {
+    const rawIds: unknown = req.body?.ids;
+    if (!Array.isArray(rawIds) || rawIds.some(id => typeof id !== 'string')) {
+      return res.status(400).json({ success: false, error: '请选择要加入 OCR 队列的图片' });
+    }
+    const ids = [...new Set(rawIds.map(id => id.trim()).filter(Boolean))];
+    if (ids.length === 0 || ids.length > 2000) {
+      return res.status(400).json({ success: false, error: '一次可加入 1 到 2000 张图片' });
+    }
+    const result = await prisma.visualCase.updateMany({
+      where: { id: { in: ids }, reviewStatus: 'pending_ai_analysis', ocrText: '', ocrProcessedAt: null },
+      data: { reviewStatus: 'pending_ocr' },
+    });
+    return res.json({ success: true, data: { queued: result.count } });
+  } catch (error) {
+    return sendInternalError(req, res, 'queue cases for OCR', error);
+  }
+});
+
 casesRouter.post('/cases/batch/delete', async (req: Request, res: Response) => {
   try {
+    const maxBatchDelete = 2000;
     const rawIds: unknown[] = Array.isArray(req.body?.ids) ? req.body.ids : [];
     const ids = [...new Set(
       rawIds
         .filter((id): id is string => typeof id === 'string')
         .map(id => id.trim())
         .filter(Boolean)
-    )].slice(0, 200);
+    )];
 
     if (ids.length === 0) {
       res.status(400).json({ success: false, error: 'No case ids provided' });
+      return;
+    }
+    if (ids.length > maxBatchDelete) {
+      res.status(400).json({ success: false, error: `一次最多删除 ${maxBatchDelete} 个案例` });
       return;
     }
 
@@ -331,11 +389,12 @@ casesRouter.post('/cases/batch/delete', async (req: Request, res: Response) => {
       where: { id: { in: existing.map(item => item.id) } },
     });
 
-    await Promise.all(
-      existing.map(item => deleteSavedImage(item.imagePath || '', item.thumbnailPath || ''))
-    );
+    for (let index = 0; index < existing.length; index += 25) {
+      const batch = existing.slice(index, index + 25);
+      await Promise.all(batch.map(item => deleteSavedImage(item.imagePath || '', item.thumbnailPath || '')));
+    }
 
-    res.json({ success: true, data: { deleted: result.count, requested: ids.length } });
+    res.json({ success: true, data: { deleted: result.count, requested: ids.length, deletedIds: existing.map(item => item.id) } });
   } catch (error) {
     sendInternalError(req, res, 'cases route', error);
   }

@@ -6,7 +6,7 @@ import { prisma } from '../prisma.js';
 import { backupDatabase } from '../utils/backup.js';
 import { analyzeImage, classifyMediaType } from '../services/vision.js';
 import { normalizeTaxonomyValue } from '../services/taxonomy.js';
-import { normalizeCaseIds } from '../services/processingInput.js';
+import { normalizeCaseIds, normalizeReviewStatuses } from '../services/processingInput.js';
 import {
   cancelOcrJob,
   createOcrJob,
@@ -20,9 +20,58 @@ import {
   createAnalysisJob,
   getAnalysisJob,
   getLatestAnalysisJob,
+  isActiveAnalysisStatus,
 } from '../services/analysisJobs.js';
+import {
+  deleteUserApiConfig,
+  getUserApiConfigStatus,
+  saveUserApiConfig,
+  testUserApiConfig,
+} from '../services/userApiCredentials.js';
 
 export const processingRouter = Router();
+// `pending_ocr` is the user-facing OCR queue, but its operation is full visual
+// analysis. Keep it out of text-extraction jobs so UI wording can never route
+// these cases into the wrong worker again.
+const OCR_JOB_STATUSES = [] as const;
+const ANALYSIS_JOB_STATUSES = ['pending_ocr', 'pending_ai_analysis', 'analysis_failed'] as const;
+const MAX_JOB_CASES = 2000;
+
+processingRouter.get('/processing/api-config', async (req, res) => {
+  try {
+    return res.json({ success: true, data: await getUserApiConfigStatus(req.user!.id) });
+  } catch (err: unknown) {
+    return sendInternalError(req, res, 'get personal API config', err);
+  }
+});
+
+processingRouter.put('/processing/api-config', async (req, res) => {
+  try {
+    const data = await saveUserApiConfig(req.user!.id, req.body ?? {});
+    return res.json({ success: true, data });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'API 配置保存失败';
+    return res.status(400).json({ success: false, error: message });
+  }
+});
+
+processingRouter.delete('/processing/api-config', async (req, res) => {
+  try {
+    await deleteUserApiConfig(req.user!.id);
+    return res.json({ success: true, data: await getUserApiConfigStatus(req.user!.id) });
+  } catch (err: unknown) {
+    return sendInternalError(req, res, 'delete personal API config', err);
+  }
+});
+
+processingRouter.post('/processing/api-config/test', async (req, res) => {
+  try {
+    return res.json({ success: true, data: await testUserApiConfig(req.user!.id) });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'API 连接测试失败';
+    return res.status(400).json({ success: false, error: message });
+  }
+});
 
 // POST /api/processing/quality-check
 processingRouter.post('/processing/quality-check', async (req, res) => {
@@ -120,9 +169,15 @@ processingRouter.post('/processing/quality-check', async (req, res) => {
 // POST /api/processing/ocr/jobs - starts a durable background OCR job.
 processingRouter.post('/processing/ocr/jobs', async (req, res) => {
   try {
-    const caseIds = normalizeCaseIds(req.body?.caseIds);
-    if (!caseIds) return res.status(400).json({ success: false, error: 'caseIds 必须是不超过 200 项的有效字符串数组' });
-    const result = await createOcrJob(caseIds);
+    const caseIds = normalizeCaseIds(req.body?.caseIds, MAX_JOB_CASES);
+    if (!caseIds) return res.status(400).json({ success: false, error: `caseIds 必须是不超过 ${MAX_JOB_CASES} 项的有效字符串数组` });
+    const statuses = normalizeReviewStatuses(req.body?.statuses, OCR_JOB_STATUSES);
+    if (statuses === null) return res.status(400).json({ success: false, error: 'OCR 任务状态范围无效' });
+    const activeAnalysis = await getLatestAnalysisJob();
+    if (activeAnalysis && isActiveAnalysisStatus(activeAnalysis.status)) {
+      return res.status(409).json({ success: false, error: '图片分析正在运行，请完成或停止后再启动 OCR', data: activeAnalysis });
+    }
+    const result = await createOcrJob(caseIds, req.user!.id, statuses);
     return res.status(result.created ? 202 : 200).json({ success: true, data: result.job, existing: !result.created });
   } catch (err: unknown) {
     return sendInternalError(req, res, 'start OCR job', err);
@@ -163,7 +218,11 @@ processingRouter.post('/processing/ocr', async (req, res) => {
   try {
     const caseIds = normalizeCaseIds(req.body?.caseIds);
     if (!caseIds) return res.status(400).json({ success: false, error: 'caseIds 必须是不超过 200 项的有效字符串数组' });
-    const result = await createOcrJob(caseIds);
+    const activeAnalysis = await getLatestAnalysisJob();
+    if (activeAnalysis && isActiveAnalysisStatus(activeAnalysis.status)) {
+      return res.status(409).json({ success: false, error: '图片分析正在运行，请完成或停止后再启动 OCR', data: activeAnalysis });
+    }
+    const result = await createOcrJob(caseIds, req.user!.id);
     if (!result.created && isActiveOcrStatus(result.job.status)) {
       return res.status(409).json({ success: false, error: '已有 OCR 任务正在运行', data: result.job });
     }
@@ -189,9 +248,15 @@ processingRouter.post('/processing/ocr', async (req, res) => {
 // Durable Qwen image-understanding jobs. OCR text is optional context, never a prerequisite.
 processingRouter.post('/processing/analysis/jobs', async (req, res) => {
   try {
-    const caseIds = normalizeCaseIds(req.body?.caseIds);
-    if (!caseIds) return res.status(400).json({ success: false, error: 'caseIds 必须是不超过 200 项的有效字符串数组' });
-    const result = await createAnalysisJob(caseIds);
+    const caseIds = normalizeCaseIds(req.body?.caseIds, MAX_JOB_CASES);
+    if (!caseIds) return res.status(400).json({ success: false, error: `caseIds 必须是不超过 ${MAX_JOB_CASES} 项的有效字符串数组` });
+    const statuses = normalizeReviewStatuses(req.body?.statuses, ANALYSIS_JOB_STATUSES);
+    if (statuses === null) return res.status(400).json({ success: false, error: '分析任务状态范围无效' });
+    const activeOcr = await getLatestOcrJob();
+    if (activeOcr && isActiveOcrStatus(activeOcr.status)) {
+      return res.status(409).json({ success: false, error: 'OCR 正在运行，请完成后再启动图片分析', data: activeOcr });
+    }
+    const result = await createAnalysisJob(caseIds, req.user!.id, statuses);
     return res.status(result.created ? 202 : 200).json({ success: true, data: result.job, existing: !result.created });
   } catch (err: unknown) {
     return sendInternalError(req, res, 'start Qwen analysis job', err);
@@ -281,7 +346,8 @@ processingRouter.post('/processing/classify', async (req, res) => {
           contextText: c.contextText || '',
         });
 
-        const isAnalysisFailure = result.confidence <= 0 && /失败|无法读取|等待AI分析/.test(result.ai_summary || '');
+        const isAnalysisFailure = Boolean(result.failure)
+          || (result.confidence <= 0 && /失败|无法读取|等待AI分析/.test(result.ai_summary || ''));
         const reviewStatus = isAnalysisFailure
           ? 'analysis_failed'
           : result.confidence >= 0.8
@@ -415,12 +481,15 @@ processingRouter.get('/processing/queue-status', async (req, res) => {
       lowConfidence,
       approved,
       failed,
+      retryableFailed,
     ] = await Promise.all([
-      prisma.visualCase.count({ where: { reviewStatus: 'pending_ai_analysis' } }),
-      prisma.visualCase.count({ where: { ocrText: '', reviewStatus: { notIn: ['rejected'] } } }),
+      prisma.visualCase.count({
+        where: { reviewStatus: 'pending_ai_analysis', ocrText: '', ocrProcessedAt: null },
+      }),
+      prisma.visualCase.count({ where: { reviewStatus: 'pending_ocr' } }),
       prisma.visualCase.count({
         where: {
-          reviewStatus: { in: ['pending_ai_analysis', 'analysis_failed'] },
+          reviewStatus: 'pending_ai_analysis',
           OR: [{ imagePath: { not: '' } }, { thumbnailPath: { not: '' } }, { imageUrl: { not: '' } }],
         },
       }),
@@ -428,19 +497,20 @@ processingRouter.get('/processing/queue-status', async (req, res) => {
       prisma.visualCase.count({ where: { reviewStatus: 'low_confidence_review' } }),
       prisma.visualCase.count({ where: { reviewStatus: 'approved' } }),
       prisma.visualCase.count({ where: { reviewStatus: { in: ['analysis_failed', 'source_missing'] } } }),
+      prisma.visualCase.count({ where: { reviewStatus: 'analysis_failed' } }),
     ]);
 
     res.json({
       success: true,
       data: {
         panels: [
-          { key: 'pending_quality', label: '待质量检查', count: pendingQuality, description: '新采集但未确认图片是否可用' },
-          { key: 'pending_ocr', label: '待 OCR', count: pendingOcr, description: '图片可用，但 OCR 文本为空' },
-          { key: 'pending_classify', label: '待 Qwen 分析', count: pendingClassify, description: '直接理解图片内容；OCR 文字仅作辅助' },
+          { key: 'pending_quality', label: '预审中', count: pendingQuality, description: '新采集图片，尚未决定是否识别' },
+          { key: 'pending_ocr', label: '等待 OCR', count: pendingOcr, description: '已通过预审，等待图片分析' },
+          { key: 'pending_classify', label: '待图片分析', count: pendingClassify, description: '直接理解原图内容，生成摘要与三轴分类' },
           { key: 'needs_review', label: '待确认', count: needsReview, description: 'AI 分析完成，等待人工确认' },
           { key: 'low_confidence', label: '需人工判断', count: lowConfidence, description: 'AI 结果不确定，需要人看' },
           { key: 'approved', label: '已入库', count: approved, description: '已通过审核，案例库可见' },
-          { key: 'failed', label: '处理失败', count: failed, description: '图片损坏、下载失败或分析失败' },
+          { key: 'failed', label: '处理失败', count: failed, retryableCount: retryableFailed, description: '图片损坏、下载失败或分析失败' },
         ],
       },
     });

@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import sharp from 'sharp';
-import { getVisionConfig, getVisionHeaders } from './visionConfig.js';
+import { getVisionConfig, getVisionHeaders, type VisionApiConfig } from './visionConfig.js';
 import { assertPublicHttpUrl, readResponseWithLimit, readTextWithLimit } from '../utils/httpSafety.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -27,6 +27,46 @@ export interface VisionAnalysisResult {
   borrowable_points: string[];
   risk_notes: string[];
   confidence: number;
+  failure?: {
+    code: string;
+    message: string;
+  };
+}
+
+const VISION_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    media_type: { type: 'string', enum: ['摄影', '手绘图', '3D渲染', '信息图', '显微图', '数据可视化', '混合媒介', '不确定'] },
+    content_type: { type: 'string', enum: ['单人肖像', '群体肖像', '绘画肖像', '实验设备', '实验过程', '微观样本', '机制模型', '数据结果', '空间环境', '团队场景', '科普传播', '不确定'] },
+    discipline: { type: 'string', enum: ['生命科学', '材料', '医学', '工程', '物理', '化学', '信息科学', '环境科学', '综合交叉', '不确定'] },
+    technical_method: { type: 'string', enum: ['拍摄', '成像', '绘设', '数据', '渲染', '生成'] },
+    composition: { type: 'string', enum: ['中心式', '对称式', '引导线', '特写局部', '多元素并列', '开放式', '不确定'] },
+    color_tone: { type: 'string', enum: ['冷调', '暖调', '中性', '低饱和', '高饱和', '黑白', '单色系', '不确定'] },
+    functional_purpose: { type: 'string', enum: ['记录', '解释', '数据', '展示', '传播', '交互'] },
+    distribution_medium: { type: 'string', enum: ['静图', '动图', '视频', '图组', '交互', '实体'] },
+    use_case: { type: 'array', items: { type: 'string' } },
+    ai_summary: { type: 'string', minLength: 1 },
+    case_title: { type: 'string', minLength: 1 },
+    borrowable_points: { type: 'array', items: { type: 'string' } },
+    risk_notes: { type: 'array', items: { type: 'string' } },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+  },
+  required: [
+    'media_type', 'content_type', 'discipline', 'technical_method', 'composition',
+    'color_tone', 'functional_purpose', 'distribution_medium', 'use_case',
+    'ai_summary', 'case_title', 'borrowable_points', 'risk_notes', 'confidence',
+  ],
+  additionalProperties: false,
+} as const;
+
+class VisionRequestError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+    public readonly retryable = false,
+  ) {
+    super(message);
+  }
 }
 
 const SYSTEM_PROMPT = `你是一个科研视觉分析专家。仔细观察图片内容，输出结构化JSON分类结果。
@@ -183,95 +223,231 @@ async function imagePathToBase64(imagePath: string): Promise<string> {
   }
 }
 
+function extractFirstJsonObject(content: string): string {
+  const cleaned = content
+    .replace(/```json\s*/gi, '')
+    .replace(/```/g, '')
+    .trim();
+  const start = cleaned.indexOf('{');
+  if (start < 0) throw new VisionRequestError('VISION_RESPONSE_INVALID', '模型没有返回 JSON 对象', true);
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < cleaned.length; index += 1) {
+    const character = cleaned[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') inString = true;
+    else if (character === '{') depth += 1;
+    else if (character === '}') {
+      depth -= 1;
+      if (depth === 0) return cleaned.slice(start, index + 1);
+    }
+  }
+  throw new VisionRequestError('VISION_RESPONSE_TRUNCATED', '模型返回的 JSON 不完整', true);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+export function parseVisionAnalysisContent(content: string): VisionAnalysisResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(extractFirstJsonObject(content));
+  } catch (error) {
+    if (error instanceof VisionRequestError) throw error;
+    throw new VisionRequestError(
+      'VISION_RESPONSE_INVALID',
+      error instanceof Error ? `模型 JSON 无法解析：${error.message}` : '模型 JSON 无法解析',
+      true,
+    );
+  }
+  if (!isRecord(parsed)) throw new VisionRequestError('VISION_RESPONSE_INVALID', '模型返回值不是 JSON 对象', true);
+
+  const requiredStrings = [
+    'media_type', 'content_type', 'discipline', 'technical_method', 'composition',
+    'color_tone', 'functional_purpose', 'distribution_medium', 'ai_summary', 'case_title',
+  ];
+  const missing = requiredStrings.filter(key => typeof parsed[key] !== 'string' || !(parsed[key] as string).trim());
+  if (missing.length > 0 || typeof parsed.confidence !== 'number' || !Number.isFinite(parsed.confidence)) {
+    throw new VisionRequestError(
+      'VISION_RESPONSE_INVALID',
+      `模型 JSON 缺少必要字段${missing.length ? `：${missing.join(', ')}` : ''}`,
+      true,
+    );
+  }
+
+  return {
+    media_type: parsed.media_type as string,
+    content_type: parsed.content_type as string,
+    discipline: parsed.discipline as string,
+    technical_method: parsed.technical_method as string,
+    composition: parsed.composition as string,
+    color_tone: parsed.color_tone as string,
+    functional_purpose: parsed.functional_purpose as string,
+    distribution_medium: parsed.distribution_medium as string,
+    use_case: stringArray(parsed.use_case),
+    ai_summary: parsed.ai_summary as string,
+    case_title: parsed.case_title as string,
+    borrowable_points: stringArray(parsed.borrowable_points),
+    risk_notes: stringArray(parsed.risk_notes),
+    confidence: Math.max(0, Math.min(1, parsed.confidence as number)),
+  };
+}
+
+function assistantText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return '';
+  return value
+    .map(part => isRecord(part) && part.type === 'text' && typeof part.text === 'string' ? part.text : '')
+    .filter(Boolean)
+    .join('\n');
+}
+
+export function buildVisionRequestBody(
+  model: string,
+  messages: unknown[],
+  provider: string,
+  strictSchema: boolean,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model,
+    messages,
+    temperature: 0,
+    max_tokens: 2200,
+    response_format: strictSchema
+      ? {
+          type: 'json_schema',
+          json_schema: { name: 'scientific_visual_analysis', strict: true, schema: VISION_RESPONSE_SCHEMA },
+        }
+      : { type: 'json_object' },
+  };
+  if (provider === 'openrouter') {
+    body.reasoning = { effort: 'none', exclude: true };
+    body.plugins = [{ id: 'response-healing' }];
+    if (strictSchema) body.provider = { require_parameters: true };
+  }
+  return body;
+}
+
+function publicVisionFailure(error: unknown): { code: string; message: string } {
+  if (error instanceof VisionRequestError) return { code: error.code, message: error.message.slice(0, 240) };
+  if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+    return { code: 'VISION_TIMEOUT', message: '图片分析接口超时' };
+  }
+  return { code: 'VISION_ERROR', message: error instanceof Error ? error.message.slice(0, 240) : '图片分析执行异常' };
+}
+
+function retryableVisionFailure(error: unknown): boolean {
+  if (error instanceof VisionRequestError) return error.retryable;
+  return error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError' || error instanceof TypeError);
+}
+
+async function waitBeforeRetry(attempt: number): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, attempt === 0 ? 300 : 900));
+}
+
 export async function analyzeImage(params: {
   imagePath: string;
   ocrText: string;
   pageTitle: string;
   sourceUrl: string;
   contextText: string;
-}): Promise<VisionAnalysisResult> {
-  const { url: apiUrl, key: apiKey, model, provider } = getVisionConfig();
+}, configOverride?: VisionApiConfig): Promise<VisionAnalysisResult> {
+  const { url: apiUrl, key: apiKey, model, provider } = configOverride ?? getVisionConfig();
   const isPlaceholder = !apiUrl || !apiKey
     || apiKey.includes('your-');
   if (isPlaceholder) {
     console.warn('[Vision] API not configured, returning mock analysis');
-    return mockResult('等待AI分析');
+    return mockResult('等待AI分析', { code: 'VISION_CONFIG_MISSING', message: '图片分析 API 尚未配置' });
   }
 
-  try {
-    const base64 = await imagePathToBase64(params.imagePath);
-    if (!base64) {
-      return mockResult('无法读取图片文件');
-    }
-
-    const userMessage = [
-      `请分析这张科研图片。`,
-      params.ocrText ? `\n图中文字: ${params.ocrText}` : '',
-      params.pageTitle ? `\n网页标题: ${params.pageTitle}` : '',
-      params.contextText ? `\n上下文: ${params.contextText}` : '',
-      params.sourceUrl ? `\n来源: ${params.sourceUrl}` : '',
-    ].filter(Boolean).join('\n');
-
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      signal: AbortSignal.timeout(60_000),
-      headers: getVisionHeaders(apiKey),
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: userMessage },
-              { type: 'image_url', image_url: { url: base64 } },
-            ],
-          },
-        ],
-        temperature: 0.1,
-        max_tokens: 1000,
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await readTextWithLimit(response, MAX_AI_RESPONSE_BYTES).catch(() => '');
-      throw new Error(`${provider} API ${response.status}: ${errText}`);
-    }
-
-    const data = JSON.parse(await readTextWithLimit(response, MAX_AI_RESPONSE_BYTES)) as {
-      choices: Array<{ message: { content?: string | null; reasoning?: string } }>;
-    };
-    const msg = data.choices?.[0]?.message;
-    let content = msg?.content || msg?.reasoning || '';
-    if (!content) {
-      throw new Error(`Empty response from ${provider}`);
-    }
-
-    // Extract JSON from the response (handle possible markdown code fences)
-    const jsonStr = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    const result = JSON.parse(jsonStr) as VisionAnalysisResult;
-
-    const rawResult: VisionAnalysisResult = {
-      media_type: result.media_type || '不确定',
-      content_type: result.content_type || '不确定',
-      discipline: result.discipline || '不确定',
-      technical_method: result.technical_method || '不确定',
-      composition: result.composition || '不确定',
-      color_tone: result.color_tone || '不确定',
-      functional_purpose: result.functional_purpose || '',
-      distribution_medium: result.distribution_medium || '',
-      use_case: result.use_case || [],
-      ai_summary: result.ai_summary || '',
-      case_title: result.case_title || '',
-      borrowable_points: result.borrowable_points || [],
-      risk_notes: result.risk_notes || [],
-      confidence: typeof result.confidence === 'number' ? result.confidence : 0.0,
-    };
-    return sanitizeResult(rawResult);
-  } catch (error) {
-    console.error('[Vision] Error:', error);
-    return mockResult('AI分析失败');
+  const base64 = await imagePathToBase64(params.imagePath);
+  if (!base64) {
+    return mockResult('无法读取图片文件', { code: 'VISION_IMAGE_UNREADABLE', message: '无法读取图片文件' });
   }
+
+  const userMessage = [
+    '请分析这张科研图片，只返回符合指定结构的 JSON。',
+    params.ocrText ? `\n图中文字: ${params.ocrText}` : '',
+    params.pageTitle ? `\n网页标题: ${params.pageTitle}` : '',
+    params.contextText ? `\n上下文: ${params.contextText}` : '',
+    params.sourceUrl ? `\n来源: ${params.sourceUrl}` : '',
+  ].filter(Boolean).join('\n');
+  let lastError: unknown = new VisionRequestError('VISION_ERROR', '图片分析未执行');
+  let strictSchema = true;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const retryInstruction = attempt > 0
+        ? '\n这是自动重试。上一次回复无法解析，请务必输出一个完整 JSON 对象，不要输出推理、解释或 Markdown。'
+        : '';
+      const messages = [
+        { role: 'system', content: SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: `${userMessage}${retryInstruction}` },
+            { type: 'image_url', image_url: { url: base64 } },
+          ],
+        },
+      ];
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        signal: AbortSignal.timeout(75_000),
+        headers: getVisionHeaders(apiKey),
+        body: JSON.stringify(buildVisionRequestBody(model, messages, provider, strictSchema)),
+      });
+      if (!response.ok) {
+        const errText = await readTextWithLimit(response, MAX_AI_RESPONSE_BYTES).catch(() => '');
+        const unsupportedStructuredOutput = strictSchema && [400, 404, 415, 422].includes(response.status);
+        if (unsupportedStructuredOutput) strictSchema = false;
+        const retryable = unsupportedStructuredOutput || response.status === 408 || response.status === 409
+          || response.status === 429 || response.status >= 500;
+        throw new VisionRequestError(
+          `VISION_API_${response.status}`,
+          `${provider} API HTTP ${response.status}${errText ? `：${errText.slice(0, 400)}` : ''}`,
+          retryable,
+        );
+      }
+
+      let data: unknown;
+      try {
+        data = JSON.parse(await readTextWithLimit(response, MAX_AI_RESPONSE_BYTES));
+      } catch (error) {
+        throw new VisionRequestError(
+          'VISION_API_RESPONSE_INVALID',
+          error instanceof Error ? `接口响应无法解析：${error.message}` : '接口响应无法解析',
+          true,
+        );
+      }
+      const choices = isRecord(data) && Array.isArray(data.choices) ? data.choices : [];
+      const firstChoice = choices[0];
+      const message = isRecord(firstChoice) && isRecord(firstChoice.message) ? firstChoice.message : null;
+      const content = assistantText(message?.content);
+      if (!content) throw new VisionRequestError('VISION_RESPONSE_EMPTY', '模型没有返回最终答案', true);
+      return sanitizeResult(parseVisionAnalysisContent(content));
+    } catch (error) {
+      lastError = error;
+      const failure = publicVisionFailure(error);
+      console.error(`[Vision] attempt ${attempt + 1}/3 failed [${failure.code}]: ${failure.message}`);
+      if (attempt === 2 || !retryableVisionFailure(error)) break;
+      await waitBeforeRetry(attempt);
+    }
+  }
+
+  const failure = publicVisionFailure(lastError);
+  return mockResult('AI分析失败', failure);
 }
 
 function sanitizeResult(result: VisionAnalysisResult): VisionAnalysisResult {
@@ -347,7 +523,7 @@ function sanitizeResult(result: VisionAnalysisResult): VisionAnalysisResult {
   };
 }
 
-function mockResult(summary: string): VisionAnalysisResult {
+function mockResult(summary: string, failure?: { code: string; message: string }): VisionAnalysisResult {
   return {
     media_type: '不确定',
     content_type: '不确定',
@@ -363,6 +539,7 @@ function mockResult(summary: string): VisionAnalysisResult {
     borrowable_points: [],
     risk_notes: [],
     confidence: 0.0,
+    failure,
   };
 }
 
@@ -389,8 +566,8 @@ export async function classifyMediaType(params: {
   ocrText: string;
   pageTitle: string;
   contextText: string;
-}): Promise<string> {
-  const { url: apiUrl, key: apiKey, model } = getVisionConfig();
+}, configOverride?: VisionApiConfig): Promise<string> {
+  const { url: apiUrl, key: apiKey, model } = configOverride ?? getVisionConfig();
   const isPlaceholder = !apiUrl || !apiKey || apiKey.includes('your-');
   if (isPlaceholder) return '不确定';
 

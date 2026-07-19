@@ -5,6 +5,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { prisma } from './prisma.js';
 import { getVisionConfig, getVisionHeaders } from './services/visionConfig.js';
+import { isAppleVisionOcrEnabled } from './services/ocrPolicy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,6 +15,7 @@ const OCR_BINARY = path.join(SERVER_ROOT, '.tmp', 'ocr_image');
 const OCR_SWIFT_SCRIPT = path.join(SERVER_ROOT, 'scripts', 'ocr_image.swift');
 const LIMIT = Number.parseInt(process.env.LIMIT || '0', 10);
 const DEBUG = process.env.DEBUG_OCR === '1';
+const APPLE_VISION_OCR_ENABLED = isAppleVisionOcrEnabled();
 const execFileAsync = promisify(execFile);
 
 function mimeType(filePath: string): string {
@@ -186,7 +188,7 @@ async function main() {
     try {
       const context = [c.caseTitle, c.pageTitle, c.contextText].filter(Boolean).join('\n').slice(0, 1200);
       const localImage = await firstExistingLocalImage(c);
-      const text = localImage
+      const text = APPLE_VISION_OCR_ENABLED && localImage
         ? await ocrLocalImage(localImage)
         : await ocrImage(await imageToInput(c), context);
       if (text) {

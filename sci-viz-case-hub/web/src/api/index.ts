@@ -1,4 +1,4 @@
-import type { ApiResponse, VisualCase, CrawlResponse, NetworkTestResponse, CrawlSource, CrawlJob, CollectionKpiProgress, InsightSummary, ComparisonData, ThreeAxisSpectrum, SiteDiscoveryResult, UrlCrawlTask, SourceDistributionSummary, OcrJob, AnalysisJob } from '../types';
+import type { ApiResponse, VisualCase, CrawlResponse, NetworkTestResponse, CrawlSource, CrawlJob, CollectionKpiProgress, InsightSummary, ComparisonData, ThreeAxisSpectrum, SiteDiscoveryResult, UrlCrawlTask, SourceDistributionSummary, OcrJob, AnalysisJob, UserApiConfig } from '../types';
 import { apiBaseUrl } from '../baseUrl';
 
 const BASE = apiBaseUrl;
@@ -81,7 +81,14 @@ export const api = {
   },
 
   batchDeleteCases(ids: string[]) {
-    return request<{ deleted: number; requested: number }>('/cases/batch/delete', {
+    return request<{ deleted: number; requested: number; deletedIds: string[] }>('/cases/batch/delete', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    });
+  },
+
+  queueCasesForOcr(ids: string[]) {
+    return request<{ queued: number }>('/cases/batch/queue-ocr', {
       method: 'POST',
       body: JSON.stringify({ ids }),
     });
@@ -104,7 +111,7 @@ export const api = {
 
   previewSiteCrawl(
     url: string,
-    preset: 'quick' | 'standard' | 'deep',
+    preset: 'quick' | 'standard' | 'deep' | 'full',
     sourceName: string,
     sourceType: string,
     cookie?: string,
@@ -255,8 +262,27 @@ export const api = {
 
   getQueueStatus() {
     return request<{
-      panels: Array<{ key: string; label: string; count: number; description: string }>;
+      panels: Array<{ key: string; label: string; count: number; retryableCount?: number; description: string }>;
     }>('/processing/queue-status');
+  },
+
+  getUserApiConfig() {
+    return request<UserApiConfig>('/processing/api-config');
+  },
+
+  saveUserApiConfig(data: { provider: UserApiConfig['provider']; endpoint: string; model: string; apiKey?: string }) {
+    return request<UserApiConfig>('/processing/api-config', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  deleteUserApiConfig() {
+    return request<UserApiConfig>('/processing/api-config', { method: 'DELETE' });
+  },
+
+  testUserApiConfig() {
+    return request<{ message: string }>('/processing/api-config/test', { method: 'POST' });
   },
 
   batchOcr(scope?: string, caseIds?: string[]) {
@@ -266,10 +292,10 @@ export const api = {
     );
   },
 
-  startOcrJob(caseIds?: string[]) {
+  startOcrJob(caseIds?: string[], statuses?: string[]) {
     return request<OcrJob>('/processing/ocr/jobs', {
       method: 'POST',
-      body: JSON.stringify({ caseIds }),
+      body: JSON.stringify({ caseIds, statuses }),
     });
   },
 
@@ -285,10 +311,10 @@ export const api = {
     return request<OcrJob>(`/processing/ocr/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' });
   },
 
-  startAnalysisJob(caseIds?: string[]) {
+  startAnalysisJob(caseIds?: string[], statuses?: string[]) {
     return request<AnalysisJob>('/processing/analysis/jobs', {
       method: 'POST',
-      body: JSON.stringify({ caseIds }),
+      body: JSON.stringify({ caseIds, statuses }),
     });
   },
 
@@ -318,10 +344,10 @@ export const api = {
     );
   },
 
-  batchApprove(statuses?: string[]) {
+  batchApprove(statuses?: string[], ids?: string[]) {
     return request<{ approved: number }>('/cases/batch/approve', {
       method: 'POST',
-      body: JSON.stringify({ statuses: statuses || ['needs_review', 'low_confidence_review'] }),
+      body: JSON.stringify({ statuses: statuses || ['needs_review', 'low_confidence_review'], ...(ids ? { ids } : {}) }),
     });
   },
 

@@ -1,6 +1,7 @@
 import { prisma } from '../prisma.js';
 import { performOCR } from './ocr.js';
 import { analyzeImage } from './vision.js';
+import type { VisionApiConfig } from './visionConfig.js';
 import { KeyedTaskQueue, type EnqueueStatus } from './taskQueue.js';
 
 const analysisQueue = new KeyedTaskQueue(3, 500, error => {
@@ -38,17 +39,18 @@ export async function runVisionAnalysis(
   sourceUrl: string,
   contextText: string,
   ocrText = '',
-): Promise<{ success: boolean; reviewStatus: string }> {
+  configOverride?: VisionApiConfig,
+): Promise<{ success: boolean; reviewStatus: string; errorCode?: string; errorMessage?: string }> {
   const visionResult = await analyzeImage({
     imagePath,
     ocrText,
     pageTitle,
     sourceUrl,
     contextText,
-  });
+  }, configOverride);
 
-  const isAnalysisFailure = visionResult.confidence <= 0
-    && /失败|无法读取|等待AI分析/.test(visionResult.ai_summary || '');
+  const isAnalysisFailure = Boolean(visionResult.failure) || (visionResult.confidence <= 0
+    && /失败|无法读取|等待AI分析/.test(visionResult.ai_summary || ''));
   const reviewStatus = isAnalysisFailure
     ? 'analysis_failed'
     : visionResult.confidence >= 0.8
@@ -90,7 +92,12 @@ export async function runVisionAnalysis(
   console.log(`[analysis] Case ${caseId} Qwen vision analysis complete`);
   // Missing provenance is a review issue, not a vision-model failure. The Qwen
   // result is still valid and should count as analyzed in job progress.
-  return { success: !isAnalysisFailure, reviewStatus: finalReviewStatus };
+  return {
+    success: !isAnalysisFailure,
+    reviewStatus: finalReviewStatus,
+    errorCode: visionResult.failure?.code,
+    errorMessage: visionResult.failure?.message,
+  };
 }
 
 export function enqueueAnalysis(

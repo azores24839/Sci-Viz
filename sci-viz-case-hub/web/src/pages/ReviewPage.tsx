@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { api } from '../api';
 import { withBaseUrl } from '../baseUrl';
-import type { VisualCase, ReviewStatus, OcrJob, AnalysisJob } from '../types';
+import type { VisualCase, ReviewStatus, OcrJob, AnalysisJob, UserApiConfig, Pagination } from '../types';
 import { theme } from '../theme';
 import { StarRating } from '../components';
 
@@ -9,6 +9,7 @@ interface QueuePanel {
   key: string;
   label: string;
   count: number;
+  retryableCount?: number;
   description: string;
 }
 
@@ -27,9 +28,9 @@ const TECHNICAL_OPTIONS = ['拍摄', '成像', '绘设', '数据', '渲染', '�
 const CONTENT_OPTIONS = ['单人肖像', '群体肖像', '绘画肖像', '实验设备', '实验过程', '微观样本', '机制模型', '数据结果', '空间环境', '团队场景', '科普传播'];
 const DISCIPLINE_OPTIONS = ['生命科学', '材料', '医学', '工程', '物理', '化学', '信息科学', '环境科学', '综合交叉'];
 
-const PANEL_MAP: Record<string, { status: string; ocrEmpty?: boolean }> = {
-  pending_quality: { status: 'pending_ai_analysis' },
-  pending_ocr: { status: 'pending_ai_analysis', ocrEmpty: true },
+const PANEL_MAP: Record<string, { status: string; ocrStatus?: 'unprocessed' }> = {
+  pending_quality: { status: 'pending_ai_analysis', ocrStatus: 'unprocessed' },
+  pending_ocr: { status: 'pending_ocr' },
   pending_classify: { status: 'pending_ai_analysis' },
   needs_review: { status: 'needs_review' },
   low_confidence: { status: 'low_confidence_review' },
@@ -51,15 +52,18 @@ const QUEUE_CONFIG: Record<string, {
   deEmphasized?: boolean;
 }> = {
   pending_quality: {
-    label: '待质检',
-    description: '检查图片是否清晰、完整',
+    label: '预审素材',
+    description: '先挑出值得处理的图片，再加入 OCR 队列',
   },
   pending_ocr: {
-    label: '待 OCR',
-    description: '可选：只提取图片里的文字，不负责理解内容',
+    label: '等待 OCR',
+    description: '已通过预审；可随时开始本批识别',
+    accent: theme.colors.accent,
+    accentBg: theme.colors.accentBg,
+    accentBorder: theme.colors.accentBorder,
   },
   pending_classify: {
-    label: '待 Qwen 分析',
+    label: '待图片分析',
     description: '理解图片内容，生成摘要和三轴分类',
   },
   needs_review: {
@@ -91,8 +95,8 @@ const QUEUE_CONFIG: Record<string, {
 };
 
 const QUEUE_ACTIONS: Record<string, Array<{ label: string; action: 'approve' | 'reject' | 'reanalyze'; primary?: boolean }>> = {
-  pending_quality: [{ label: '重新处理', action: 'reanalyze' }],
-  pending_ocr: [{ label: '重新处理', action: 'reanalyze' }],
+  pending_quality: [],
+  pending_ocr: [],
   pending_classify: [{ label: '重新处理', action: 'reanalyze' }],
   needs_review: [],
   low_confidence: [
@@ -104,66 +108,172 @@ const QUEUE_ACTIONS: Record<string, Array<{ label: string; action: 'approve' | '
   ],
 };
 
-const ACTIVE_OCR_STATUSES = new Set(['queued', 'running', 'cancelling']);
+const ACTIVE_JOB_STATUSES = new Set(['queued', 'running', 'cancelling']);
 
-function ocrMethodLabel(method: OcrJob['currentMethod']): string {
-  if (method === 'local') return 'Apple Vision 本地识别';
-  if (method === 'remote') return '远程视觉识别';
-  if (method === 'remote_fallback') return '本地失败，已切换远程识别';
-  if (method === 'existing') return '已存在识别结果';
-  return '正在定位图片';
-}
+const API_PROVIDER_PRESETS: Record<UserApiConfig['provider'], { label: string; endpoint: string; model: string; note: string }> = {
+  openrouter: {
+    label: 'OpenRouter',
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    model: 'qwen/qwen2.5-vl-72b-instruct',
+    note: '一个 Key 可选择 OpenRouter 上的多种视觉模型，适合团队统一使用。',
+  },
+  dashscope: {
+    label: '阿里云百炼（Qwen）',
+    endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+    model: 'qwen3-vl-plus',
+    note: '适合直接使用阿里云购买的 Qwen Key；不同地域或工作空间可修改 API 地址。',
+  },
+  custom: {
+    label: '其他 OpenAI 兼容服务',
+    endpoint: '',
+    model: '',
+    note: '只支持兼容 Chat Completions 且能接收图片的视觉模型。',
+  },
+};
 
-function formatJobTime(value: string | null | undefined): string {
-  if (!value) return '尚无记录';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '时间未知';
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(date);
+function panelRequestParams(key: string, page: number): Record<string, string> {
+  const config = PANEL_MAP[key];
+  if (!config) return {};
+  const params: Record<string, string> = { limit: '100', page: String(page) };
+  params.review_status = config.status === 'analysis_failed'
+    ? 'analysis_failed,source_missing'
+    : config.status;
+  if (config.ocrStatus) params.ocr_status = config.ocrStatus;
+  return params;
 }
 
 export default function ReviewPage() {
+  const [workflowTab, setWorkflowTab] = useState<'preflight' | 'processing'>('preflight');
   const [panels, setPanels] = useState<QueuePanel[]>([]);
   const [loading, setLoading] = useState(true);
+  const [statusError, setStatusError] = useState('');
   const [activePanel, setActivePanel] = useState<string | null>(null);
   const [cases, setCases] = useState<VisualCase[]>([]);
   const [casesLoading, setCasesLoading] = useState(false);
+  const [casesLoadingMore, setCasesLoadingMore] = useState(false);
+  const [casePagination, setCasePagination] = useState<Pagination>({ total: 0, page: 1, limit: 100, totalPages: 0 });
   const [expandedCase, setExpandedCase] = useState<string | null>(null);
   const [managementMode, setManagementMode] = useState(false);
   const [selectedCaseIds, setSelectedCaseIds] = useState<Set<string>>(new Set());
   const [selectionWorking, setSelectionWorking] = useState(false);
+  const [caseActionWorkingId, setCaseActionWorkingId] = useState<string | null>(null);
   const [editingCaseId, setEditingCaseId] = useState<string | null>(null);
   const [manualDraft, setManualDraft] = useState<ManualCaseDraft | null>(null);
   const [manualSaveWorking, setManualSaveWorking] = useState(false);
   const [manualEditError, setManualEditError] = useState('');
   const [approvingAll, setApprovingAll] = useState(false);
-  const [batchType, setBatchType] = useState<'quality' | 'ocr' | 'classify' | null>(null);
+  const [approvingCurrentPage, setApprovingCurrentPage] = useState(false);
+  const [analysisStartWorking, setAnalysisStartWorking] = useState(false);
+  const [ocrStartWorking, setOcrStartWorking] = useState(false);
   const [batchResult, setBatchResult] = useState<{ success: boolean; message: string } | null>(null);
-  const [batchElapsed, setBatchElapsed] = useState(0);
   const [ocrJob, setOcrJob] = useState<OcrJob | null>(null);
-  const [ocrPollingWarning, setOcrPollingWarning] = useState('');
-  const [ocrCancelWorking, setOcrCancelWorking] = useState(false);
   const [analysisJob, setAnalysisJob] = useState<AnalysisJob | null>(null);
   const [analysisPollingWarning, setAnalysisPollingWarning] = useState('');
   const [analysisCancelWorking, setAnalysisCancelWorking] = useState(false);
-  const batchTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const batchStartRef = useRef(0);
-  const observedActiveOcrRef = useRef(false);
-  const handledOcrTerminalRef = useRef('');
+  const [ocrCancelWorking, setOcrCancelWorking] = useState(false);
+  const [apiConfig, setApiConfig] = useState<UserApiConfig | null>(null);
+  const [apiConfigOpen, setApiConfigOpen] = useState(false);
+  const [apiConfigForm, setApiConfigForm] = useState({
+    provider: 'openrouter' as UserApiConfig['provider'], endpoint: API_PROVIDER_PRESETS.openrouter.endpoint,
+    model: API_PROVIDER_PRESETS.openrouter.model, apiKey: '',
+  });
+  const [apiConfigWorking, setApiConfigWorking] = useState(false);
+  const [apiConfigMessage, setApiConfigMessage] = useState<{ success: boolean; text: string } | null>(null);
   const observedActiveAnalysisRef = useRef(false);
   const handledAnalysisTerminalRef = useRef('');
   const taskListRef = useRef<HTMLDivElement>(null);
+  const panelRequestRef = useRef(0);
 
   const fetchStatus = useCallback(async () => {
     try {
       const res = await api.getQueueStatus();
-      if (res.success) setPanels(res.data.panels);
-    } catch { /* ignore */ }
+      if (!res.success) throw new Error(res.error || '队列状态加载失败');
+      setPanels(res.data.panels);
+      setStatusError('');
+    } catch (error) {
+      setStatusError(error instanceof Error ? error.message : '队列状态加载失败');
+    }
     setLoading(false);
   }, []);
 
+  useEffect(() => {
+    if (!apiConfigOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setApiConfigOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [apiConfigOpen]);
+
   useEffect(() => { fetchStatus(); }, [fetchStatus]);
+
+  useEffect(() => {
+    api.getUserApiConfig().then(res => { if (res.success) setApiConfig(res.data); }).catch(() => {});
+  }, []);
+
+  const openApiConfig = () => {
+    const provider = apiConfig?.provider || 'openrouter';
+    const preset = API_PROVIDER_PRESETS[provider];
+    setApiConfigForm({
+      provider,
+      endpoint: apiConfig?.endpoint || preset.endpoint,
+      model: apiConfig?.model || preset.model,
+      apiKey: '',
+    });
+    setApiConfigMessage(null);
+    setApiConfigOpen(true);
+  };
+
+  const selectApiProvider = (provider: UserApiConfig['provider']) => {
+    const preset = API_PROVIDER_PRESETS[provider];
+    setApiConfigForm(current => ({ ...current, provider, endpoint: preset.endpoint, model: preset.model }));
+    setApiConfigMessage(null);
+  };
+
+  const saveApiConfig = async () => {
+    setApiConfigWorking(true);
+    setApiConfigMessage(null);
+    try {
+      const saved = await api.saveUserApiConfig(apiConfigForm);
+      if (!saved.success) throw new Error(saved.error || '保存失败');
+      setApiConfig(saved.data);
+      setApiConfigForm(current => ({ ...current, apiKey: '' }));
+      setApiConfigMessage({ success: true, text: '已保存。Qwen 图片分析会使用你的 Key。' });
+    } catch (error) {
+      setApiConfigMessage({ success: false, text: error instanceof Error ? error.message : '保存失败' });
+    } finally {
+      setApiConfigWorking(false);
+    }
+  };
+
+  const testApiConfig = async () => {
+    setApiConfigWorking(true);
+    setApiConfigMessage(null);
+    try {
+      const result = await api.testUserApiConfig();
+      if (!result.success) throw new Error(result.error || '连接测试失败');
+      setApiConfigMessage({ success: true, text: result.data.message });
+    } catch (error) {
+      setApiConfigMessage({ success: false, text: error instanceof Error ? error.message : '连接测试失败' });
+    } finally {
+      setApiConfigWorking(false);
+    }
+  };
+
+  const removeApiConfig = async () => {
+    setApiConfigWorking(true);
+    setApiConfigMessage(null);
+    try {
+      const result = await api.deleteUserApiConfig();
+      if (!result.success) throw new Error(result.error || '删除配置失败');
+      setApiConfig(result.data);
+      setApiConfigOpen(false);
+    } catch (error) {
+      setApiConfigMessage({ success: false, text: error instanceof Error ? error.message : '删除配置失败' });
+    } finally {
+      setApiConfigWorking(false);
+    }
+  };
 
   useEffect(() => {
     let disposed = false;
@@ -175,42 +285,8 @@ export default function ReviewPage() {
     return () => { disposed = true; };
   }, []);
 
-  const ocrIsActive = Boolean(ocrJob && ACTIVE_OCR_STATUSES.has(ocrJob.status));
-  const analysisIsActive = Boolean(analysisJob && ACTIVE_OCR_STATUSES.has(analysisJob.status));
-
-  useEffect(() => {
-    if (!ocrJob || !ocrIsActive) return;
-    observedActiveOcrRef.current = true;
-    let disposed = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let consecutiveFailures = 0;
-
-    const poll = async () => {
-      try {
-        const res = await api.getOcrJob(ocrJob.id);
-        if (disposed) return;
-        if (res.success) {
-          consecutiveFailures = 0;
-          setOcrPollingWarning('');
-          setOcrJob(res.data);
-        } else {
-          consecutiveFailures += 1;
-        }
-      } catch {
-        consecutiveFailures += 1;
-      }
-      if (!disposed) {
-        if (consecutiveFailures >= 3) setOcrPollingWarning('进度连接暂时中断，任务仍会在后台继续');
-        timer = setTimeout(poll, consecutiveFailures > 0 ? 2000 : 1000);
-      }
-    };
-
-    timer = setTimeout(poll, 500);
-    return () => {
-      disposed = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [ocrJob?.id, ocrIsActive]);
+  const analysisIsActive = Boolean(analysisJob && ACTIVE_JOB_STATUSES.has(analysisJob.status));
+  const ocrIsActive = Boolean(ocrJob && ACTIVE_JOB_STATUSES.has(ocrJob.status));
 
   useEffect(() => {
     if (!analysisJob || !analysisIsActive) return;
@@ -234,7 +310,7 @@ export default function ReviewPage() {
         consecutiveFailures += 1;
       }
       if (!disposed) {
-        if (consecutiveFailures >= 3) setAnalysisPollingWarning('进度连接暂时中断，Qwen 任务仍会在后台继续');
+        if (consecutiveFailures >= 3) setAnalysisPollingWarning('进度连接暂时中断，图片分析任务仍会在后台继续');
         timer = setTimeout(poll, consecutiveFailures > 0 ? 2000 : 1000);
       }
     };
@@ -246,56 +322,99 @@ export default function ReviewPage() {
     };
   }, [analysisJob?.id, analysisIsActive]);
 
-  useEffect(() => {
-    return () => {
-      if (batchTimerRef.current) clearInterval(batchTimerRef.current);
-    };
-  }, []);
-
-  const fetchPanelCases = useCallback(async (key: string) => {
+  const fetchPanelCases = useCallback(async (key: string, preserveMessage = false) => {
+    const requestId = ++panelRequestRef.current;
     setCasesLoading(true);
+    setCasesLoadingMore(false);
     setActivePanel(key);
+    setCases([]);
+    setCasePagination({ total: 0, page: 1, limit: 100, totalPages: 0 });
+    if (!preserveMessage) setBatchResult(null);
     setSelectedCaseIds(new Set());
-    setManagementMode(false);
+    // Preflight is intentionally always actionable: reloads after deleting or
+    // queueing must not hide the selection controls.
+    setManagementMode(key === 'pending_quality');
     setExpandedCase(null);
     setEditingCaseId(null);
     setManualDraft(null);
     setManualEditError('');
-    const config = PANEL_MAP[key];
-    if (!config) { setCasesLoading(false); return; }
-    const params: Record<string, string> = { limit: '100' };
-    if (config.status === 'analysis_failed') {
-      params.review_status = 'analysis_failed,source_missing';
-    } else {
-      params.review_status = config.status;
-    }
-    if (config.ocrEmpty) {
-      params.ocr_status = 'no_text';
-    }
+    if (!PANEL_MAP[key]) { setCasesLoading(false); return; }
     try {
-      const res = await api.getCases(params);
-      if (res.success) setCases(res.data);
-    } catch { /* ignore */ }
-    setCasesLoading(false);
+      const res = await api.getCases(panelRequestParams(key, 1));
+      if (requestId !== panelRequestRef.current) return;
+      if (res.success) {
+        setCases(res.data);
+        if (res.pagination) setCasePagination(res.pagination);
+      } else {
+        setBatchResult({ success: false, message: res.error || '案例列表加载失败' });
+      }
+    } catch (error) {
+      if (requestId === panelRequestRef.current) {
+        setBatchResult({ success: false, message: error instanceof Error ? error.message : '案例列表加载失败' });
+      }
+    } finally {
+      if (requestId === panelRequestRef.current) setCasesLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (!ocrJob || ocrIsActive || !observedActiveOcrRef.current) return;
-    const terminalKey = `${ocrJob.id}:${ocrJob.status}`;
-    if (handledOcrTerminalRef.current === terminalKey) return;
-    handledOcrTerminalRef.current = terminalKey;
-    observedActiveOcrRef.current = false;
+    if (workflowTab === 'preflight' && activePanel === 'pending_quality') setManagementMode(true);
+  }, [activePanel, workflowTab]);
 
-    if (ocrJob.status === 'completed') {
-      setBatchResult({ success: true, message: `OCR 完成：${ocrJob.updated} 张已识别，${ocrJob.skipped} 张无可读文字，${ocrJob.failed} 张失败` });
-    } else if (ocrJob.status === 'cancelled') {
-      setBatchResult({ success: true, message: `OCR 已停止：已完成 ${ocrJob.processed}/${ocrJob.total} 张` });
-    } else {
-      setBatchResult({ success: false, message: ocrJob.error || 'OCR 任务异常终止' });
+  const loadMorePanelCases = useCallback(async () => {
+    if (!activePanel || casesLoadingMore || casePagination.page >= casePagination.totalPages) return;
+    const requestId = panelRequestRef.current;
+    const panelKey = activePanel;
+    setCasesLoadingMore(true);
+    try {
+      const res = await api.getCases(panelRequestParams(panelKey, casePagination.page + 1));
+      if (requestId !== panelRequestRef.current || panelKey !== activePanel) return;
+      if (res.success) {
+        setCases(current => {
+          const existing = new Set(current.map(item => item.id));
+          return [...current, ...res.data.filter(item => !existing.has(item.id))];
+        });
+        if (res.pagination) setCasePagination(res.pagination);
+      }
+    } catch {
+      if (requestId === panelRequestRef.current) setBatchResult({ success: false, message: '加载更多案例失败，请重试' });
+    } finally {
+      if (requestId === panelRequestRef.current) setCasesLoadingMore(false);
     }
-    void fetchStatus();
-    if (activePanel) void fetchPanelCases(activePanel);
-  }, [activePanel, fetchPanelCases, fetchStatus, ocrIsActive, ocrJob]);
+  }, [activePanel, casePagination.page, casePagination.totalPages, casesLoadingMore]);
+
+  useEffect(() => {
+    if (!ocrJob || !ocrIsActive) return;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const poll = async () => {
+      try {
+        const res = await api.getOcrJob(ocrJob.id);
+        if (disposed) return;
+        if (res.success) {
+          setOcrJob(res.data);
+          // OCR writes the review status for each successful image in the same database
+          // transaction. Refresh queue totals on every progress update so the “待确认”
+          // card advances together with the OCR “已处理” counter.
+          await fetchStatus();
+          if (disposed) return;
+          if (!ACTIVE_JOB_STATUSES.has(res.data.status)) {
+            setBatchResult({
+              success: res.data.status === 'completed',
+              message: res.data.status === 'completed'
+                ? `OCR 完成：${res.data.updated} 张提取到文字，${res.data.skipped} 张无文字，${res.data.failed} 张失败`
+                : res.data.error || 'OCR 任务未完成',
+            });
+            if (activePanel) await fetchPanelCases(activePanel, true);
+            return;
+          }
+        }
+      } catch { /* 下次轮询重试 */ }
+      if (!disposed) timer = setTimeout(poll, 1000);
+    };
+    timer = setTimeout(poll, 500);
+    return () => { disposed = true; if (timer) clearTimeout(timer); };
+  }, [activePanel, fetchPanelCases, fetchStatus, ocrIsActive, ocrJob?.id]);
 
   useEffect(() => {
     if (!analysisJob || analysisIsActive || !observedActiveAnalysisRef.current) return;
@@ -305,91 +424,84 @@ export default function ReviewPage() {
     observedActiveAnalysisRef.current = false;
 
     if (analysisJob.status === 'completed') {
-      setBatchResult({ success: analysisJob.failed === 0, message: `Qwen 分析完成：${analysisJob.analyzed} 张成功，${analysisJob.failed} 张失败` });
+      setBatchResult({ success: analysisJob.failed === 0, message: `图片分析完成：${analysisJob.analyzed} 张成功，${analysisJob.failed} 张失败` });
     } else if (analysisJob.status === 'cancelled') {
-      setBatchResult({ success: true, message: `Qwen 分析已停止：已完成 ${analysisJob.processed}/${analysisJob.total} 张` });
+      setBatchResult({ success: true, message: `图片分析已停止：已完成 ${analysisJob.processed}/${analysisJob.total} 张` });
     } else {
-      setBatchResult({ success: false, message: analysisJob.error || 'Qwen 分析任务异常终止' });
+      setBatchResult({ success: false, message: analysisJob.error || '图片分析任务异常终止' });
     }
     void fetchStatus();
-    if (activePanel) void fetchPanelCases(activePanel);
+    if (activePanel) void fetchPanelCases(activePanel, true);
   }, [activePanel, analysisIsActive, analysisJob, fetchPanelCases, fetchStatus]);
 
   useEffect(() => {
     if (loading || activePanel || panels.length === 0) return;
-    const firstPanel = panels.find(panel => panel.key === 'needs_review' && panel.count > 0)
+    if (workflowTab === 'preflight') {
+      void fetchPanelCases('pending_quality');
+      return;
+    }
+    const firstPanel = panels.find(panel => panel.key === 'pending_ocr' && panel.count > 0)
+      ?? panels.find(panel => panel.key === 'needs_review' && panel.count > 0)
       ?? panels.find(panel => panel.key === 'low_confidence' && panel.count > 0)
       ?? panels.find(panel => panel.key === 'failed' && panel.count > 0);
     if (firstPanel) fetchPanelCases(firstPanel.key);
-  }, [activePanel, fetchPanelCases, loading, panels]);
+  }, [activePanel, fetchPanelCases, loading, panels, workflowTab]);
 
-  const runBatch = async (type: 'quality' | 'ocr' | 'classify') => {
-    if (type === 'ocr') {
-      setBatchResult(null);
-      try {
-        const res = await api.startOcrJob();
-        if (res.success) {
-          observedActiveOcrRef.current = ACTIVE_OCR_STATUSES.has(res.data.status);
-          setOcrJob(res.data);
-        } else {
-          setBatchResult({ success: false, message: res.error || 'OCR 启动失败' });
-        }
-      } catch (error) {
-        setBatchResult({ success: false, message: error instanceof Error ? error.message : 'OCR 启动异常' });
-      }
-      return;
-    }
-
-    if (type === 'classify') {
-      setBatchResult(null);
-      try {
-        const res = await api.startAnalysisJob();
-        if (res.success) {
-          observedActiveAnalysisRef.current = ACTIVE_OCR_STATUSES.has(res.data.status);
-          setAnalysisJob(res.data);
-        } else {
-          setBatchResult({ success: false, message: res.error || 'Qwen 分析启动失败' });
-        }
-      } catch (error) {
-        setBatchResult({ success: false, message: error instanceof Error ? error.message : 'Qwen 分析启动异常' });
-      }
-      return;
-    }
-
-    setBatchType(type);
+  const startPendingOcr = async () => {
+    const count = panelCount('pending_ocr');
+    if (ocrStartWorking || ocrIsActive || analysisIsActive || count === 0) return;
+    if (count > 20 && !window.confirm(`将对 ${count} 张图片执行 OCR，并可能产生模型费用。确定继续吗？`)) return;
+    setOcrStartWorking(true);
     setBatchResult(null);
-    setBatchElapsed(0);
-    batchStartRef.current = Date.now();
-    batchTimerRef.current = setInterval(() => {
-      setBatchElapsed(Math.round((Date.now() - batchStartRef.current) / 1000));
-    }, 1000);
-
     try {
-      let res: any;
-      res = await api.batchQualityCheck();
-
-      if (batchTimerRef.current) clearInterval(batchTimerRef.current);
-      batchTimerRef.current = null;
-
-      if (res?.success) {
-        const s = res.summary;
-        let msg = '';
-        msg = `完成：${s.ok ?? 0} 张合格，${s.broken ?? 0} 张损坏，${s.lowQuality ?? 0} 张低质`;
-        const elapsed = Math.round((Date.now() - batchStartRef.current) / 1000);
-        msg += ` · 耗时 ${elapsed}s`;
-        setBatchResult({ success: true, message: msg });
-        await fetchStatus();
-        if (activePanel) fetchPanelCases(activePanel);
+      const res = await api.startAnalysisJob(undefined, ['pending_ocr']);
+      if (res.success) {
+        observedActiveAnalysisRef.current = ACTIVE_JOB_STATUSES.has(res.data.status);
+        setAnalysisJob(res.data);
+        setBatchResult({ success: true, message: `OCR 已启动，本批 ${res.data.total} 张` });
       } else {
-        setBatchResult({ success: false, message: res?.error || '操作失败' });
+        setBatchResult({ success: false, message: res.error || 'OCR 启动失败' });
       }
-    } catch (e: any) {
-      if (batchTimerRef.current) clearInterval(batchTimerRef.current);
-      batchTimerRef.current = null;
-      setBatchResult({ success: false, message: e.message || '操作异常' });
+    } catch (error) {
+      setBatchResult({ success: false, message: error instanceof Error ? error.message : 'OCR 启动异常' });
+    } finally {
+      setOcrStartWorking(false);
     }
-    setBatchType(null);
-    setTimeout(() => setBatchResult(null), 10000);
+  };
+
+  const reanalyzeAllFailed = async () => {
+    if (analysisStartWorking || analysisIsActive || ocrIsActive || retryableFailedCount === 0) return;
+    if (!window.confirm(`将重新分析 ${retryableFailedCount} 张分析异常图片，并产生模型费用。缺少来源的案例不会重复分析。确定继续吗？`)) return;
+    setAnalysisStartWorking(true);
+    setBatchResult(null);
+    try {
+      const res = await api.startAnalysisJob(undefined, ['analysis_failed']);
+      if (res.success) {
+        observedActiveAnalysisRef.current = ACTIVE_JOB_STATUSES.has(res.data.status);
+        setAnalysisJob(res.data);
+        setBatchResult({ success: true, message: `已启动重新分析，共 ${res.data.total} 张` });
+      } else {
+        setBatchResult({ success: false, message: res.error || '重新分析启动失败' });
+      }
+    } catch (error) {
+      setBatchResult({ success: false, message: error instanceof Error ? error.message : '重新分析启动异常' });
+    } finally {
+      setAnalysisStartWorking(false);
+    }
+  };
+
+  const cancelCurrentAnalysis = async () => {
+    if (!analysisJob || !analysisIsActive || analysisCancelWorking) return;
+    setAnalysisCancelWorking(true);
+    try {
+      const res = await api.cancelAnalysisJob(analysisJob.id);
+      if (res.success) setAnalysisJob(res.data);
+      else setBatchResult({ success: false, message: res.error || '无法停止图片分析' });
+    } catch (error) {
+      setBatchResult({ success: false, message: error instanceof Error ? error.message : '无法停止图片分析' });
+    } finally {
+      setAnalysisCancelWorking(false);
+    }
   };
 
   const cancelCurrentOcr = async () => {
@@ -406,41 +518,42 @@ export default function ReviewPage() {
     }
   };
 
-  const cancelCurrentAnalysis = async () => {
-    if (!analysisJob || !analysisIsActive || analysisCancelWorking) return;
-    setAnalysisCancelWorking(true);
-    try {
-      const res = await api.cancelAnalysisJob(analysisJob.id);
-      if (res.success) setAnalysisJob(res.data);
-      else setBatchResult({ success: false, message: res.error || '无法停止 Qwen 分析' });
-    } catch (error) {
-      setBatchResult({ success: false, message: error instanceof Error ? error.message : '无法停止 Qwen 分析' });
-    } finally {
-      setAnalysisCancelWorking(false);
-    }
-  };
-
   const handleAction = async (caseId: string, action: 'approve' | 'reject' | 'reanalyze') => {
-    if (action === 'approve') {
-      await api.updateCase(caseId, { reviewStatus: 'approved' as ReviewStatus } as any);
-      setCases(prev => prev.filter(c => c.id !== caseId));
-    } else if (action === 'reject') {
-      await api.updateCase(caseId, { reviewStatus: 'rejected' as ReviewStatus } as any);
-      setCases(prev => prev.filter(c => c.id !== caseId));
-    } else {
-      await api.reanalyze(caseId);
+    if (caseActionWorkingId) return;
+    setCaseActionWorkingId(caseId);
+    setBatchResult(null);
+    try {
+      if (action === 'approve' || action === 'reject') {
+        const reviewStatus = action === 'approve' ? 'approved' : 'rejected';
+        const result = await api.updateCase(caseId, { reviewStatus: reviewStatus as ReviewStatus } as Partial<VisualCase>);
+        if (!result.success) throw new Error(result.error || '状态更新失败');
+        setCases(prev => prev.filter(c => c.id !== caseId));
+        setCasePagination(current => ({ ...current, total: Math.max(0, current.total - 1) }));
+      } else {
+        if (analysisIsActive || ocrIsActive) throw new Error('已有图片任务正在运行，请稍后重试');
+        const result = await api.startAnalysisJob([caseId]);
+        if (!result.success) throw new Error(result.error || '重新分析启动失败');
+        observedActiveAnalysisRef.current = ACTIVE_JOB_STATUSES.has(result.data.status);
+        setAnalysisJob(result.data);
+        setBatchResult({ success: true, message: '已加入重新分析任务' });
+      }
+      await fetchStatus();
+    } catch (error) {
+      setBatchResult({ success: false, message: error instanceof Error ? error.message : '操作失败' });
+    } finally {
+      setCaseActionWorkingId(null);
     }
-    fetchStatus();
   };
 
   const handleApproveAll = async () => {
-    if (approvingAll || !activePanel) return;
+    if (approvingAll || approvingCurrentPage || !activePanel) return;
     const status = activePanel === 'needs_review'
       ? 'needs_review'
       : activePanel === 'low_confidence'
         ? 'low_confidence_review'
         : null;
     if (!status) return;
+    if (!window.confirm(`确定将该分组中的 ${queueCount} 个案例全部收入案例库吗？`)) return;
 
     setApprovingAll(true);
     setBatchResult(null);
@@ -458,6 +571,28 @@ export default function ReviewPage() {
       setBatchResult({ success: false, message: error instanceof Error ? error.message : '入库失败' });
     } finally {
       setApprovingAll(false);
+    }
+  };
+
+  const handleApproveCurrentPage = async () => {
+    const ids = cases
+      .filter(item => item.reviewStatus === 'needs_review')
+      .map(item => item.id);
+    if (activePanel !== 'needs_review' || ids.length === 0 || approvingAll || approvingCurrentPage) return;
+    if (!window.confirm(`确定将当前已加载的 ${ids.length} 个案例收入案例库吗？未加载的待确认案例不会受影响。`)) return;
+
+    setApprovingCurrentPage(true);
+    setBatchResult(null);
+    try {
+      const res = await api.batchApprove(['needs_review'], ids);
+      if (!res.success) throw new Error(res.error || '入库失败');
+      setBatchResult({ success: true, message: `已将当前已加载的 ${res.data.approved} 个案例收入案例库` });
+      await fetchStatus();
+      await fetchPanelCases('needs_review', true);
+    } catch (error) {
+      setBatchResult({ success: false, message: error instanceof Error ? error.message : '入库失败' });
+    } finally {
+      setApprovingCurrentPage(false);
     }
   };
 
@@ -485,13 +620,88 @@ export default function ReviewPage() {
         setBatchResult({ success: false, message: res.error || '删除失败' });
         return;
       }
-      const deletedIds = new Set(ids);
+      const deletedIds = new Set(res.data.deletedIds);
       setCases(current => current.filter(item => !deletedIds.has(item.id)));
+      setCasePagination(current => ({ ...current, total: Math.max(0, current.total - res.data.deleted) }));
       setSelectedCaseIds(new Set());
       setBatchResult({ success: true, message: `已删除 ${res.data.deleted} 个案例` });
       await fetchStatus();
+      // Keep this preflight batch stable while the user screens it.  Reloading
+      // here would pull new records into the first 100 immediately after every
+      // deletion; the next refill happens only after the user queues a batch
+      // for OCR (handleQueueSelectedForOcr).
     } catch (error) {
       setBatchResult({ success: false, message: error instanceof Error ? error.message : '删除失败' });
+    } finally {
+      setSelectionWorking(false);
+    }
+  };
+
+  const handleQueueSelectedForOcr = async () => {
+    const ids = [...selectedCaseIds];
+    if (activePanel !== 'pending_quality' || ids.length === 0 || selectionWorking) return;
+    setSelectionWorking(true);
+    setBatchResult(null);
+    try {
+      const res = await api.queueCasesForOcr(ids);
+      if (!res.success) throw new Error(res.error || '加入 OCR 队列失败');
+      setSelectedCaseIds(new Set());
+      setBatchResult({ success: true, message: `已将 ${res.data.queued} 张图片加入 OCR 队列；你可以继续预审下一页。` });
+      await fetchStatus();
+      await fetchPanelCases('pending_quality', true);
+    } catch (error) {
+      setBatchResult({ success: false, message: error instanceof Error ? error.message : '加入 OCR 队列失败' });
+    } finally {
+      setSelectionWorking(false);
+    }
+  };
+
+  const handleSelectedApprove = async () => {
+    const ids = cases
+      .filter(item => selectedCaseIds.has(item.id) && item.reviewStatus === 'needs_review')
+      .map(item => item.id);
+    if (activePanel !== 'needs_review' || ids.length === 0 || selectionWorking) return;
+    if (!window.confirm(`确定将已选的 ${ids.length} 个案例收入案例库吗？`)) return;
+
+    setSelectionWorking(true);
+    setBatchResult(null);
+    try {
+      const res = await api.batchApprove(['needs_review'], ids);
+      if (!res.success) throw new Error(res.error || '入库失败');
+      setBatchResult({ success: true, message: `已将 ${res.data.approved} 个案例收入案例库` });
+      await fetchStatus();
+      await fetchPanelCases('needs_review', true);
+    } catch (error) {
+      setBatchResult({ success: false, message: error instanceof Error ? error.message : '入库失败' });
+    } finally {
+      setSelectionWorking(false);
+    }
+  };
+
+  const handleSelectedReanalyze = async () => {
+    const ids = cases
+      .filter(item => selectedCaseIds.has(item.id) && item.reviewStatus === 'analysis_failed')
+      .map(item => item.id);
+    if (activePanel !== 'failed' || ids.length === 0 || selectionWorking || analysisIsActive || ocrIsActive) {
+      if (activePanel === 'failed' && selectedCaseIds.size > 0 && ids.length === 0) {
+        setBatchResult({ success: false, message: '所选案例均为“缺少来源”，请先补充来源信息，无需重复分析' });
+      }
+      return;
+    }
+    if (!window.confirm(`将重新分析所选的 ${ids.length} 张图片，并产生模型费用。确定继续吗？`)) return;
+
+    setSelectionWorking(true);
+    setBatchResult(null);
+    try {
+      const result = await api.startAnalysisJob(ids);
+      if (!result.success) throw new Error(result.error || '重新分析启动失败');
+      observedActiveAnalysisRef.current = ACTIVE_JOB_STATUSES.has(result.data.status);
+      setAnalysisJob(result.data);
+      setSelectedCaseIds(new Set());
+      setManagementMode(false);
+      setBatchResult({ success: true, message: `已将 ${result.data.total} 个案例加入重新分析任务` });
+    } catch (error) {
+      setBatchResult({ success: false, message: error instanceof Error ? error.message : '重新分析失败' });
     } finally {
       setSelectionWorking(false);
     }
@@ -568,6 +778,25 @@ export default function ReviewPage() {
     setTimeout(() => taskListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
   };
 
+  const openPreflight = async () => {
+    setWorkflowTab('preflight');
+    await fetchPanelCases('pending_quality');
+    setManagementMode(true);
+    setTimeout(() => taskListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+  };
+
+  const closePreflight = () => {
+    setWorkflowTab('processing');
+    panelRequestRef.current += 1;
+    setActivePanel(null);
+    setCases([]);
+    setCasesLoading(false);
+    setCasesLoadingMore(false);
+    setSelectedCaseIds(new Set());
+    setManagementMode(false);
+    setExpandedCase(null);
+  };
+
   const imageCandidates = (c: VisualCase) => [c.thumbnailPath, c.imagePath, c.imageUrl].filter(Boolean).map(withBaseUrl);
 
   const handleImageError = (c: VisualCase) => (e: React.SyntheticEvent<HTMLImageElement>) => {
@@ -582,11 +811,13 @@ export default function ReviewPage() {
   };
 
   const panelCount = (key: string) => panels.find(p => p.key === key)?.count ?? 0;
-  const pendingRecognitionCount = panelCount('pending_classify');
+  const pendingRecognitionCount = panelCount('pending_ocr');
+  const pendingQualityCount = panelCount('pending_quality');
   const needsReviewCount = panelCount('needs_review');
   const lowConfidenceCount = panelCount('low_confidence');
   const reviewReadyCount = needsReviewCount + lowConfidenceCount;
   const failedCount = panelCount('failed');
+  const retryableFailedCount = panels.find(panel => panel.key === 'failed')?.retryableCount ?? 0;
   const approvedCount = panelCount('approved');
 
   const queueConfig = activePanel ? QUEUE_CONFIG[activePanel] : null;
@@ -594,46 +825,11 @@ export default function ReviewPage() {
   const queueCount = activePanel ? panelCount(activePanel) : 0;
   const selectedCount = selectedCaseIds.size;
   const allLoadedSelected = cases.length > 0 && cases.every(item => selectedCaseIds.has(item.id));
-  const anyBatchRunning = batchType !== null || ocrIsActive || analysisIsActive;
-  const ocrElapsed = ocrJob?.startedAt
-    ? Math.max(0, Math.round((Date.now() - new Date(ocrJob.startedAt).getTime()) / 1000))
-    : 0;
-  const ocrStageLabel = ocrJob?.status === 'cancelling'
-    ? '正在停止，将在当前图片完成后结束'
-    : ocrJob?.stage === 'backing_up'
-      ? '正在备份案例库'
-      : ocrJob?.stage === 'preparing'
-        ? '正在准备任务'
-        : '正在识别图片文字';
+  const anyBatchRunning = analysisIsActive || ocrIsActive || analysisStartWorking || ocrStartWorking;
+  const preflightMode = workflowTab === 'preflight';
   const analysisElapsed = analysisJob?.startedAt
     ? Math.max(0, Math.round((Date.now() - new Date(analysisJob.startedAt).getTime()) / 1000))
     : 0;
-  const analysisStageLabel = analysisJob?.status === 'cancelling'
-    ? '正在停止，将在当前图片分析完成后结束'
-    : analysisJob?.stage === 'backing_up'
-      ? '正在备份案例库'
-      : analysisJob?.stage === 'preparing'
-        ? '正在准备 Qwen 任务'
-        : 'Qwen 正在理解图片内容';
-
-  const activeFlowStep = analysisIsActive
-    ? 2
-    : pendingRecognitionCount > 0
-      ? 1
-      : reviewReadyCount > 0
-        ? 3
-        : approvedCount > 0
-          ? 4
-          : 1;
-  const lastJobFinished = analysisJob && !analysisIsActive;
-  const lastJobSucceeded = lastJobFinished ? analysisJob.analyzed : 0;
-  const lastJobFailed = lastJobFinished ? analysisJob.failed : 0;
-  const autoActions = [
-    { type: 'quality' as const, label: '开始图片质检', panelKey: 'pending_quality' },
-    { type: 'classify' as const, label: '开始 Qwen 图片分析', panelKey: 'pending_classify' },
-    { type: 'ocr' as const, label: '提取图片文字（可选）', panelKey: 'pending_ocr' },
-  ];
-
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: 80, color: theme.colors.text.tertiary }}>
@@ -644,44 +840,87 @@ export default function ReviewPage() {
 
   return (
     <div>
-      <section className="recognition-section recognition-flow" aria-label="处理流程">
-        <button className="recognition-refresh" onClick={() => { fetchStatus(); if (activePanel) fetchPanelCases(activePanel); }}>
-          刷新
-        </button>
-        <div className="recognition-steps">
-          {[
-            ['待处理', '尚未识别的图片'],
-            ['识别中', 'OCR 与内容分析'],
-            ['待确认', '人工检查与修正'],
-            ['已入库', '完成确认，正式入库'],
-          ].map(([label, description], index) => {
-            const step = index + 1;
-            const isActive = activeFlowStep === step;
-            const isComplete = activeFlowStep > step;
-            return (
-              <div className={`recognition-step ${isActive ? 'is-active' : ''} ${isComplete ? 'is-complete' : ''}`} key={label}>
-                <div className="recognition-step-marker">{isComplete ? '✓' : step}</div>
-                <div><strong>{label}</strong><span>{description}</span></div>
-              </div>
-            );
-          })}
+      {statusError && (
+        <div role="alert" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12, padding: '10px 12px', border: `1px solid ${theme.colors.redBorder}`, borderRadius: 9, background: theme.colors.redBg, color: theme.colors.red, fontSize: 12 }}>
+          <span>工作台状态加载失败：{statusError}</span>
+          <button type="button" onClick={fetchStatus} style={{ minHeight: 30, padding: '0 10px', border: `1px solid ${theme.colors.redBorder}`, borderRadius: 7, background: '#fff', color: theme.colors.red, cursor: 'pointer', fontWeight: 700 }}>重试</button>
+        </div>
+      )}
+      <section className="recognition-section recognition-flow" aria-label="工作流切换">
+        {!preflightMode && <button className={`recognition-api-key ${apiConfig?.configured ? 'is-configured' : ''}`} onClick={openApiConfig} title={apiConfig?.configured ? `已配置 ${apiConfig.keyHint || 'API Key'}` : '配置个人 API Key'}>
+          <span aria-hidden="true" />API Key
+        </button>}
+        <div className="recognition-tabs" role="tablist" aria-label="处理工作区">
+          <button role="tab" aria-selected={preflightMode} className={preflightMode ? 'is-active' : ''} onClick={openPreflight}>
+            <strong>预审</strong><b>{pendingQualityCount}</b>
+          </button>
+          <button role="tab" aria-selected={!preflightMode} className={!preflightMode ? 'is-active' : ''} onClick={closePreflight}>
+            <strong>OCR 与审核</strong><b>{panelCount('pending_ocr') + reviewReadyCount}</b>
+          </button>
         </div>
       </section>
 
-      <section className={`recognition-hero ${analysisIsActive ? 'is-running' : ''}`} aria-label="图片识别任务">
-        {analysisJob && analysisIsActive ? (
+      {apiConfigOpen && (
+        <div className="api-config-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setApiConfigOpen(false); }}>
+          <section className="api-config-dialog" role="dialog" aria-modal="true" aria-labelledby="api-config-title">
+            <header>
+              <div><span className="api-config-eyebrow">个人费用配置</span><h2 id="api-config-title">使用自己的 API Key</h2></div>
+              <button className="api-config-close" aria-label="关闭" onClick={() => setApiConfigOpen(false)}>×</button>
+            </header>
+            <p className="api-config-intro">保存后，Qwen 图片分析从你的账户计费。Key 会在服务器中加密保存，页面不会再次显示完整内容。</p>
+            <div className="api-provider-grid">
+              {(Object.keys(API_PROVIDER_PRESETS) as UserApiConfig['provider'][]).map(provider => (
+                <button key={provider} className={apiConfigForm.provider === provider ? 'is-selected' : ''} onClick={() => selectApiProvider(provider)}>
+                  <strong>{API_PROVIDER_PRESETS[provider].label}</strong><span>{provider === 'openrouter' ? '推荐' : provider === 'dashscope' ? 'Qwen 官方' : '高级'}</span>
+                </button>
+              ))}
+            </div>
+            <p className="api-provider-note">{API_PROVIDER_PRESETS[apiConfigForm.provider].note}</p>
+            <label className="api-config-field"><span>API Key</span><input type="password" autoComplete="off" value={apiConfigForm.apiKey} onChange={event => setApiConfigForm({ ...apiConfigForm, apiKey: event.target.value })} placeholder={apiConfig?.source === 'personal' ? `已保存 ${apiConfig.keyHint}；留空表示不修改` : '粘贴你的 Key'} /></label>
+            <label className="api-config-field"><span>模型名称</span><input value={apiConfigForm.model} onChange={event => setApiConfigForm({ ...apiConfigForm, model: event.target.value })} placeholder="例如 qwen3-vl-plus" /></label>
+            <label className="api-config-field"><span>API 地址</span><input value={apiConfigForm.endpoint} onChange={event => setApiConfigForm({ ...apiConfigForm, endpoint: event.target.value })} placeholder="https://…/chat/completions" /></label>
+            <div className="api-config-security"><span aria-hidden="true">⌁</span><p><strong>一人一份配置</strong>其他登录用户看不到也不会使用你的 Key；后台任务启动后会锁定到发起人的配置。</p></div>
+            {apiConfigMessage && <div className={`api-config-message ${apiConfigMessage.success ? 'is-success' : 'is-error'}`}>{apiConfigMessage.text}</div>}
+            <footer>
+              <div>{apiConfig?.source === 'personal' && <button className="api-config-remove" disabled={apiConfigWorking} onClick={removeApiConfig}>改用服务器默认配置</button>}</div>
+              <div className="api-config-actions"><button disabled={apiConfigWorking || apiConfig?.source !== 'personal'} onClick={testApiConfig}>测试连接</button><button className="is-primary" disabled={apiConfigWorking} onClick={saveApiConfig}>{apiConfigWorking ? '处理中…' : '保存配置'}</button></div>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {!preflightMode && <section className={`recognition-hero ${analysisIsActive || ocrIsActive ? 'is-running' : ''}`} aria-label="图片识别任务">
+        {ocrJob && ocrIsActive ? (
           <div className="recognition-live" aria-live="polite">
             <div className="recognition-live-copy">
-              <div className="recognition-live-kicker">{analysisStageLabel}</div>
+              <div className="recognition-live-kicker">正在进行 OCR 识别</div>
+              <div className="recognition-live-title">{ocrJob.currentCaseTitle || '正在准备识别队列'}</div>
+              <div className="recognition-live-meta">已处理 {ocrJob.processed}/{ocrJob.total} · 提取文字 {ocrJob.updated} · 无文字 {ocrJob.skipped} · 异常 {ocrJob.failed}{ocrJob.currentMethod ? ` · ${ocrJob.currentMethod}` : ''}</div>
+            </div>
+            <div className="recognition-live-value">{ocrJob.progress}%</div>
+            <div className="recognition-progress-track" role="progressbar" aria-label="OCR 识别进度" aria-valuemin={0} aria-valuemax={ocrJob.total} aria-valuenow={ocrJob.processed}>
+              <div className="recognition-progress-fill" style={{ width: `${ocrJob.progress}%` }} />
+            </div>
+            <div className="recognition-live-footer">
+              <span>OCR 会在后台继续。完成后，图片将自动进入待确认队列。</span>
+              <button className="recognition-stop" onClick={cancelCurrentOcr} disabled={ocrCancelWorking || ocrJob.status === 'cancelling'}>
+                {ocrJob.status === 'cancelling' ? '正在停止…' : '完成当前张后停止'}
+              </button>
+            </div>
+          </div>
+        ) : analysisJob && analysisIsActive ? (
+          <div className="recognition-live" aria-live="polite">
+            <div className="recognition-live-copy">
+              <div className="recognition-live-kicker">{analysisJob.status === 'cancelling' ? '正在停止 OCR' : '正在进行 OCR'}</div>
               <div className="recognition-live-title">{analysisJob.currentCaseTitle || '正在建立图片识别序列'}</div>
-              <div className="recognition-live-meta">已处理 {analysisJob.processed}/{analysisJob.total} · 成功 {analysisJob.analyzed} · 异常 {analysisJob.failed} · 已用时 {analysisElapsed}s</div>
+              <div className="recognition-live-meta">已分析 {analysisJob.processed}/{analysisJob.total} · 成功 {analysisJob.analyzed} · 异常 {analysisJob.failed} · 已用时 {analysisElapsed}s</div>
             </div>
             <div className="recognition-live-value">{analysisJob.progress}%</div>
             <div className="recognition-progress-track" role="progressbar" aria-label="图片识别进度" aria-valuemin={0} aria-valuemax={analysisJob.total} aria-valuenow={analysisJob.processed}>
               <div className="recognition-progress-fill" style={{ width: `${analysisJob.progress}%` }} />
             </div>
             <div className="recognition-live-footer">
-              <span>Qwen 正在检测图片质量、读取可见文字并理解图片内容。任务可在后台继续。</span>
+              <span>任务可在后台继续。</span>
               <button className="recognition-stop" onClick={cancelCurrentAnalysis} disabled={analysisCancelWorking || analysisJob.status === 'cancelling'}>
                 {analysisJob.status === 'cancelling' ? '正在停止…' : '完成当前张后停止'}
               </button>
@@ -692,281 +931,20 @@ export default function ReviewPage() {
           <div className="recognition-idle">
             <div className="recognition-inbox-icon"><img src="/OCR.png" alt="" aria-hidden="true" /></div>
             <div className="recognition-idle-copy">
-              <div className="recognition-count">{pendingRecognitionCount}<span>张</span></div>
-              <p>{pendingRecognitionCount > 0 ? '这些图片尚未进行识别，请开始批量处理。' : '当前没有尚未识别的图片。'}</p>
+              <div className="recognition-count-row">
+                <div className="recognition-count">{pendingRecognitionCount}<span>张</span></div>
+              </div>
+              <p>{pendingRecognitionCount > 0 ? '这些图片已完成预审，随时可开始批量 OCR。' : 'OCR 队列为空；请先在“预审”中挑选图片。'}</p>
             </div>
             <div className="recognition-primary-action">
-              <button onClick={() => runBatch('classify')} disabled={pendingRecognitionCount === 0 || anyBatchRunning}>
-                <span aria-hidden="true">▶</span>{pendingRecognitionCount > 0 ? '开始 OCR 识别' : '暂无待处理图片'}
-              </button>
-              <span>系统将自动检测图片质量，提取文字与内容信息</span>
-            </div>
-          </div>
-        )}
-      </section>
-
-      <section className="recognition-section recognition-result" aria-labelledby="recognition-result-title">
-        <div className="recognition-result-head">
-          <div><h2 id="recognition-result-title">上次识别结果</h2><span>{analysisJob ? formatJobTime(analysisJob.finishedAt || analysisJob.heartbeatAt) : '尚无识别记录'}</span></div>
-          <div className={`recognition-result-state ${lastJobFailed > 0 ? 'has-warning' : ''}`}><span>{lastJobFailed > 0 ? '!' : '✓'}</span>{analysisJob ? (analysisJob.status === 'completed' ? '已完成' : analysisJob.status === 'cancelled' ? '已停止' : '任务异常') : '尚未处理'}</div>
-        </div>
-        <div className="recognition-result-grid">
-          <button className="recognition-metric is-review" onClick={() => switchToPanel('needs_review')} disabled={reviewReadyCount === 0}><strong>{lastJobSucceeded}</strong><span>进入待确认</span><i aria-hidden="true">→</i></button>
-          <button className="recognition-metric is-error" onClick={() => switchToPanel('failed')} disabled={failedCount === 0}><strong>{lastJobFailed}</strong><span>识别异常</span><i aria-hidden="true">→</i></button>
-          <div className="recognition-metric is-approved"><strong>{approvedCount}</strong><span>当前已入库</span></div>
-        </div>
-        <div className="recognition-result-note"><span aria-hidden="true">ⓘ</span>{lastJobSucceeded > 0 ? '识别成功的图片已进入待确认列表，请及时检查并修正信息。' : lastJobFailed > 0 ? '存在识别异常，请在下方异常列表中检查图片或重新识别。' : '完成识别后，结果会在这里汇总。'}</div>
-        {batchResult && <div className={`recognition-toast ${batchResult.success ? 'is-success' : 'is-error'}`}>{batchResult.message}</div>}
-      </section>
-
-      {/* ═══════ Section 2: Auto Processing Zone ═══════ */}
-      <div hidden aria-hidden="true" style={{
-        background: theme.colors.bgCard,
-        borderRadius: theme.radius.lg,
-        border: `1px solid ${anyBatchRunning ? theme.colors.accentBorder : theme.colors.border}`,
-        padding: '16px 20px',
-        marginBottom: 20,
-        boxShadow: theme.shadow.card,
-        transition: 'border-color 0.2s',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
-          <span style={{ fontSize: theme.typography.size.lg, fontWeight: 600, color: theme.colors.text.primary }}>
-            批量补全
-          </span>
-          <span style={{ fontSize: theme.typography.size.xs, color: theme.colors.text.tertiary }}>
-            一次处理当前缺少的图片信息
-          </span>
-        </div>
-        {/* Running indicator */}
-        {batchType && (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            padding: '10px 14px', marginBottom: 12,
-            borderRadius: theme.radius.md,
-            background: theme.colors.accentBg,
-            border: `1px solid ${theme.colors.accentBorder}`,
-          }}>
-            <span style={{
-              display: 'inline-block', width: 16, height: 16,
-              border: `2px solid ${theme.colors.accentBorder}`,
-              borderTopColor: theme.colors.accent,
-              borderRadius: '50%',
-              animation: 'spin 0.8s linear infinite',
-            }} />
-            <div>
-              <div style={{ fontSize: theme.typography.size.base, fontWeight: 600, color: theme.colors.accent }}>
-                正在执行{batchType === 'quality' ? '图片质检' : '智能分类'}...
-              </div>
-              <div style={{ fontSize: theme.typography.size.xs, color: theme.colors.text.secondary, marginTop: 1 }}>
-                已用时 {batchElapsed}s{batchElapsed > 15 ? ' · 大批量任务可能需要较长时间，请耐心等待' : ''}
-              </div>
-            </div>
-          </div>
-        )}
-        {analysisJob && analysisIsActive && (
-          <div className="ocr-progress-card" aria-live="polite">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: theme.typography.size.base, fontWeight: 700, color: theme.colors.text.primary }}>
-                  {analysisStageLabel}
-                </div>
-                <div style={{ fontSize: theme.typography.size.xs, color: theme.colors.text.secondary, marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {analysisJob.currentCaseTitle || '正在建立图片分析序列'}
-                </div>
-              </div>
-              <div style={{ fontFamily: theme.typography.fontMono, fontSize: 24, fontWeight: 700, color: theme.colors.accent, lineHeight: 1 }}>
-                {analysisJob.progress}%
-              </div>
-            </div>
-
-            <div
-              className="ocr-progress-track"
-              role="progressbar"
-              aria-label="Qwen 图片分析进度"
-              aria-valuemin={0}
-              aria-valuemax={analysisJob.total}
-              aria-valuenow={analysisJob.processed}
-            >
-              <div className="ocr-progress-fill" style={{ width: `${analysisJob.progress}%` }} />
-            </div>
-
-            <div className="ocr-progress-stats analysis-progress-stats">
-              <div><strong>{analysisJob.processed}</strong><span>已处理 / {analysisJob.total}</span></div>
-              <div><strong style={{ color: theme.colors.green }}>{analysisJob.analyzed}</strong><span>分析成功</span></div>
-              <div><strong style={{ color: theme.colors.red }}>{analysisJob.failed}</strong><span>分析失败</span></div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
-              <div style={{ fontSize: theme.typography.size.xs, color: theme.colors.text.secondary }}>
-                Qwen VL 图片语义理解
-                <span style={{ color: theme.colors.text.tertiary }}> · 已用时 {analysisElapsed}s · OCR 文字仅作为辅助上下文</span>
-              </div>
-              <button
-                onClick={cancelCurrentAnalysis}
-                disabled={analysisCancelWorking || analysisJob.status === 'cancelling'}
-                style={{
-                  padding: '6px 10px', borderRadius: theme.radius.md,
-                  border: `1px solid ${theme.colors.border}`,
-                  background: theme.colors.bgCard, color: theme.colors.text.secondary,
-                  fontSize: theme.typography.size.xs, fontWeight: 600,
-                  cursor: analysisCancelWorking || analysisJob.status === 'cancelling' ? 'wait' : 'pointer',
-                  opacity: analysisCancelWorking || analysisJob.status === 'cancelling' ? 0.6 : 1,
-                }}
-              >
-                {analysisJob.status === 'cancelling' ? '正在停止…' : '完成当前张后停止'}
+              <button type="button" onClick={startPendingOcr} disabled={pendingRecognitionCount === 0 || anyBatchRunning}>
+                <span aria-hidden="true">▶</span>{ocrStartWorking ? '正在启动…' : ocrIsActive ? 'OCR 处理中…' : pendingRecognitionCount > 0 ? '开始 OCR' : '前往预审挑选'}
               </button>
             </div>
-            {analysisPollingWarning && (
-              <div style={{ marginTop: 10, fontSize: theme.typography.size.xs, color: theme.colors.orange }}>
-                {analysisPollingWarning}
-              </div>
-            )}
           </div>
         )}
-        {ocrJob && ocrIsActive && (
-          <div className="ocr-progress-card" aria-live="polite">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: theme.typography.size.base, fontWeight: 700, color: theme.colors.text.primary }}>
-                  {ocrStageLabel}
-                </div>
-                <div style={{ fontSize: theme.typography.size.xs, color: theme.colors.text.secondary, marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {ocrJob.currentCaseTitle || '正在建立处理序列'}
-                </div>
-              </div>
-              <div style={{ fontFamily: theme.typography.fontMono, fontSize: 24, fontWeight: 700, color: theme.colors.accent, lineHeight: 1 }}>
-                {ocrJob.progress}%
-              </div>
-            </div>
+      </section>}
 
-            <div
-              className="ocr-progress-track"
-              role="progressbar"
-              aria-label="OCR 处理进度"
-              aria-valuemin={0}
-              aria-valuemax={ocrJob.total}
-              aria-valuenow={ocrJob.processed}
-            >
-              <div className="ocr-progress-fill" style={{ width: `${ocrJob.progress}%` }} />
-            </div>
-
-            <div className="ocr-progress-stats">
-              <div><strong>{ocrJob.processed}</strong><span>已处理 / {ocrJob.total}</span></div>
-              <div><strong style={{ color: theme.colors.green }}>{ocrJob.updated}</strong><span>识别成功</span></div>
-              <div><strong style={{ color: theme.colors.orange }}>{ocrJob.skipped}</strong><span>无可读文字</span></div>
-              <div><strong style={{ color: theme.colors.red }}>{ocrJob.failed}</strong><span>处理失败</span></div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
-              <div style={{ fontSize: theme.typography.size.xs, color: theme.colors.text.secondary }}>
-                {ocrJob.stage === 'ocr' ? ocrMethodLabel(ocrJob.currentMethod) : ocrStageLabel}
-                <span style={{ color: theme.colors.text.tertiary }}> · 已用时 {ocrElapsed}s · 可离开此页面，任务会继续</span>
-              </div>
-              <button
-                onClick={cancelCurrentOcr}
-                disabled={ocrCancelWorking || ocrJob.status === 'cancelling'}
-                style={{
-                  padding: '6px 10px', borderRadius: theme.radius.md,
-                  border: `1px solid ${theme.colors.border}`,
-                  background: theme.colors.bgCard, color: theme.colors.text.secondary,
-                  fontSize: theme.typography.size.xs, fontWeight: 600,
-                  cursor: ocrCancelWorking || ocrJob.status === 'cancelling' ? 'wait' : 'pointer',
-                  opacity: ocrCancelWorking || ocrJob.status === 'cancelling' ? 0.6 : 1,
-                }}
-              >
-                {ocrJob.status === 'cancelling' ? '正在停止…' : '完成当前张后停止'}
-              </button>
-            </div>
-            {ocrPollingWarning && (
-              <div style={{ marginTop: 10, fontSize: theme.typography.size.xs, color: theme.colors.orange }}>
-                {ocrPollingWarning}
-              </div>
-            )}
-          </div>
-        )}
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {autoActions.map(action => {
-            const count = panelCount(action.panelKey);
-            const isRunning = batchType === action.type
-              || (action.type === 'ocr' && ocrIsActive)
-              || (action.type === 'classify' && analysisIsActive);
-            const isDisabled = anyBatchRunning;
-            return (
-              <button
-                key={action.type}
-                onClick={() => runBatch(action.type)}
-                disabled={isDisabled}
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: theme.radius.md,
-                  border: `1px solid ${isRunning ? theme.colors.accentBorder : theme.colors.border}`,
-                  background: isRunning ? theme.colors.accentBg : theme.colors.bgCard,
-                  color: isRunning ? theme.colors.accent : (isDisabled ? theme.colors.text.disabled : theme.colors.text.primary),
-                  fontSize: theme.typography.size.sm,
-                  fontWeight: 500,
-                  cursor: isDisabled ? 'not-allowed' : 'pointer',
-                  opacity: isDisabled && !isRunning ? 0.5 : 1,
-                  transition: 'all 0.15s',
-                }}
-              >
-                {action.type === 'ocr' && ocrIsActive && ocrJob
-                  ? `OCR 进行中（${ocrJob.processed}/${ocrJob.total}）`
-                  : action.type === 'classify' && analysisIsActive && analysisJob
-                    ? `Qwen 分析中（${analysisJob.processed}/${analysisJob.total}）`
-                  : isRunning ? '处理中...' : `${action.label}（${count}）`}
-              </button>
-            );
-          })}
-        </div>
-        {batchResult && (
-          <div style={{
-            marginTop: 12,
-            padding: '10px 14px',
-            borderRadius: theme.radius.md,
-            background: batchResult.success ? theme.colors.greenBg : theme.colors.redBg,
-            border: `1px solid ${batchResult.success ? theme.colors.greenBorder : theme.colors.redBorder}`,
-            color: batchResult.success ? theme.colors.green : theme.colors.red,
-            fontSize: theme.typography.size.sm,
-            lineHeight: 1.5,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}>
-            <span style={{ fontSize: 16 }}>{batchResult.success ? '✓' : '✗'}</span>
-            <span>{batchResult.message}</span>
-          </div>
-        )}
-        {ocrJob && !ocrIsActive && ocrJob.errors.length > 0 && (
-          <details style={{ marginTop: 10, fontSize: theme.typography.size.xs, color: theme.colors.text.secondary }}>
-            <summary style={{ cursor: 'pointer', fontWeight: 600, color: theme.colors.red }}>
-              查看最近一次 OCR 的失败详情（{ocrJob.failed}）
-            </summary>
-            <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
-              {ocrJob.errors.map((item, index) => (
-                <div key={`${item.caseId}:${index}`} style={{ padding: '8px 10px', borderRadius: theme.radius.md, background: theme.colors.redBg, border: `1px solid ${theme.colors.redBorder}` }}>
-                  <div style={{ fontWeight: 600, color: theme.colors.text.primary }}>{item.caseTitle || item.caseId}</div>
-                  <div style={{ marginTop: 2, color: theme.colors.red }}>{item.message} · {item.code}</div>
-                </div>
-              ))}
-            </div>
-          </details>
-        )}
-        {analysisJob && !analysisIsActive && analysisJob.errors.length > 0 && (
-          <details style={{ marginTop: 10, fontSize: theme.typography.size.xs, color: theme.colors.text.secondary }}>
-            <summary style={{ cursor: 'pointer', fontWeight: 600, color: theme.colors.red }}>
-              查看最近一次 Qwen 分析失败详情（{analysisJob.failed}）
-            </summary>
-            <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
-              {analysisJob.errors.map((item, index) => (
-                <div key={`${item.caseId}:${index}`} style={{ padding: '8px 10px', borderRadius: theme.radius.md, background: theme.colors.redBg, border: `1px solid ${theme.colors.redBorder}` }}>
-                  <div style={{ fontWeight: 600, color: theme.colors.text.primary }}>{item.caseTitle || item.caseId}</div>
-                  <div style={{ marginTop: 2, color: theme.colors.red }}>{item.message} · {item.code}</div>
-                </div>
-              ))}
-            </div>
-          </details>
-        )}
-      </div>
       <style>{`
         .recognition-hero,
         .recognition-section {
@@ -993,6 +971,7 @@ export default function ReviewPage() {
         }
         .recognition-inbox-icon { width: 88px; height: 88px; }
         .recognition-inbox-icon img { width: 100%; height: 100%; display: block; object-fit: contain; }
+        .recognition-count-row { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
         .recognition-count { margin-top: 4px; color: #0b1220; font-size: 46px; line-height: 1; font-weight: 760; letter-spacing: -.045em; font-variant-numeric: tabular-nums; }
         .recognition-count span { margin-left: 8px; color: #4d596a; font-size: 15px; font-weight: 500; letter-spacing: 0; }
         .recognition-idle-copy p { margin: 12px 0 0; color: #5e6978; font-size: 13px; }
@@ -1037,10 +1016,48 @@ export default function ReviewPage() {
         .recognition-warning { grid-column: 1 / -1; color: #b46400; font-size: 12px; }
         .recognition-section { margin-bottom: 12px; padding: 20px 22px; }
         .recognition-section h2 { margin: 0; color: #1b2535; font-size: 15px; font-weight: 750; letter-spacing: .01em; }
-        .recognition-flow { position: relative; margin-bottom: 6px; padding: 6px 64px 16px; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
-        .recognition-refresh { position: absolute; top: 3px; right: 2px; padding: 5px 11px; border: 1px solid #dce3ed; border-radius: 7px; background: #fff; color: #718096; font-size: 11px; font-weight: 600; cursor: pointer; }
-        .recognition-refresh:hover { border-color: #c7d3e2; color: #455267; }
-        .recognition-refresh:focus-visible { outline: 3px solid rgba(18, 101, 244, .18); outline-offset: 2px; }
+        .recognition-flow { position: relative; margin: 16px 0 20px; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+        .recognition-tabs { display: flex; width: min(100%, 380px); min-height: 46px; margin: 0 auto; padding: 3px; border: 1px solid #e0e3e9; border-radius: 14px; background: #f3f4f6; box-shadow: inset 0 1px 2px rgba(28, 35, 48, .05); }
+        .recognition-tabs button { flex: 1 1 50%; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; padding: 0 10px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: #727b8d; font-family: ${theme.typography.fontFamily}; text-align: center; cursor: pointer; transition: color .16s ease, background .16s ease, box-shadow .16s ease; }
+        .recognition-tabs button:hover:not(.is-active) { color: #3b4658; }
+        .recognition-tabs button.is-active { border-color: #dfe2e7; background: #fff; box-shadow: 0 2px 7px rgba(29, 38, 54, .12); color: #2265f5; }
+        .recognition-tabs strong { color: inherit; font-size: 14px; font-weight: 760; letter-spacing: -.03em; white-space: nowrap; }
+        .recognition-tabs b { color: inherit; font-size: 14px; font-weight: 680; letter-spacing: -.015em; font-variant-numeric: tabular-nums; }
+        .recognition-api-key { position: absolute; top: 3px; right: 2px; display: inline-flex; align-items: center; gap: 7px; padding: 6px 11px; border: 1px solid #d9e1ec; border-radius: 8px; background: #fff; color: #536174; font-size: 11px; font-weight: 700; cursor: pointer; }
+        .recognition-api-key > span { width: 7px; height: 7px; border-radius: 50%; background: #b8c2d0; box-shadow: 0 0 0 3px #f0f3f7; }
+        .recognition-api-key.is-configured > span { background: #15a46d; box-shadow: 0 0 0 3px #def5eb; }
+        .recognition-api-key:hover { border-color: #abc3e5; color: #1265f4; }
+        .recognition-api-key:focus-visible { outline: 3px solid rgba(18, 101, 244, .18); outline-offset: 2px; }
+        .api-config-backdrop { position: fixed; z-index: 1200; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(13, 24, 42, .42); backdrop-filter: blur(4px); }
+        .api-config-dialog { width: min(100%, 620px); max-height: min(780px, calc(100vh - 40px)); overflow: auto; border: 1px solid #dce4ef; border-radius: 16px; background: #fff; box-shadow: 0 28px 80px rgba(20, 38, 65, .24); }
+        .api-config-dialog > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 24px 26px 14px; }
+        .api-config-dialog h2 { margin: 5px 0 0; color: #142033; font-size: 22px; letter-spacing: -.025em; }
+        .api-config-eyebrow { color: #1265f4; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+        .api-config-close { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 8px; background: #f2f5f9; color: #657186; font-size: 22px; cursor: pointer; }
+        .api-config-intro { margin: 0; padding: 0 26px 18px; color: #657186; font-size: 12px; line-height: 1.7; }
+        .api-provider-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 0 26px; }
+        .api-provider-grid button { display: grid; min-width: 0; gap: 5px; padding: 12px; border: 1px solid #dde4ee; border-radius: 10px; background: #fff; color: #2d3a4e; text-align: left; cursor: pointer; }
+        .api-provider-grid button strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+        .api-provider-grid button span { width: max-content; padding: 2px 6px; border-radius: 99px; background: #eef2f7; color: #7b8798; font-size: 9px; font-weight: 700; }
+        .api-provider-grid button.is-selected { border-color: #1265f4; background: #f3f7ff; box-shadow: 0 0 0 2px rgba(18, 101, 244, .09); }
+        .api-provider-grid button.is-selected span { background: #dce9ff; color: #1265f4; }
+        .api-provider-note { min-height: 34px; margin: 9px 26px 13px; color: #7a8596; font-size: 11px; line-height: 1.55; }
+        .api-config-field { display: grid; gap: 6px; margin: 0 26px 13px; color: #46546a; font-size: 11px; font-weight: 700; }
+        .api-config-field input { width: 100%; box-sizing: border-box; height: 40px; padding: 0 12px; border: 1px solid #d8e0eb; border-radius: 8px; background: #fbfcfe; color: #1d2a3d; font: 12px ${theme.typography.fontMono}; outline: none; }
+        .api-config-field input:focus { border-color: #1265f4; box-shadow: 0 0 0 3px rgba(18, 101, 244, .1); background: #fff; }
+        .api-config-security { display: grid; grid-template-columns: 28px 1fr; gap: 9px; margin: 18px 26px 0; padding: 12px; border: 1px solid #dce9e4; border-radius: 10px; background: #f3faf7; color: #477063; }
+        .api-config-security > span { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 50%; background: #dff2ea; color: #16845e; font-size: 17px; }
+        .api-config-security p { margin: 0; font-size: 10px; line-height: 1.55; }
+        .api-config-security strong { display: block; margin-bottom: 2px; color: #285a49; font-size: 11px; }
+        .api-config-message { margin: 12px 26px 0; padding: 9px 11px; border-radius: 8px; font-size: 11px; }
+        .api-config-message.is-success { background: #eaf8f2; color: #147854; }
+        .api-config-message.is-error { background: #fff0ef; color: #b33e37; }
+        .api-config-dialog > footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 20px; padding: 16px 26px 22px; border-top: 1px solid #edf0f4; }
+        .api-config-dialog footer button { min-height: 36px; padding: 0 13px; border: 1px solid #d5deea; border-radius: 8px; background: #fff; color: #4e5d72; font-size: 11px; font-weight: 700; cursor: pointer; }
+        .api-config-dialog footer button:disabled { cursor: not-allowed; opacity: .45; }
+        .api-config-dialog footer .is-primary { border-color: #1265f4; background: #1265f4; color: #fff; }
+        .api-config-remove { border-color: transparent !important; color: #a34a43 !important; }
+        .api-config-actions { display: flex; gap: 8px; }
         .recognition-steps { display: grid; width: min(100%, 1040px); grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px; margin: 0 auto; }
         .recognition-step { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: 9px; min-width: 0; opacity: .72; }
         .recognition-step:not(:last-child)::after { content: ''; position: absolute; top: 15px; left: calc(100% + 5px); width: 18px; border-top: 1px solid #dce2eb; }
@@ -1229,12 +1246,13 @@ export default function ReviewPage() {
           .review-queue-heading { align-items: flex-start; flex-direction: column; gap: 5px; }
           .manual-classification-grid { grid-template-columns: 1fr; }
         }
-        @media (max-width: 540px) { .ocr-progress-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 540px) { .ocr-progress-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .recognition-tabs { flex-direction: column; } }
         @media (max-width: 680px) { .review-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } }
         @media (max-width: 430px) { .review-grid { grid-template-columns: 1fr; } }
       `}</style>
 
       {/* ═══════ Section 3: Queue Switcher ═══════ */}
+      {!preflightMode && <>
       <div className="review-queue-heading">
         <div>
           <h2>人工审核</h2>
@@ -1243,7 +1261,10 @@ export default function ReviewPage() {
         <span>{reviewReadyCount + failedCount} 张待处理</span>
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
-        {panels.filter(p => ['needs_review', 'low_confidence', 'failed'].includes(p.key)).map(p => {
+        {panels.filter(p => ['needs_review', 'low_confidence', 'failed'].includes(p.key)).sort((a, b) => {
+          const order = ['needs_review', 'low_confidence', 'failed'];
+          return order.indexOf(a.key) - order.indexOf(b.key);
+        }).map(p => {
           const cfg = QUEUE_CONFIG[p.key];
           if (!cfg) return null;
           const isActive = activePanel === p.key;
@@ -1293,6 +1314,7 @@ export default function ReviewPage() {
           );
         })}
       </div>
+      </>}
 
       {/* ═══════ Section 4: Task List ═══════ */}
       <div ref={taskListRef}>
@@ -1311,22 +1333,67 @@ export default function ReviewPage() {
                 </p>
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {activePanel === 'pending_ocr' && (
+                  <button
+                    onClick={startPendingOcr}
+                    disabled={ocrStartWorking || ocrIsActive || analysisIsActive || queueCount === 0}
+                    style={{
+                      height: 34, padding: '0 14px', borderRadius: 8, border: 'none',
+                      background: ocrStartWorking || ocrIsActive || analysisIsActive || queueCount === 0 ? theme.colors.accentBg : theme.colors.accent,
+                      color: ocrStartWorking || ocrIsActive || analysisIsActive || queueCount === 0 ? theme.colors.accent : '#fff',
+                      cursor: ocrStartWorking || ocrIsActive || analysisIsActive || queueCount === 0 ? 'not-allowed' : 'pointer',
+                      fontSize: 13, fontWeight: 800,
+                    }}
+                  >
+                    {ocrStartWorking ? '正在启动…' : ocrIsActive ? `OCR ${ocrJob?.progress ?? 0}%` : analysisIsActive ? '图片分析进行中' : `开始 OCR（${queueCount}）`}
+                  </button>
+                )}
+                {activePanel === 'needs_review' && (
+                  <button
+                    onClick={handleApproveCurrentPage}
+                    disabled={approvingAll || approvingCurrentPage || cases.length === 0}
+                    style={{
+                      height: 34, padding: '0 14px', borderRadius: 8, border: 'none',
+                      background: approvingAll || approvingCurrentPage || cases.length === 0 ? theme.colors.greenBg : theme.colors.green,
+                      color: approvingAll || approvingCurrentPage || cases.length === 0 ? theme.colors.green : '#fff',
+                      cursor: approvingAll || approvingCurrentPage || cases.length === 0 ? 'not-allowed' : 'pointer',
+                      fontSize: 13, fontWeight: 800,
+                    }}
+                  >
+                    {approvingCurrentPage ? '入库中…' : `一键入库当前页（${cases.length}）`}
+                  </button>
+                )}
                 {(activePanel === 'needs_review' || activePanel === 'low_confidence') && (
                   <button
                     onClick={handleApproveAll}
-                    disabled={approvingAll || queueCount === 0}
+                    disabled={approvingAll || approvingCurrentPage || queueCount === 0}
                     style={{
-                      height: 34, padding: '0 14px', borderRadius: 8, border: 'none',
-                      background: approvingAll || queueCount === 0 ? theme.colors.greenBg : theme.colors.green,
-                      color: approvingAll || queueCount === 0 ? theme.colors.green : '#fff',
-                      cursor: approvingAll || queueCount === 0 ? 'not-allowed' : 'pointer',
+                      height: 34, padding: '0 14px', borderRadius: 8,
+                      border: `1px solid ${theme.colors.greenBorder}`, background: theme.colors.bgCard, color: theme.colors.green,
+                      cursor: approvingAll || approvingCurrentPage || queueCount === 0 ? 'not-allowed' : 'pointer',
+                      opacity: approvingAll || approvingCurrentPage || queueCount === 0 ? .55 : 1,
                       fontSize: 13, fontWeight: 800,
                     }}
                   >
                     {approvingAll ? '入库中…' : `一键入库（${queueCount}）`}
                   </button>
                 )}
-                <button
+                {activePanel === 'failed' && (
+                  <button
+                    onClick={reanalyzeAllFailed}
+                    disabled={analysisStartWorking || analysisIsActive || ocrIsActive || retryableFailedCount === 0}
+                    style={{
+                      height: 34, padding: '0 14px', borderRadius: 8,
+                      border: 'none', background: analysisStartWorking || analysisIsActive || ocrIsActive || retryableFailedCount === 0 ? theme.colors.accentBg : theme.colors.accent,
+                      color: analysisStartWorking || analysisIsActive || ocrIsActive || retryableFailedCount === 0 ? theme.colors.accent : '#fff',
+                      cursor: analysisStartWorking || analysisIsActive || ocrIsActive || retryableFailedCount === 0 ? 'not-allowed' : 'pointer',
+                      fontSize: 13, fontWeight: 800,
+                    }}
+                  >
+                    {analysisStartWorking ? '正在启动…' : analysisIsActive ? '分析进行中…' : ocrIsActive ? 'OCR 进行中…' : `重新分析异常（${retryableFailedCount}）`}
+                  </button>
+                )}
+                {activePanel !== 'pending_quality' && <button
                   onClick={() => {
                     setManagementMode(current => {
                       if (current) {
@@ -1347,8 +1414,8 @@ export default function ReviewPage() {
                     cursor: 'pointer', fontSize: 13, fontWeight: 700,
                   }}
                 >
-                  {managementMode ? '退出管理' : activePanel === 'failed' ? '管理与人工分类' : '管理'}
-                </button>
+                  {managementMode ? '退出管理' : activePanel === 'failed' ? '管理与人工分类' : activePanel === 'pending_quality' ? '批量筛除' : '管理'}
+                </button>}
               </div>
             </div>
           </div>
@@ -1362,14 +1429,32 @@ export default function ReviewPage() {
             background: 'rgba(255,255,255,.96)', boxShadow: theme.shadow.card, backdropFilter: 'blur(10px)',
           }}>
             <strong style={{ fontSize: 13, color: theme.colors.text.primary }}>
-              {activePanel === 'failed' ? '可选择删除，或在图片右上角编辑分类与来源' : `已选 ${selectedCount} 项`}
+              {activePanel === 'failed' ? '可选择重新分析、删除，或在图片右上角编辑分类与来源' : `已选 ${selectedCount} 项`}
               <span style={{ color: theme.colors.text.tertiary, fontWeight: 400 }}> · 当前显示 {cases.length} 项</span>
             </strong>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button onClick={allLoadedSelected ? () => setSelectedCaseIds(new Set()) : selectAllLoaded} disabled={cases.length === 0}
                 style={{ height: 32, padding: '0 12px', borderRadius: 8, border: `1px solid ${theme.colors.border}`, background: theme.colors.bgCard, color: theme.colors.text.secondary, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
-                {allLoadedSelected ? '取消全选' : '全选当前页'}
+                {allLoadedSelected ? '取消全选' : '全选已加载'}
               </button>
+              {activePanel === 'needs_review' && (
+                <button onClick={handleSelectedApprove} disabled={!selectedCount || selectionWorking}
+                  style={{ height: 32, padding: '0 13px', borderRadius: 8, border: `1px solid ${theme.colors.greenBorder}`, background: !selectedCount ? theme.colors.greenBg : theme.colors.green, color: !selectedCount ? theme.colors.green : '#fff', cursor: !selectedCount ? 'not-allowed' : 'pointer', opacity: !selectedCount ? .55 : 1, fontSize: 12, fontWeight: 800 }}>
+                  {selectionWorking ? '处理中…' : '入库所选'}
+                </button>
+              )}
+              {activePanel === 'pending_quality' && (
+                <button onClick={handleQueueSelectedForOcr} disabled={!selectedCount || selectionWorking}
+                  style={{ height: 32, padding: '0 13px', borderRadius: 8, border: 'none', background: !selectedCount ? theme.colors.accentBg : theme.colors.accent, color: !selectedCount ? theme.colors.accent : '#fff', cursor: !selectedCount ? 'not-allowed' : 'pointer', opacity: !selectedCount ? .55 : 1, fontSize: 12, fontWeight: 800 }}>
+                  {selectionWorking ? '加入中…' : `加入 OCR 队列（${selectedCount}）`}
+                </button>
+              )}
+              {activePanel === 'failed' && (
+                <button onClick={handleSelectedReanalyze} disabled={!selectedCount || selectionWorking || analysisIsActive || ocrIsActive}
+                  style={{ height: 32, padding: '0 13px', borderRadius: 8, border: `1px solid ${theme.colors.accentBorder}`, background: !selectedCount ? theme.colors.accentBg : theme.colors.accent, color: !selectedCount ? theme.colors.accent : '#fff', cursor: !selectedCount ? 'not-allowed' : 'pointer', opacity: !selectedCount ? .55 : 1, fontSize: 12, fontWeight: 800 }}>
+                  {selectionWorking ? '处理中…' : '重新分析所选'}
+                </button>
+              )}
               <button onClick={handleSelectedDelete} disabled={!selectedCount || selectionWorking}
                 style={{ height: 32, padding: '0 13px', borderRadius: 8, border: `1px solid ${theme.colors.redBorder}`, background: !selectedCount ? theme.colors.redBg : theme.colors.red, color: !selectedCount ? theme.colors.red : '#fff', cursor: !selectedCount ? 'not-allowed' : 'pointer', opacity: !selectedCount ? .55 : 1, fontSize: 12, fontWeight: 800 }}>
                 {selectionWorking ? '处理中…' : '删除所选'}
@@ -1378,7 +1463,7 @@ export default function ReviewPage() {
           </div>
         )}
 
-        {activePanel && batchResult && !batchType && (
+        {activePanel && batchResult && (
           <div style={{
             marginBottom: 14, padding: '9px 12px', borderRadius: 8,
             border: `1px solid ${batchResult.success ? theme.colors.greenBorder : theme.colors.redBorder}`,
@@ -1411,9 +1496,10 @@ export default function ReviewPage() {
         <div className="review-grid">
           {cases.map(c => {
             const isExpanded = expandedCase === c.id;
-            const actions = queueActions;
+            const actions = c.reviewStatus === 'source_missing' ? [] : queueActions;
             const selected = selectedCaseIds.has(c.id);
             const isManualEditing = editingCaseId === c.id && manualDraft;
+            const isCaseWorking = caseActionWorkingId === c.id;
 
             return (
               <div
@@ -1430,7 +1516,7 @@ export default function ReviewPage() {
                     background: theme.colors.bgSubtle, flexShrink: 0, position: 'relative',
                   }}>
                     {imageCandidates(c).length > 0 ? (
-                      <img src={imageCandidates(c)[0]} alt={c.caseTitle || c.pageTitle || c.title || ''} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+                      <img src={imageCandidates(c)[0]} alt={c.caseTitle || c.pageTitle || c.title || ''} loading="lazy" decoding="async" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
                         onError={handleImageError(c)} />
                     ) : (
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 12, color: theme.colors.text.tertiary }}>无图片</div>
@@ -1475,6 +1561,7 @@ export default function ReviewPage() {
                       <button
                         key={act.action + act.label}
                         onClick={(event) => { event.stopPropagation(); handleAction(c.id, act.action); }}
+                        disabled={Boolean(caseActionWorkingId) || ((analysisIsActive || ocrIsActive) && act.action === 'reanalyze')}
                         style={{
                           padding: '5px 12px',
                           borderRadius: theme.radius.md,
@@ -1487,13 +1574,22 @@ export default function ReviewPage() {
                           color: act.primary ? '#fff' : (act.action === 'reject' ? theme.colors.red : theme.colors.text.secondary),
                           fontSize: theme.typography.size.xs,
                           fontWeight: act.primary ? 600 : 500,
-                          cursor: 'pointer',
+                          cursor: isCaseWorking ? 'wait' : 'pointer',
                           whiteSpace: 'nowrap',
                         }}
                       >
-                        {act.label}
+                        {isCaseWorking ? '处理中…' : act.label}
                       </button>
                     ))}
+                    {c.reviewStatus === 'source_missing' && (
+                      <button
+                        type="button"
+                        onClick={(event) => { event.stopPropagation(); beginManualEdit(c); }}
+                        style={{ padding: '5px 12px', borderRadius: theme.radius.md, border: `1px solid ${theme.colors.orangeBorder}`, background: theme.colors.orangeBg, color: theme.colors.orange, fontSize: theme.typography.size.xs, fontWeight: 650, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                      >
+                        补充来源
+                      </button>
+                    )}
                     <button
                       onClick={(event) => { event.stopPropagation(); setExpandedCase(isExpanded ? null : c.id); }}
                       style={{
@@ -1606,6 +1702,20 @@ export default function ReviewPage() {
             );
           })}
         </div>
+        {!casesLoading && activePanel && cases.length > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, padding: '22px 0 8px', color: theme.colors.text.tertiary, fontSize: 12 }}>
+            <span>已显示 {cases.length} / {casePagination.total} 张</span>
+            {casePagination.page < casePagination.totalPages && (
+              <button
+                onClick={loadMorePanelCases}
+                disabled={casesLoadingMore}
+                style={{ minHeight: 34, padding: '0 14px', border: `1px solid ${theme.colors.border}`, borderRadius: 8, background: theme.colors.bgCard, color: theme.colors.text.secondary, cursor: casesLoadingMore ? 'wait' : 'pointer', fontSize: 12, fontWeight: 700 }}
+              >
+                {casesLoadingMore ? '加载中…' : `加载更多（还剩 ${Math.max(0, casePagination.total - cases.length)} 张）`}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

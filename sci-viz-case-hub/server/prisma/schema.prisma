@@ -27,6 +27,7 @@ model VisualCase {
 
   contextText String @default("")
   ocrText     String @default("")
+  ocrProcessedAt DateTime?
   captureType String @default("image")
   userHint    String @default("")
   collectionScore Int @default(0)
@@ -79,6 +80,7 @@ model OcrJob {
   backupPath       String    @default("")
   error            String    @default("")
   cancelRequested  Boolean   @default(false)
+  ownerUserId      String    @default("")
   startedAt        DateTime?
   heartbeatAt      DateTime?
   finishedAt       DateTime?
@@ -107,6 +109,7 @@ model AnalysisJob {
   backupPath       String    @default("")
   error            String    @default("")
   cancelRequested  Boolean   @default(false)
+  ownerUserId      String    @default("")
   startedAt        DateTime?
   heartbeatAt      DateTime?
   finishedAt       DateTime?
@@ -206,6 +209,23 @@ model User {
   passwordHash String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  apiCredential UserApiCredential?
+}
+
+model UserApiCredential {
+  userId       String   @id
+  provider     String   @default("openrouter")
+  endpoint     String
+  model        String
+  encryptedKey String
+  keyIv        String
+  keyTag       String
+  keyHint      String   @default("")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model CollectionKpi {
