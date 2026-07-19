@@ -42,6 +42,7 @@
     "stanford:dry-run": "tsx src/crawler/runStanfordBatch.ts --max-urls=80",
     "db:dedup:dry-run": "tsx src/cleanupDuplicates.ts",
     "db:dedup": "tsx src/cleanupDuplicates.ts --execute",
+    "db:dedup:exact": "tsx src/cleanupExactImageDuplicates.ts --execute",
     "gap:normalize-tags": "tsx src/normalizeGapBatchTags.ts",
     "gap:noaa": "tsx src/runGapNoaaSupplement.ts",
     "gap:audit": "tsx src/auditGapCoverage.ts",

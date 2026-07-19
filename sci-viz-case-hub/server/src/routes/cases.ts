@@ -8,6 +8,7 @@ import { classifyEnterpriseCase, makeEnterpriseCompanyWhere } from '../services/
 import { toPublicCaseDto } from '../services/publicCase.js';
 import { sendInternalError } from '../middleware/requestContext.js';
 import { inferSourceOwner } from '../services/sourceOwner.js';
+import { ensureImageDedupeSchema, rememberDeletedImageHashes } from '../services/dedupe.js';
 
 function remapCase(c: Record<string, any>) {
   return {
@@ -332,14 +333,14 @@ casesRouter.post('/cases/batch/approve', async (req: Request, res: Response) => 
   }
 });
 
-// Move pre-reviewed captures into the durable OCR queue.  This is deliberately
-// separate from creating an OCR job: a reviewer can continue paging through a
-// large capture set while earlier selections wait safely for a later batch.
+// Move pre-reviewed captures into the durable image-analysis queue. The legacy
+// status name is retained for stored-data compatibility; the workbench starts
+// Qwen image understanding rather than the text-only OCR worker.
 casesRouter.post('/cases/batch/queue-ocr', async (req: Request, res: Response) => {
   try {
     const rawIds: unknown = req.body?.ids;
     if (!Array.isArray(rawIds) || rawIds.some(id => typeof id !== 'string')) {
-      return res.status(400).json({ success: false, error: '请选择要加入 OCR 队列的图片' });
+      return res.status(400).json({ success: false, error: '请选择要加入图片分析队列的图片' });
     }
     const ids = [...new Set(rawIds.map(id => id.trim()).filter(Boolean))];
     if (ids.length === 0 || ids.length > 2000) {
@@ -351,7 +352,7 @@ casesRouter.post('/cases/batch/queue-ocr', async (req: Request, res: Response) =
     });
     return res.json({ success: true, data: { queued: result.count } });
   } catch (error) {
-    return sendInternalError(req, res, 'queue cases for OCR', error);
+    return sendInternalError(req, res, 'queue cases for image analysis', error);
   }
 });
 
@@ -377,7 +378,7 @@ casesRouter.post('/cases/batch/delete', async (req: Request, res: Response) => {
 
     const existing = await prisma.visualCase.findMany({
       where: { id: { in: ids } },
-      select: { id: true, imagePath: true, thumbnailPath: true },
+      select: { id: true, imagePath: true, thumbnailPath: true, imageHash: true },
     });
 
     if (existing.length === 0) {
@@ -385,8 +386,12 @@ casesRouter.post('/cases/batch/delete', async (req: Request, res: Response) => {
       return;
     }
 
-    const result = await prisma.visualCase.deleteMany({
-      where: { id: { in: existing.map(item => item.id) } },
+    await ensureImageDedupeSchema();
+    const result = await prisma.$transaction(async tx => {
+      await rememberDeletedImageHashes(tx, existing.map(item => item.imageHash));
+      return tx.visualCase.deleteMany({
+        where: { id: { in: existing.map(item => item.id) } },
+      });
     });
 
     for (let index = 0; index < existing.length; index += 25) {
@@ -469,7 +474,7 @@ casesRouter.delete('/cases/:id', async (req: Request, res: Response) => {
   try {
     const existing = await prisma.visualCase.findUnique({
       where: { id: req.params.id },
-      select: { imagePath: true, thumbnailPath: true },
+      select: { imagePath: true, thumbnailPath: true, imageHash: true },
     });
 
     if (!existing) {
@@ -477,8 +482,12 @@ casesRouter.delete('/cases/:id', async (req: Request, res: Response) => {
       return;
     }
 
-    await prisma.visualCase.delete({
-      where: { id: req.params.id },
+    await ensureImageDedupeSchema();
+    await prisma.$transaction(async tx => {
+      await rememberDeletedImageHashes(tx, [existing.imageHash]);
+      await tx.visualCase.delete({
+        where: { id: req.params.id },
+      });
     });
 
     if (existing.imagePath || existing.thumbnailPath) {

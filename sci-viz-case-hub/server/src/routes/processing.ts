@@ -7,6 +7,7 @@ import { backupDatabase } from '../utils/backup.js';
 import { analyzeImage, classifyMediaType } from '../services/vision.js';
 import { normalizeTaxonomyValue } from '../services/taxonomy.js';
 import { normalizeCaseIds, normalizeReviewStatuses } from '../services/processingInput.js';
+import { buildWorkbenchQueuePanels } from '../services/workbenchQueue.js';
 import {
   cancelOcrJob,
   createOcrJob,
@@ -30,9 +31,9 @@ import {
 } from '../services/userApiCredentials.js';
 
 export const processingRouter = Router();
-// `pending_ocr` is the user-facing OCR queue, but its operation is full visual
-// analysis. Keep it out of text-extraction jobs so UI wording can never route
-// these cases into the wrong worker again.
+// `pending_ocr` is a legacy stored status. In the workbench it means "passed
+// preflight and waiting for full image analysis". Keep it out of text-only OCR
+// jobs so these cases can never be routed into the wrong worker.
 const OCR_JOB_STATUSES = [] as const;
 const ANALYSIS_JOB_STATUSES = ['pending_ocr', 'pending_ai_analysis', 'analysis_failed'] as const;
 const MAX_JOB_CASES = 2000;
@@ -476,42 +477,35 @@ processingRouter.get('/processing/queue-status', async (req, res) => {
     const [
       pendingQuality,
       pendingOcr,
-      pendingClassify,
       needsReview,
       lowConfidence,
       approved,
       failed,
-      retryableFailed,
+      sourceMissing,
     ] = await Promise.all([
       prisma.visualCase.count({
         where: { reviewStatus: 'pending_ai_analysis', ocrText: '', ocrProcessedAt: null },
       }),
       prisma.visualCase.count({ where: { reviewStatus: 'pending_ocr' } }),
-      prisma.visualCase.count({
-        where: {
-          reviewStatus: 'pending_ai_analysis',
-          OR: [{ imagePath: { not: '' } }, { thumbnailPath: { not: '' } }, { imageUrl: { not: '' } }],
-        },
-      }),
       prisma.visualCase.count({ where: { reviewStatus: 'needs_review' } }),
       prisma.visualCase.count({ where: { reviewStatus: 'low_confidence_review' } }),
       prisma.visualCase.count({ where: { reviewStatus: 'approved' } }),
-      prisma.visualCase.count({ where: { reviewStatus: { in: ['analysis_failed', 'source_missing'] } } }),
       prisma.visualCase.count({ where: { reviewStatus: 'analysis_failed' } }),
+      prisma.visualCase.count({ where: { reviewStatus: 'source_missing' } }),
     ]);
 
     res.json({
       success: true,
       data: {
-        panels: [
-          { key: 'pending_quality', label: '预审中', count: pendingQuality, description: '新采集图片，尚未决定是否识别' },
-          { key: 'pending_ocr', label: '等待 OCR', count: pendingOcr, description: '已通过预审，等待图片分析' },
-          { key: 'pending_classify', label: '待图片分析', count: pendingClassify, description: '直接理解原图内容，生成摘要与三轴分类' },
-          { key: 'needs_review', label: '待确认', count: needsReview, description: 'AI 分析完成，等待人工确认' },
-          { key: 'low_confidence', label: '需人工判断', count: lowConfidence, description: 'AI 结果不确定，需要人看' },
-          { key: 'approved', label: '已入库', count: approved, description: '已通过审核，案例库可见' },
-          { key: 'failed', label: '处理失败', count: failed, retryableCount: retryableFailed, description: '图片损坏、下载失败或分析失败' },
-        ],
+        panels: buildWorkbenchQueuePanels({
+          pendingQuality,
+          pendingAnalysis: pendingOcr,
+          needsReview,
+          lowConfidence,
+          approved,
+          analysisFailed: failed,
+          sourceMissing,
+        }),
       },
     });
   } catch (err: unknown) {

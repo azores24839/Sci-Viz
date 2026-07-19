@@ -493,7 +493,7 @@ export async function processSingleUrl(
         if (duplicate) {
           duplicateImageCount++;
           await deleteSavedImage(imageResult.imagePath, imageResult.thumbnailPath);
-          notices.push(`Duplicate image skipped: ${img.src} - matched ${duplicate.caseEntry.id} (${duplicate.matchType})`);
+          notices.push(`Duplicate image skipped: ${img.src} - matched ${duplicate.caseEntry?.id ?? 'deleted-image'} (${duplicate.matchType})`);
           reportProgress(options, { type: 'images_processed', url, count: 1, outcome: 'duplicate' });
           continue;
         }

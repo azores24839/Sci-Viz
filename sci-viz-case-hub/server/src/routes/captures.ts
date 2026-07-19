@@ -46,6 +46,10 @@ capturesRouter.post('/captures', upload.single('image_file'), async (req: Reques
       const duplicate = await findDuplicateCase(imageResult.imageHash);
       if (duplicate) {
         await deleteSavedImage(imageResult.imagePath, imageResult.thumbnailPath);
+        if (duplicate.matchType === 'deleted') {
+          res.status(409).json({ success: false, duplicate: true, matchType: 'deleted', error: '这张图片此前已在预审中删除，不会重新采集' });
+          return;
+        }
         res.json({
           success: true,
           duplicate: true,

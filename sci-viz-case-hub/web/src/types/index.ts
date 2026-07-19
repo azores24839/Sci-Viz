@@ -335,7 +335,7 @@ export const REVIEW_STATUS_LABELS: Record<ReviewStatus, string> = {
   low_confidence_review: '重点复核',
   approved: '已入库',
   rejected: '已丢弃',
-  analysis_failed: '分析异常',
+  analysis_failed: '分析失败',
   source_missing: '缺少来源',
 };
 

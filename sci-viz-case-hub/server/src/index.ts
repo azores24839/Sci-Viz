@@ -8,7 +8,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { ensureUploadDirs } from './services/image.js';
 import { seedVideos } from './services/videoSeed.js';
-import { startAnalysisRecovery, stopAnalysisRecovery } from './services/analysisRecovery.js';
 import { prisma } from './prisma.js';
 import { authRouter } from './routes/auth.js';
 import { authMiddleware } from './middleware/auth.js';
@@ -27,6 +26,7 @@ import { createConcurrencyLimit } from './middleware/concurrencyLimit.js';
 import { markInterruptedCrawlJobs } from './crawler/sourceJobRunner.js';
 import { recoverOcrJobs } from './services/ocrJobs.js';
 import { recoverAnalysisJobs } from './services/analysisJobs.js';
+import { ensureImageDedupeSchema } from './services/dedupe.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -208,7 +208,8 @@ if (process.argv.includes('--seed-videos')) {
     return sendInternalError(req, res, 'unhandled request', error);
   });
 
-  ensureUploadDirs();
+  await ensureUploadDirs();
+  await ensureImageDedupeSchema();
 
   void markInterruptedCrawlJobs().catch(error => {
     console.error('[crawl-recovery] failed to mark interrupted jobs', error);
@@ -219,8 +220,6 @@ if (process.argv.includes('--seed-videos')) {
   void recoverAnalysisJobs().catch(error => {
     console.error('[analysis-recovery] failed to recover Qwen analysis job', error);
   });
-  startAnalysisRecovery();
-
   const server = app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
@@ -230,7 +229,6 @@ if (process.argv.includes('--seed-videos')) {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`[server] Received ${signal}, shutting down...`);
-    stopAnalysisRecovery();
     server.closeAllConnections();
     server.close(async () => {
       await prisma.$disconnect().catch(() => {});

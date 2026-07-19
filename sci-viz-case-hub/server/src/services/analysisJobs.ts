@@ -3,6 +3,7 @@ import { prisma } from '../prisma.js';
 import { backupDatabase } from '../utils/backup.js';
 import { runVisionAnalysis } from './analysisRunner.js';
 import { resolveVisionConfig } from './userApiCredentials.js';
+import { dedupeCaseIdsByImageHash } from './processingInput.js';
 
 const ACTIVE_KEY = 'qwen-vision';
 const ACTIVE_STATUSES = ['queued', 'running', 'cancelling'];
@@ -177,12 +178,20 @@ async function runAnalysisJob(jobId: string): Promise<void> {
 
       const imagePath = visualCase.imagePath || visualCase.thumbnailPath || visualCase.imageUrl;
       if (!imagePath) {
+        await prisma.visualCase.update({
+          where: { id: caseId },
+          data: { reviewStatus: 'analysis_failed' },
+        });
         await recordFailure(job, index, errorDetail(caseId, caseTitle, 'NO_IMAGE', '没有可供 Qwen 分析的图片'));
         continue;
       }
 
       try {
-        await prisma.visualCase.update({ where: { id: caseId }, data: { reviewStatus: 'pending_ai_analysis' } });
+        // Keep the durable workflow status while Qwen is running. In particular,
+        // a pre-reviewed `pending_ocr` case must not be moved back into the
+        // `pending_ai_analysis` preflight pool. The AnalysisJob row already owns
+        // the transient running state; runVisionAnalysis atomically writes the
+        // terminal review status when the model returns.
         const result = await runVisionAnalysis(
           caseId,
           imagePath,
@@ -239,18 +248,17 @@ export async function createAnalysisJob(caseIds: string[], ownerUserId = '', sta
   if (existing) return { job: toAnalysisJobSnapshot(existing), created: false };
 
   const candidates = caseIds.length > 0
-    ? await prisma.visualCase.findMany({ where: { id: { in: caseIds } }, select: { id: true } })
+    ? await prisma.visualCase.findMany({ where: { id: { in: caseIds } }, select: { id: true, imageHash: true } })
     : await prisma.visualCase.findMany({
         where: {
           reviewStatus: { in: statuses?.length ? statuses : ['pending_ai_analysis'] },
           OR: [{ imagePath: { not: '' } }, { thumbnailPath: { not: '' } }, { imageUrl: { not: '' } }],
         },
         orderBy: { updatedAt: 'asc' },
-        select: { id: true },
+        select: { id: true, imageHash: true },
         take: 2000,
       });
-  const found = new Set(candidates.map(candidate => candidate.id));
-  const frozenIds = caseIds.length > 0 ? caseIds.filter(id => found.has(id)) : candidates.map(candidate => candidate.id);
+  const frozenIds = dedupeCaseIdsByImageHash(candidates, caseIds.length > 0 ? caseIds : undefined);
 
   try {
     const created = await prisma.analysisJob.create({

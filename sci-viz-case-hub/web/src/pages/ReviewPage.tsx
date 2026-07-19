@@ -31,11 +31,11 @@ const DISCIPLINE_OPTIONS = ['生命科学', '材料', '医学', '工程', '物�
 const PANEL_MAP: Record<string, { status: string; ocrStatus?: 'unprocessed' }> = {
   pending_quality: { status: 'pending_ai_analysis', ocrStatus: 'unprocessed' },
   pending_ocr: { status: 'pending_ocr' },
-  pending_classify: { status: 'pending_ai_analysis' },
   needs_review: { status: 'needs_review' },
   low_confidence: { status: 'low_confidence_review' },
   approved: { status: 'approved' },
   failed: { status: 'analysis_failed' },
+  source_missing: { status: 'source_missing' },
 };
 
 function normalizeContentTypeLabel(value: string): string {
@@ -53,18 +53,14 @@ const QUEUE_CONFIG: Record<string, {
 }> = {
   pending_quality: {
     label: '预审素材',
-    description: '先挑出值得处理的图片，再加入 OCR 队列',
+    description: '先挑出值得处理的图片，再加入图片分析队列',
   },
   pending_ocr: {
-    label: '等待 OCR',
-    description: '已通过预审；可随时开始本批识别',
+    label: '等待图片分析',
+    description: '已通过预审；等待生成摘要和三轴分类',
     accent: theme.colors.accent,
     accentBg: theme.colors.accentBg,
     accentBorder: theme.colors.accentBorder,
-  },
-  pending_classify: {
-    label: '待图片分析',
-    description: '理解图片内容，生成摘要和三轴分类',
   },
   needs_review: {
     label: '待确认',
@@ -86,18 +82,24 @@ const QUEUE_CONFIG: Record<string, {
     deEmphasized: true,
   },
   failed: {
-    label: '分析异常',
-    description: '图片不可读、来源缺失或识别结果无效',
+    label: '分析失败',
+    description: '全库中模型未能完成图片分析的项目，可重试或人工处理',
     accent: theme.colors.purple,
     accentBg: theme.colors.purpleBg,
     accentBorder: theme.colors.purpleBorder,
+  },
+  source_missing: {
+    label: '缺少来源',
+    description: '图片分析已完成，需要补充可追溯的来源网址',
+    accent: theme.colors.orange,
+    accentBg: theme.colors.orangeBg,
+    accentBorder: theme.colors.orangeBorder,
   },
 };
 
 const QUEUE_ACTIONS: Record<string, Array<{ label: string; action: 'approve' | 'reject' | 'reanalyze'; primary?: boolean }>> = {
   pending_quality: [],
   pending_ocr: [],
-  pending_classify: [{ label: '重新处理', action: 'reanalyze' }],
   needs_review: [],
   low_confidence: [
     { label: '重新分析', action: 'reanalyze' },
@@ -106,6 +108,7 @@ const QUEUE_ACTIONS: Record<string, Array<{ label: string; action: 'approve' | '
   failed: [
     { label: '重试', action: 'reanalyze', primary: true },
   ],
+  source_missing: [],
 };
 
 const ACTIVE_JOB_STATUSES = new Set(['queued', 'running', 'cancelling']);
@@ -135,9 +138,7 @@ function panelRequestParams(key: string, page: number): Record<string, string> {
   const config = PANEL_MAP[key];
   if (!config) return {};
   const params: Record<string, string> = { limit: '100', page: String(page) };
-  params.review_status = config.status === 'analysis_failed'
-    ? 'analysis_failed,source_missing'
-    : config.status;
+  params.review_status = config.status;
   if (config.ocrStatus) params.ocr_status = config.ocrStatus;
   return params;
 }
@@ -181,6 +182,7 @@ export default function ReviewPage() {
   const [apiConfigMessage, setApiConfigMessage] = useState<{ success: boolean; text: string } | null>(null);
   const observedActiveAnalysisRef = useRef(false);
   const handledAnalysisTerminalRef = useRef('');
+  const lastAnalysisStatusRefreshRef = useRef(0);
   const taskListRef = useRef<HTMLDivElement>(null);
   const panelRequestRef = useRef(0);
 
@@ -303,6 +305,12 @@ export default function ReviewPage() {
           consecutiveFailures = 0;
           setAnalysisPollingWarning('');
           setAnalysisJob(res.data);
+          const now = Date.now();
+          if (now - lastAnalysisStatusRefreshRef.current >= 3000) {
+            lastAnalysisStatusRefreshRef.current = now;
+            await fetchStatus();
+            if (disposed) return;
+          }
         } else {
           consecutiveFailures += 1;
         }
@@ -320,7 +328,7 @@ export default function ReviewPage() {
       disposed = true;
       if (timer) clearTimeout(timer);
     };
-  }, [analysisJob?.id, analysisIsActive]);
+  }, [analysisJob?.id, analysisIsActive, fetchStatus]);
 
   const fetchPanelCases = useCallback(async (key: string, preserveMessage = false) => {
     const requestId = ++panelRequestRef.current;
@@ -443,14 +451,15 @@ export default function ReviewPage() {
     const firstPanel = panels.find(panel => panel.key === 'pending_ocr' && panel.count > 0)
       ?? panels.find(panel => panel.key === 'needs_review' && panel.count > 0)
       ?? panels.find(panel => panel.key === 'low_confidence' && panel.count > 0)
-      ?? panels.find(panel => panel.key === 'failed' && panel.count > 0);
+      ?? panels.find(panel => panel.key === 'failed' && panel.count > 0)
+      ?? panels.find(panel => panel.key === 'source_missing' && panel.count > 0);
     if (firstPanel) fetchPanelCases(firstPanel.key);
   }, [activePanel, fetchPanelCases, loading, panels, workflowTab]);
 
   const startPendingOcr = async () => {
     const count = panelCount('pending_ocr');
     if (ocrStartWorking || ocrIsActive || analysisIsActive || count === 0) return;
-    if (count > 20 && !window.confirm(`将对 ${count} 张图片执行 OCR，并可能产生模型费用。确定继续吗？`)) return;
+    if (count > 20 && !window.confirm(`将对 ${count} 张图片执行图片分析，生成摘要和三轴分类，并可能产生模型费用。确定继续吗？`)) return;
     setOcrStartWorking(true);
     setBatchResult(null);
     try {
@@ -458,12 +467,12 @@ export default function ReviewPage() {
       if (res.success) {
         observedActiveAnalysisRef.current = ACTIVE_JOB_STATUSES.has(res.data.status);
         setAnalysisJob(res.data);
-        setBatchResult({ success: true, message: `OCR 已启动，本批 ${res.data.total} 张` });
+        setBatchResult({ success: true, message: `图片分析已启动，本批 ${res.data.total} 张` });
       } else {
-        setBatchResult({ success: false, message: res.error || 'OCR 启动失败' });
+        setBatchResult({ success: false, message: res.error || '图片分析启动失败' });
       }
     } catch (error) {
-      setBatchResult({ success: false, message: error instanceof Error ? error.message : 'OCR 启动异常' });
+      setBatchResult({ success: false, message: error instanceof Error ? error.message : '图片分析启动异常' });
     } finally {
       setOcrStartWorking(false);
     }
@@ -471,7 +480,7 @@ export default function ReviewPage() {
 
   const reanalyzeAllFailed = async () => {
     if (analysisStartWorking || analysisIsActive || ocrIsActive || retryableFailedCount === 0) return;
-    if (!window.confirm(`将重新分析 ${retryableFailedCount} 张分析异常图片，并产生模型费用。缺少来源的案例不会重复分析。确定继续吗？`)) return;
+    if (!window.confirm(`将重新分析 ${retryableFailedCount} 张失败图片，并产生模型费用。缺少来源的案例位于独立分组，不会重复分析。确定继续吗？`)) return;
     setAnalysisStartWorking(true);
     setBatchResult(null);
     try {
@@ -629,7 +638,7 @@ export default function ReviewPage() {
       // Keep this preflight batch stable while the user screens it.  Reloading
       // here would pull new records into the first 100 immediately after every
       // deletion; the next refill happens only after the user queues a batch
-      // for OCR (handleQueueSelectedForOcr).
+      // for analysis (handleQueueSelectedForOcr).
     } catch (error) {
       setBatchResult({ success: false, message: error instanceof Error ? error.message : '删除失败' });
     } finally {
@@ -644,13 +653,13 @@ export default function ReviewPage() {
     setBatchResult(null);
     try {
       const res = await api.queueCasesForOcr(ids);
-      if (!res.success) throw new Error(res.error || '加入 OCR 队列失败');
+      if (!res.success) throw new Error(res.error || '加入图片分析队列失败');
       setSelectedCaseIds(new Set());
-      setBatchResult({ success: true, message: `已将 ${res.data.queued} 张图片加入 OCR 队列；你可以继续预审下一页。` });
+      setBatchResult({ success: true, message: `已将 ${res.data.queued} 张图片加入图片分析队列；你可以继续预审下一页。` });
       await fetchStatus();
       await fetchPanelCases('pending_quality', true);
     } catch (error) {
-      setBatchResult({ success: false, message: error instanceof Error ? error.message : '加入 OCR 队列失败' });
+      setBatchResult({ success: false, message: error instanceof Error ? error.message : '加入图片分析队列失败' });
     } finally {
       setSelectionWorking(false);
     }
@@ -817,6 +826,7 @@ export default function ReviewPage() {
   const lowConfidenceCount = panelCount('low_confidence');
   const reviewReadyCount = needsReviewCount + lowConfidenceCount;
   const failedCount = panelCount('failed');
+  const sourceMissingCount = panelCount('source_missing');
   const retryableFailedCount = panels.find(panel => panel.key === 'failed')?.retryableCount ?? 0;
   const approvedCount = panelCount('approved');
 
@@ -855,7 +865,7 @@ export default function ReviewPage() {
             <strong>预审</strong><b>{pendingQualityCount}</b>
           </button>
           <button role="tab" aria-selected={!preflightMode} className={!preflightMode ? 'is-active' : ''} onClick={closePreflight}>
-            <strong>OCR 与审核</strong><b>{panelCount('pending_ocr') + reviewReadyCount}</b>
+            <strong>图片分析与审核</strong><b>{panelCount('pending_ocr') + reviewReadyCount + failedCount + sourceMissingCount}</b>
           </button>
         </div>
       </section>
@@ -895,7 +905,7 @@ export default function ReviewPage() {
             <div className="recognition-live-copy">
               <div className="recognition-live-kicker">正在进行 OCR 识别</div>
               <div className="recognition-live-title">{ocrJob.currentCaseTitle || '正在准备识别队列'}</div>
-              <div className="recognition-live-meta">已处理 {ocrJob.processed}/{ocrJob.total} · 提取文字 {ocrJob.updated} · 无文字 {ocrJob.skipped} · 异常 {ocrJob.failed}{ocrJob.currentMethod ? ` · ${ocrJob.currentMethod}` : ''}</div>
+              <div className="recognition-live-meta">本批已处理 {ocrJob.processed}/{ocrJob.total} · 提取文字 {ocrJob.updated} · 无文字 {ocrJob.skipped} · 本批 OCR 失败 {ocrJob.failed}{ocrJob.currentMethod ? ` · ${ocrJob.currentMethod}` : ''}</div>
             </div>
             <div className="recognition-live-value">{ocrJob.progress}%</div>
             <div className="recognition-progress-track" role="progressbar" aria-label="OCR 识别进度" aria-valuemin={0} aria-valuemax={ocrJob.total} aria-valuenow={ocrJob.processed}>
@@ -911,9 +921,9 @@ export default function ReviewPage() {
         ) : analysisJob && analysisIsActive ? (
           <div className="recognition-live" aria-live="polite">
             <div className="recognition-live-copy">
-              <div className="recognition-live-kicker">{analysisJob.status === 'cancelling' ? '正在停止 OCR' : '正在进行 OCR'}</div>
+              <div className="recognition-live-kicker">{analysisJob.status === 'cancelling' ? '正在停止图片分析' : '正在进行图片分析'}</div>
               <div className="recognition-live-title">{analysisJob.currentCaseTitle || '正在建立图片识别序列'}</div>
-              <div className="recognition-live-meta">已分析 {analysisJob.processed}/{analysisJob.total} · 成功 {analysisJob.analyzed} · 异常 {analysisJob.failed} · 已用时 {analysisElapsed}s</div>
+              <div className="recognition-live-meta">本批已处理 {analysisJob.processed}/{analysisJob.total} · 本批成功 {analysisJob.analyzed} · 本批分析失败 {analysisJob.failed} · 已用时 {analysisElapsed}s</div>
             </div>
             <div className="recognition-live-value">{analysisJob.progress}%</div>
             <div className="recognition-progress-track" role="progressbar" aria-label="图片识别进度" aria-valuemin={0} aria-valuemax={analysisJob.total} aria-valuenow={analysisJob.processed}>
@@ -934,11 +944,11 @@ export default function ReviewPage() {
               <div className="recognition-count-row">
                 <div className="recognition-count">{pendingRecognitionCount}<span>张</span></div>
               </div>
-              <p>{pendingRecognitionCount > 0 ? '这些图片已完成预审，随时可开始批量 OCR。' : 'OCR 队列为空；请先在“预审”中挑选图片。'}</p>
+              <p>{pendingRecognitionCount > 0 ? '这些图片已完成预审，可开始生成摘要和三轴分类。' : '待分析队列为空；请先在“预审”中挑选图片。'}</p>
             </div>
             <div className="recognition-primary-action">
               <button type="button" onClick={startPendingOcr} disabled={pendingRecognitionCount === 0 || anyBatchRunning}>
-                <span aria-hidden="true">▶</span>{ocrStartWorking ? '正在启动…' : ocrIsActive ? 'OCR 处理中…' : pendingRecognitionCount > 0 ? '开始 OCR' : '前往预审挑选'}
+                <span aria-hidden="true">▶</span>{ocrStartWorking ? '正在启动…' : analysisIsActive ? '图片分析中…' : pendingRecognitionCount > 0 ? '开始图片分析' : '前往预审挑选'}
               </button>
             </div>
           </div>
@@ -1256,13 +1266,13 @@ export default function ReviewPage() {
       <div className="review-queue-heading">
         <div>
           <h2>人工审核</h2>
-          <p>识别完成的图片会来到这里；确认后才会正式进入案例库。</p>
+          <p>分析结果、低置信度项目和处理失败项会分别列在这里；人工确认后才会正式入库。</p>
         </div>
-        <span>{reviewReadyCount + failedCount} 张待处理</span>
+        <span>全库累计 {reviewReadyCount + failedCount + sourceMissingCount} 张待处理</span>
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
-        {panels.filter(p => ['needs_review', 'low_confidence', 'failed'].includes(p.key)).sort((a, b) => {
-          const order = ['needs_review', 'low_confidence', 'failed'];
+        {panels.filter(p => ['needs_review', 'low_confidence', 'failed', 'source_missing'].includes(p.key)).sort((a, b) => {
+          const order = ['needs_review', 'low_confidence', 'failed', 'source_missing'];
           return order.indexOf(a.key) - order.indexOf(b.key);
         }).map(p => {
           const cfg = QUEUE_CONFIG[p.key];
@@ -1345,7 +1355,7 @@ export default function ReviewPage() {
                       fontSize: 13, fontWeight: 800,
                     }}
                   >
-                    {ocrStartWorking ? '正在启动…' : ocrIsActive ? `OCR ${ocrJob?.progress ?? 0}%` : analysisIsActive ? '图片分析进行中' : `开始 OCR（${queueCount}）`}
+                    {ocrStartWorking ? '正在启动…' : ocrIsActive ? `OCR ${ocrJob?.progress ?? 0}%` : analysisIsActive ? '图片分析进行中' : `开始图片分析（${queueCount}）`}
                   </button>
                 )}
                 {activePanel === 'needs_review' && (
@@ -1390,7 +1400,7 @@ export default function ReviewPage() {
                       fontSize: 13, fontWeight: 800,
                     }}
                   >
-                    {analysisStartWorking ? '正在启动…' : analysisIsActive ? '分析进行中…' : ocrIsActive ? 'OCR 进行中…' : `重新分析异常（${retryableFailedCount}）`}
+                    {analysisStartWorking ? '正在启动…' : analysisIsActive ? '分析进行中…' : ocrIsActive ? 'OCR 进行中…' : `重新分析失败项（${retryableFailedCount}）`}
                   </button>
                 )}
                 {activePanel !== 'pending_quality' && <button
@@ -1414,7 +1424,7 @@ export default function ReviewPage() {
                     cursor: 'pointer', fontSize: 13, fontWeight: 700,
                   }}
                 >
-                  {managementMode ? '退出管理' : activePanel === 'failed' ? '管理与人工分类' : activePanel === 'pending_quality' ? '批量筛除' : '管理'}
+                  {managementMode ? '退出管理' : (activePanel === 'failed' || activePanel === 'source_missing') ? '管理与人工分类' : activePanel === 'pending_quality' ? '批量筛除' : '管理'}
                 </button>}
               </div>
             </div>
@@ -1429,7 +1439,11 @@ export default function ReviewPage() {
             background: 'rgba(255,255,255,.96)', boxShadow: theme.shadow.card, backdropFilter: 'blur(10px)',
           }}>
             <strong style={{ fontSize: 13, color: theme.colors.text.primary }}>
-              {activePanel === 'failed' ? '可选择重新分析、删除，或在图片右上角编辑分类与来源' : `已选 ${selectedCount} 项`}
+              {activePanel === 'failed'
+                ? '可选择重新分析、删除，或在图片右上角编辑分类与来源'
+                : activePanel === 'source_missing'
+                  ? '可选择删除，或在图片右上角补充来源并确认分类'
+                  : `已选 ${selectedCount} 项`}
               <span style={{ color: theme.colors.text.tertiary, fontWeight: 400 }}> · 当前显示 {cases.length} 项</span>
             </strong>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1446,7 +1460,7 @@ export default function ReviewPage() {
               {activePanel === 'pending_quality' && (
                 <button onClick={handleQueueSelectedForOcr} disabled={!selectedCount || selectionWorking}
                   style={{ height: 32, padding: '0 13px', borderRadius: 8, border: 'none', background: !selectedCount ? theme.colors.accentBg : theme.colors.accent, color: !selectedCount ? theme.colors.accent : '#fff', cursor: !selectedCount ? 'not-allowed' : 'pointer', opacity: !selectedCount ? .55 : 1, fontSize: 12, fontWeight: 800 }}>
-                  {selectionWorking ? '加入中…' : `加入 OCR 队列（${selectedCount}）`}
+                  {selectionWorking ? '加入中…' : `加入图片分析队列（${selectedCount}）`}
                 </button>
               )}
               {activePanel === 'failed' && (
@@ -1527,7 +1541,7 @@ export default function ReviewPage() {
                         <span>{selected ? '已选' : '选择'}</span>
                       </label>
                     )}
-                    {managementMode && activePanel === 'failed' && (
+                    {managementMode && (activePanel === 'failed' || activePanel === 'source_missing') && (
                       <button type="button" className="review-manual-edit" aria-expanded={Boolean(isManualEditing)} onClick={(event) => { event.stopPropagation(); beginManualEdit(c); }}>
                         编辑分类与来源
                       </button>

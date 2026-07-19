@@ -10,6 +10,7 @@ import { getVisionConfig, getVisionHeaders } from './visionConfig.js';
 import { resolveVisionConfig } from './userApiCredentials.js';
 import { isAppleVisionOcrEnabled } from './ocrPolicy.js';
 import type { VisionApiConfig } from './visionConfig.js';
+import { dedupeCaseIdsByImageHash } from './processingInput.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -452,7 +453,7 @@ export async function createOcrJob(caseIds: string[], ownerUserId = '', statuses
   const candidates = caseIds.length > 0
     ? await prisma.visualCase.findMany({
         where: { id: { in: caseIds } },
-        select: { id: true },
+        select: { id: true, imageHash: true },
       })
     : await prisma.visualCase.findMany({
         where: {
@@ -461,11 +462,10 @@ export async function createOcrJob(caseIds: string[], ownerUserId = '', statuses
           reviewStatus: statuses?.length ? { in: statuses } : { notIn: ['rejected'] },
         },
         orderBy: { createdAt: 'asc' },
-        select: { id: true },
+        select: { id: true, imageHash: true },
         take: 2000,
       });
-  const found = new Set(candidates.map(candidate => candidate.id));
-  const frozenIds = caseIds.length > 0 ? caseIds.filter(id => found.has(id)) : candidates.map(candidate => candidate.id);
+  const frozenIds = dedupeCaseIdsByImageHash(candidates, caseIds.length > 0 ? caseIds : undefined);
 
   try {
     const created = await prisma.ocrJob.create({

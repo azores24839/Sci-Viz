@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { normalizeCaseIds, normalizeReviewStatuses } from '../src/services/processingInput.js';
+import { dedupeCaseIdsByImageHash, normalizeCaseIds, normalizeReviewStatuses } from '../src/services/processingInput.js';
 
 test('processing case IDs are trimmed, deduplicated, and bounded', () => {
   assert.deepEqual(normalizeCaseIds([' case-1 ', 'case-1', 'case-2']), ['case-1', 'case-2']);
@@ -18,4 +18,16 @@ test('processing review statuses are deduplicated and restricted to an allowlist
   assert.equal(normalizeReviewStatuses([], allowed), null);
   assert.equal(normalizeReviewStatuses(['approved'], allowed), null);
   assert.equal(normalizeReviewStatuses(['analysis_failed', 3], allowed), null);
+});
+
+test('processing queues keep only the first case for each non-empty image hash', () => {
+  const candidates = [
+    { id: 'a', imageHash: 'same' },
+    { id: 'b', imageHash: 'same' },
+    { id: 'c', imageHash: '' },
+    { id: 'd', imageHash: '' },
+    { id: 'e', imageHash: 'other' },
+  ];
+  assert.deepEqual(dedupeCaseIdsByImageHash(candidates), ['a', 'c', 'd', 'e']);
+  assert.deepEqual(dedupeCaseIdsByImageHash(candidates, ['b', 'a', 'e', 'missing']), ['b', 'e']);
 });

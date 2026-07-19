@@ -444,7 +444,7 @@ export async function processRenderedStanfordUrl(
       const duplicate = await findDuplicateCase(imageResult.imageHash);
       if (duplicate) {
         await deleteSavedImage(imageResult.imagePath, imageResult.thumbnailPath);
-        errors.push(`Duplicate image skipped: ${item.image.src} - matched ${duplicate.caseEntry.id} (${duplicate.matchType})`);
+        errors.push(`Duplicate image skipped: ${item.image.src} - matched ${duplicate.caseEntry?.id ?? 'deleted-image'} (${duplicate.matchType})`);
         continue;
       }
 

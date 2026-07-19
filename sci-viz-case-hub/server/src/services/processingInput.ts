@@ -28,3 +28,25 @@ export function normalizeReviewStatuses(value: unknown, allowed: readonly string
   if (statuses.length === 0 || statuses.some(status => !status || !allowedSet.has(status))) return null;
   return statuses;
 }
+
+export function dedupeCaseIdsByImageHash(
+  candidates: Array<{ id: string; imageHash: string }>,
+  requestedIds?: string[],
+): string[] {
+  const byId = new Map(candidates.map(candidate => [candidate.id, candidate]));
+  const ordered = requestedIds ?? candidates.map(candidate => candidate.id);
+  const seenIds = new Set<string>();
+  const seenHashes = new Set<string>();
+  const result: string[] = [];
+
+  for (const id of ordered) {
+    if (seenIds.has(id)) continue;
+    const candidate = byId.get(id);
+    if (!candidate) continue;
+    seenIds.add(id);
+    if (candidate.imageHash && seenHashes.has(candidate.imageHash)) continue;
+    if (candidate.imageHash) seenHashes.add(candidate.imageHash);
+    result.push(id);
+  }
+  return result;
+}
