@@ -47,7 +47,7 @@ CORS_ORIGINS=https://<实际案例库域名>
 STUDIO_SERVICE_KEY=<另一独立随机值>
 ```
 
-两种密钥各至少 32 字符，可分别使用 `openssl rand -hex 32` 生成，保存到权限为 600 的 `.env`。即使本次不部署工作台，当前案例库仍要求 service key。origin 不包含路径或结尾斜杠。首次迁移现有案例库时，始终保持 initialization 为 false；生产显式初始化只创建空 schema，不加入演示案例或账号。
+两种密钥各至少 32 字符，可分别使用 `openssl rand -hex 32` 生成，保存到权限为 600 的 `.env`。现有个人 API 密钥使用 JWT_SECRET 派生的密钥加密：迁移时可保留符合生产强度且未泄漏的旧 JWT_SECRET；如果必须更换旧开发密钥，用户需要登录后重新填写并保存个人 API 密钥，否则迁移的配置虽然存在却不能解密。轮换不会改变登录密码，但旧登录会话失效。即使本次不部署工作台，当前案例库仍要求 service key。origin 不包含路径或结尾斜杠。首次迁移现有案例库时，始终保持 initialization 为 false；生产显式初始化只创建空 schema，不加入演示案例或账号。
 
 暂不配置 OSS：本次使用数据盘中的原图、缩略图和期刊封面。不要配置 `OSS_PUBLIC_BASE_URL`，除非已完整上传并验证对应对象；该设置不会迁移本地资产。
 
