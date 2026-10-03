@@ -12,7 +12,8 @@ exec 9>"$CASE_HUB_SNAPSHOT_DIR/.backup.lock"
 flock -n 9 || { echo 'Another backup is running' >&2; exit 1; }
 compose=(docker compose --project-directory "$CASE_HUB_COMPOSE_DIR" --env-file "$CASE_HUB_COMPOSE_DIR/.env" -f "$CASE_HUB_COMPOSE_DIR/docker-compose.prod.yml")
 was_running=false
-if [ -n "$("${compose[@]}" ps --status running -q sci-viz-hub)" ]; then was_running=true; fi
+running_id=$("${compose[@]}" ps --status running -q sci-viz-hub)
+if [ -n "$running_id" ]; then was_running=true; fi
 resume() {
   rc=$?
   if [ "$was_running" = true ]; then

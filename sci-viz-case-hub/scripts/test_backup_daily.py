@@ -22,7 +22,7 @@ class DailyBackupTest(unittest.TestCase):
         self.bin = self.root / 'bin'
         self.bin.mkdir()
         for name, body in {'flock': 'exit 0', 'docker': '''printf '%s\\n' "$*" >> "$DOCKER_LOG"
-case "$*" in *"ps --status running"*) echo fixture-container;; esac''', 'rsync': 'exit 9'}.items():
+case "$*" in *"ps --status running"*) [ "${PS_FAIL:-false}" != true ] || exit 6; echo fixture-container;; esac''', 'rsync': 'exit 9'}.items():
             p = self.bin / name
             p.write_text('#!/bin/sh\n' + body + '\n')
             p.chmod(0o755)
@@ -56,6 +56,12 @@ case "$*" in *"ps --status running"*) echo fixture-container;; esac''', 'rsync':
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(len(list(self.snapshots.glob('*/manifest.json'))), 1)
         self.assertIn('start sci-viz-hub', self.log.read_text())
+
+    def test_container_status_failure_never_creates_snapshot(self):
+        r = self.run_backup(PS_FAIL='true')
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(list(self.snapshots.glob('*/manifest.json')), [])
+        self.assertNotIn('stop sci-viz-hub', self.log.read_text())
 
     def test_external_writers_not_confirmed_refuses_to_stop(self):
         r = self.run_backup(CASE_HUB_WRITERS_MANAGED='false')

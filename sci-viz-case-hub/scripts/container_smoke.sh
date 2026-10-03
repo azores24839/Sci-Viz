@@ -42,7 +42,7 @@ done
 if [ "$ready" != true ]; then docker logs "$container"; exit 1; fi
 ! grep -q 'stale invalid schema' "$work/prisma/schema.prisma"
 [ "$(find "$work/backups" -name '*.db' | wc -l | tr -d ' ')" -ge 1 ]
-docker exec "$container" node --input-type=module -e '
+docker exec -w /app/sci-viz-case-hub/server "$container" node --input-type=module -e '
   import assert from "node:assert/strict";
   import {PrismaClient} from "@prisma/client";
   const base="http://127.0.0.1:3001";
@@ -63,7 +63,7 @@ docker exec "$container" node --input-type=module -e '
 docker restart "$container" >/dev/null
 # Reuse readiness check after restart to prove persistence.
 for _ in $(seq 1 30); do
-  if docker exec "$container" node --input-type=module -e 'import {PrismaClient} from "@prisma/client";const d=new PrismaClient();const r=await fetch("http://127.0.0.1:3001/api/health");if(!r.ok||await d.visualCase.count()!==1)process.exit(1);await d.$disconnect();' >/dev/null 2>&1; then
+  if docker exec -w /app/sci-viz-case-hub/server "$container" node --input-type=module -e 'import {PrismaClient} from "@prisma/client";const d=new PrismaClient();const r=await fetch("http://127.0.0.1:3001/api/health");if(!r.ok||await d.visualCase.count()!==1)process.exit(1);await d.$disconnect();' >/dev/null 2>&1; then
     echo 'PASS: restart retains fixture database'; exit 0
   fi
   sleep 2
