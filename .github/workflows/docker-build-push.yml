@@ -179,24 +179,29 @@ jobs:
             set -eu
             cd ${{ vars.CASE_HUB_COMPOSE_DIR }}
             export CASE_HUB_IMAGE_TAG='${{ needs.build-and-push.outputs.image_version }}'
-            previous_image="$(docker inspect --format '{{.Image}}' sci-viz-hub 2>/dev/null || true)"
+            previous_ref="$(docker inspect --format '{{.Config.Image}}' sci-viz-hub 2>/dev/null || true)"
+            previous_tag=""
+            case "$previous_ref" in
+              "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:"*) previous_tag="${previous_ref##*:}" ;;
+            esac
+            rollback_image() {
+              case "$previous_tag" in
+                ""|latest) echo "No previous immutable image tag; manual recovery required" >&2; return ;;
+              esac
+              export CASE_HUB_IMAGE_TAG="$previous_tag"
+              docker compose -f docker-compose.prod.yml up -d --force-recreate --pull never --wait --wait-timeout 120 || true
+            }
             docker compose -f docker-compose.prod.yml config -q
             docker compose -f docker-compose.prod.yml pull
             if ! docker compose -f docker-compose.prod.yml up -d --remove-orphans --wait --wait-timeout 120; then
               docker compose -f docker-compose.prod.yml logs --tail=200 || true
-              if [ -n "$previous_image" ]; then
-                docker image tag "$previous_image" "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_version }}"
-                docker compose -f docker-compose.prod.yml up -d --force-recreate --pull never --wait --wait-timeout 120 || true
-              fi
+              rollback_image
               exit 1
             fi
             published_port="$(docker compose -f docker-compose.prod.yml port sci-viz-hub 3001 | tail -n 1 | sed 's/.*://')"
             if ! curl --fail --silent --show-error "http://127.0.0.1:${published_port}/api/health" >/dev/null; then
               docker compose -f docker-compose.prod.yml logs --tail=200 || true
-              if [ -n "$previous_image" ]; then
-                docker image tag "$previous_image" "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_version }}"
-                docker compose -f docker-compose.prod.yml up -d --force-recreate --pull never --wait --wait-timeout 120 || true
-              fi
+              rollback_image
               exit 1
             fi
 
