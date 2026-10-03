@@ -1,5 +1,7 @@
 # 科研影像案例库 · 交大云部署与恢复
 
+新增[本地与线上两套设置](case-hub-local-online-settings.md)：可用 `config/local.env` 运行本地 demo，用 `config/online.env` 和 `scripts/start-online.sh` 驱动本手册的生产 Compose。原 `/srv/case-hub/.env` 运维布局也继续可用。
+
 本手册只部署 `Sci-Viz/sci-viz-case-hub`；不安装 AI 工作台。案例库可以独立浏览、登录、采集和分析。所有数据规模以迁移时生成的 manifest 为准，勿把历史数量当作验收值。
 
 ## 交付前需要取得的信息

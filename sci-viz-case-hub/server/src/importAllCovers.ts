@@ -1,16 +1,14 @@
+import { storagePaths } from './config/storage.js';
 /**
  * 批量导入 Springer Nature 期刊封面到案例库 (直接引用路径版)
  * 用法: cd server && npx tsx src/importAllCovers.ts
  */
 import fs from 'fs/promises';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { prisma } from './prisma.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
-const COVERS_ROOT = path.join(__dirname, '..', '..', '..', 'journal_covers');
+const COVERS_ROOT = storagePaths.journalCoversDir;
 
 interface IssueInfo {
   volume: number;

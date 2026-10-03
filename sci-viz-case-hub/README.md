@@ -1,3 +1,5 @@
+> **本地 demo 和交大云启动：** 请先看[两套设置与一键启动说明](../docs/case-hub-local-online-settings.md)。本地使用 `npm run demo:local`，线上使用 `config/online.env`。
+
 # 科研视觉案例自动收集与分类系统
 
 科研视觉案例自动收集与分类系统，帮助自动收集、整理和分析科研相关的视觉案例。

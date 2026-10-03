@@ -1,20 +1,12 @@
+import { localImagePath as resolveLocalImagePath } from './config/storage.js';
 import { prisma } from './prisma.js';
 import fs from 'fs/promises';
-import path from 'path';
 import crypto from 'crypto';
-import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 async function getImageHash(imagePath: string): Promise<string | null> {
-  const PROJECT_ROOT = path.join(__dirname, '..', '..', '..');
-  const SERVER_ROOT = path.join(__dirname, '..', '..');
-  const candidates = [
-    path.join(SERVER_ROOT, imagePath.replace(/^\//, '')),
-    path.join(PROJECT_ROOT, imagePath.replace(/^\//, '')),
-    imagePath,
-  ];
+  const localPath = resolveLocalImagePath(imagePath);
+  const candidates = localPath ? [localPath] : [];
   for (const fullPath of candidates) {
     try {
       const buffer = await fs.readFile(fullPath);
@@ -198,17 +190,12 @@ async function main() {
   }
 
   // Try to clean up image files for deleted entries
-  const PROJECT_ROOT = path.join(__dirname, '..', '..', '..');
-  const SERVER_ROOT = path.join(__dirname, '..', '..');
   let filesCleaned = 0;
   for (const c of allCasesToDelete) {
     for (const p of [c.imagePath, c.thumbnailPath]) {
       if (!p) continue;
-      const candidates = [
-        path.join(SERVER_ROOT, p.replace(/^\//, '')),
-        path.join(PROJECT_ROOT, p.replace(/^\//, '')),
-        p,
-      ];
+      const localPath = resolveLocalImagePath(p);
+      const candidates = localPath ? [localPath] : [];
       for (const fullPath of candidates) {
         try {
           await fs.unlink(fullPath);

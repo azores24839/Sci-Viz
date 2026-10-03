@@ -1,21 +1,15 @@
+import { localImagePath as resolveLocalImagePath } from './config/storage.js';
 import { PrismaClient } from '@prisma/client';
 import fs from 'fs/promises';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
 import { getVisionConfig, getVisionHeaders } from './services/visionConfig.js';
 
 const prisma = new PrismaClient();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const SERVER_ROOT = path.resolve(__dirname, '..');
-const UPLOADS_ROOT = path.join(SERVER_ROOT, 'uploads');
 
 function uploadPathToFilePath(webPath: string): string {
   if (!webPath.startsWith('/uploads/')) return '';
-  const relative = webPath.replace(/^\/uploads\//, '');
-  const filePath = path.join(UPLOADS_ROOT, relative);
-  return filePath.startsWith(UPLOADS_ROOT) ? filePath : '';
+  return resolveLocalImagePath(webPath) ?? '';
 }
 
 function cleanOcrText(text: string): string {
@@ -29,10 +23,7 @@ function cleanOcrText(text: string): string {
 }
 
 function localPathFromWebPath(webPath: string): string {
-  if (webPath.startsWith('/uploads/')) {
-    return path.join(SERVER_ROOT, webPath.replace(/^\//, ''));
-  }
-  return '';
+  return resolveLocalImagePath(webPath) ?? '';
 }
 
 function mimeType(filePath: string): string {

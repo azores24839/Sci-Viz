@@ -10,7 +10,10 @@ script_dir=$(cd "$(dirname "$0")" && pwd)
 mkdir -p "$CASE_HUB_SNAPSHOT_DIR"
 exec 9>"$CASE_HUB_SNAPSHOT_DIR/.backup.lock"
 flock -n 9 || { echo 'Another backup is running' >&2; exit 1; }
-compose=(docker compose --project-directory "$CASE_HUB_COMPOSE_DIR" --env-file "$CASE_HUB_COMPOSE_DIR/.env" -f "$CASE_HUB_COMPOSE_DIR/docker-compose.prod.yml")
+settings=${CASE_HUB_ENV_FILE:-$CASE_HUB_COMPOSE_DIR/.env}
+if [ ! -f "$settings" ] && [ -f "$CASE_HUB_COMPOSE_DIR/config/online.env" ]; then settings="$CASE_HUB_COMPOSE_DIR/config/online.env"; fi
+export CASE_HUB_ENV_FILE="$settings"
+compose=(docker compose --project-directory "$CASE_HUB_COMPOSE_DIR" --env-file "$settings" -f "$CASE_HUB_COMPOSE_DIR/docker-compose.prod.yml")
 was_running=false
 running_id=$("${compose[@]}" ps --status running -q sci-viz-hub)
 if [ -n "$running_id" ]; then was_running=true; fi

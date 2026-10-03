@@ -1,3 +1,4 @@
+import { localImagePath as resolveLocalImagePath } from './config/storage.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -10,7 +11,6 @@ import { isAppleVisionOcrEnabled } from './services/ocrPolicy.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SERVER_ROOT = path.join(__dirname, '..');
-const REPO_ROOT = path.join(__dirname, '..', '..', '..');
 const OCR_BINARY = path.join(SERVER_ROOT, '.tmp', 'ocr_image');
 const OCR_SWIFT_SCRIPT = path.join(SERVER_ROOT, 'scripts', 'ocr_image.swift');
 const LIMIT = Number.parseInt(process.env.LIMIT || '0', 10);
@@ -27,13 +27,7 @@ function mimeType(filePath: string): string {
 }
 
 function localPathFromWebPath(webPath: string): string {
-  if (webPath.startsWith('/uploads/')) {
-    return path.join(SERVER_ROOT, webPath.replace(/^\//, ''));
-  }
-  if (webPath.startsWith('/journal_covers/')) {
-    return path.join(REPO_ROOT, webPath.replace(/^\//, ''));
-  }
-  return '';
+  return resolveLocalImagePath(webPath) ?? '';
 }
 
 async function imageToInput(c: { imagePath: string; thumbnailPath: string; imageUrl: string }) {

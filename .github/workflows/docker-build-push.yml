@@ -56,6 +56,9 @@ jobs:
         working-directory: sci-viz-case-hub/web
       - name: Test deployment tooling
         run: python3 -m unittest discover -s sci-viz-case-hub/scripts -p 'test_*.py' -v
+      - name: Exercise local demo profile
+        run: python3 scripts/local_profile_smoke.py
+        working-directory: sci-viz-case-hub
       - name: Validate production Compose
         env:
           CASE_HUB_IMAGE_TAG: ${{ github.sha }}

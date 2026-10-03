@@ -1,18 +1,15 @@
+import { storagePaths, localImagePath as resolveLocalImagePath } from './config/storage.js';
 import { PrismaClient, type VisualCase } from '@prisma/client';
 import fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
 import sharp from 'sharp';
 import { createImageHash } from './services/image.js';
 import { runAnalysis } from './services/analysisRunner.js';
 
 const prisma = new PrismaClient();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const SERVER_ROOT = path.resolve(__dirname, '..');
-const UPLOADS_ROOT = path.join(SERVER_ROOT, 'uploads');
+const UPLOADS_ROOT = storagePaths.uploadsDir;
 const ORIGINALS_DIR = path.join(UPLOADS_ROOT, 'originals');
 const THUMBNAILS_DIR = path.join(UPLOADS_ROOT, 'thumbnails');
 
@@ -26,9 +23,7 @@ type CaseLite = Pick<VisualCase,
 
 function uploadPathToFilePath(webPath: string): string | null {
   if (!webPath.startsWith('/uploads/')) return null;
-  const relative = webPath.replace(/^\/uploads\//, '');
-  const filePath = path.join(UPLOADS_ROOT, relative);
-  return filePath.startsWith(UPLOADS_ROOT) ? filePath : null;
+  return resolveLocalImagePath(webPath);
 }
 
 function localImagePath(c: Pick<VisualCase, 'imagePath' | 'thumbnailPath'>): string {

@@ -1,4 +1,5 @@
 import express from 'express';
+import { storagePaths } from './config/storage.js';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
@@ -141,8 +142,8 @@ if (process.argv.includes('--seed-videos')) {
   const processingConcurrencyLimit = createConcurrencyLimit(1);
   const crawlConcurrencyLimit = createConcurrencyLimit(1);
 
-  app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
-  app.use('/journal_covers', express.static(path.join(__dirname, '..', '..', '..', 'journal_covers')));
+  app.use('/uploads', express.static(storagePaths.uploadsDir));
+  app.use('/journal_covers', express.static(storagePaths.journalCoversDir));
 
   app.get('/api/health', async (req, res) => {
     try {
@@ -221,7 +222,7 @@ if (process.argv.includes('--seed-videos')) {
   void recoverAnalysisJobs().catch(error => {
     console.error('[analysis-recovery] failed to recover Qwen analysis job', error);
   });
-  const server = app.listen(PORT, () => {
+  const server = app.listen(PORT, process.env.HOST || '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 
