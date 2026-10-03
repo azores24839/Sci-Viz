@@ -4,7 +4,12 @@ set -euo pipefail
 image=${1:?Usage: container_smoke.sh IMAGE}
 work=$(mktemp -d)
 container="case-hub-smoke-${RANDOM}-$$"
-cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; rm -rf "$work"; }
+cleanup() {
+  docker rm -f "$container" >/dev/null 2>&1 || true
+  # Fixture files were created by the image user; remove them using that same user.
+  docker run --rm -v "$work:/fixture" --entrypoint sh "$image" -c 'find /fixture -mindepth 1 -maxdepth 1 -exec rm -rf {} +' >/dev/null 2>&1 || true
+  rm -rf "$work"
+}
 trap cleanup EXIT
 mkdir -p "$work/prisma" "$work/uploads/originals" "$work/uploads/thumbnails" "$work/journal_covers" "$work/backups"
 mounts=(-v "$work/prisma:/app/sci-viz-case-hub/server/prisma" -v "$work/uploads:/app/sci-viz-case-hub/server/uploads" -v "$work/journal_covers:/app/journal_covers" -v "$work/backups:/app/sci-viz-case-hub/server/backups")
@@ -32,7 +37,7 @@ docker run --rm "${mounts[@]}" "${environment[@]}" --entrypoint sh "$image" -c '
     await db.$disconnect();
   '\''
 '
-printf 'stale invalid schema\n' > "$work/prisma/schema.prisma"
+docker run --rm "${mounts[@]}" --entrypoint sh "$image" -c 'printf "stale invalid schema\n" > /app/sci-viz-case-hub/server/prisma/schema.prisma' 
 docker run -d --name "$container" --read-only --tmpfs /tmp:size=128m "${mounts[@]}" "${environment[@]}" "$image" >/dev/null
 ready=false
 for _ in $(seq 1 30); do
