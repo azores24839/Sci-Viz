@@ -22,6 +22,9 @@ COPY web/public web/public/
 RUN cd web && npx vite build
 
 FROM node:24-slim
+# The runtime executes Node and the bundled Prisma CLI directly, not npm/npx.
+# Remove the base image's unused global package managers and their dependency tree.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /opt/yarn* /usr/local/bin/yarn /usr/local/bin/yarnpkg
 RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app/sci-viz-case-hub
 

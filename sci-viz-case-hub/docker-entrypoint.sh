@@ -19,7 +19,7 @@ if [ -f prisma/dev.db ]; then
   node dist/utils/backup.js
 fi
 cp "$schema_template" prisma/schema.prisma
-npx --no-install prisma db push --skip-generate
+node node_modules/prisma/build/index.js db push --skip-generate
 
 if [ "$initialize_database" = "true" ] && [ "${NODE_ENV:-development}" != "production" ]; then
   # Development fixtures only: restored production libraries must never be reseeded.

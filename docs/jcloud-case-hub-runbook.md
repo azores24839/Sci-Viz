@@ -30,7 +30,7 @@
 - `sci-viz-case-hub/scripts/` → `/srv/case-hub/scripts/`
 - `sci-viz-case-hub/deployment/` → `/srv/case-hub/deployment/`
 
-这些是运维配置和脚本；服务器不需要安装 Node 或源码构建。获取私有 GHCR 镜像时，用学校批准的只读 package 凭据执行 `docker login ghcr.io`，不要把令牌写进 Git。
+这些是运维配置和脚本；服务器不需要安装 Node 或源码构建。运行镜像只执行 Node 和随镜像安装的 Prisma CLI，不保留全局 npm/npx；维护命令使用 `node dist/...`。获取私有 GHCR 镜像时，用学校批准的只读 package 凭据执行 `docker login ghcr.io`，不要把令牌写进 Git。
 
 编辑 `.env`：
 
@@ -162,6 +162,6 @@ systemctl list-timers case-hub-backup.timer
 
 本地：74 项后端测试、前后端构建、真实图片处理，前后端全量及生产依赖审计均无漏洞；20 项 Python 工具测试涵盖快照/恢复、WAL、完整性校验、拒绝覆盖，入口故障阻断，以及每日备份失败后恢复运行流程。Playwright 使用隔离测试数据库验证新版前端案例列表、三轴分析页面跳转与测试账号登录，浏览器控制台没有错误；此登录检查使用本地开发 Cookie，生产 Secure Cookie 由容器烟测另行验证。
 
-CI：生产镜像真实容器烟测覆盖原图/缩略图生成、缺数据库拒绝、旧 schema 替换、实际 SQLite 备份、HTTPS Cookie 登录、静态资产读取、三轴读取和重启数据保留；Trivy 扫描结果以当前 PR/run 为准。
+CI：生产镜像真实容器烟测覆盖 multipart 图片上传、原图/缩略图生成、缺数据库拒绝、旧 schema 替换、实际 SQLite 备份、HTTPS Cookie 登录、静态资产读取、三轴读取、重启数据保留，以及完整快照恢复和数据回滚后的用户/图片保留；Trivy 扫描结果以当前 PR/run 为准。
 
 尚需交大云实测：实际证书/反代、校园网络、全量迁移与恢复演练、现有用户登录、上传/导出/真实 AI 作业、异地备份与告警、资源/磁盘评估。没有这些证据，不报告正式上线完成。

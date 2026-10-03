@@ -23,6 +23,10 @@ class EntrypointTest(unittest.TestCase):
         node.write_text('''#!/bin/sh
 printf '%s\\n' "$*" >> "$CALL_LOG"
 if [ "$1" = dist/utils/backup.js ]; then exit "${BACKUP_EXIT:-0}"; fi
+if [ "$1" = node_modules/prisma/build/index.js ]; then
+  [ "$(cat prisma/schema.prisma)" = "new schema" ] || exit 99
+  exit "${MIGRATE_EXIT:-0}"
+fi
 ''')
         node.chmod(0o755)
         npx = bin_dir / 'npx'
@@ -48,7 +52,7 @@ exit "${MIGRATE_EXIT:-0}"
     def test_updates_stale_schema_only_after_backup(self):
         (self.server / 'prisma/dev.db').write_bytes(b'existing')
         self.assertEqual(self.run_entrypoint().returncode, 0)
-        self.assertEqual(self.calls(), ['dist/utils/backup.js', '--no-install prisma db push --skip-generate', 'dist/index.js'])
+        self.assertEqual(self.calls(), ['dist/utils/backup.js', 'node_modules/prisma/build/index.js db push --skip-generate', 'dist/index.js'])
         self.assertEqual((self.server / 'prisma/schema.prisma').read_text(), 'new schema')
 
     def test_backup_failure_preserves_schema_and_blocks_start(self):
@@ -69,7 +73,7 @@ exit "${MIGRATE_EXIT:-0}"
 
     def test_explicit_empty_production_initialization_does_not_seed(self):
         self.assertEqual(self.run_entrypoint(CASE_HUB_ALLOW_DATABASE_INITIALIZATION='true').returncode, 0)
-        self.assertEqual(self.calls(), ['--no-install prisma db push --skip-generate', 'dist/index.js'])
+        self.assertEqual(self.calls(), ['node_modules/prisma/build/index.js db push --skip-generate', 'dist/index.js'])
 
     def test_restart_never_reseeds_existing_database(self):
         (self.server / 'prisma/dev.db').write_bytes(b'existing')
