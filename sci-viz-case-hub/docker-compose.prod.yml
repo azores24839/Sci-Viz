@@ -11,6 +11,8 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3001"
+      HOST: "0.0.0.0"
+      CASE_HUB_STORAGE_ROOT: ""
       DATABASE_URL: file:/app/sci-viz-case-hub/server/prisma/dev.db
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in the production .env file}
       CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS must be set in the production .env file}

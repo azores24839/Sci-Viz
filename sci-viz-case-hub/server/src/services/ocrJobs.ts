@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { localImagePath } from '../config/storage.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execFile } from 'child_process';
@@ -15,7 +16,6 @@ import { dedupeCaseIdsByImageHash } from './processingInput.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SERVER_ROOT = path.join(__dirname, '..', '..');
-const WORKSPACE_ROOT = path.join(SERVER_ROOT, '..', '..');
 const OCR_BINARY = path.join(SERVER_ROOT, '.tmp', 'ocr_image');
 const OCR_SWIFT_SCRIPT = path.join(SERVER_ROOT, 'scripts', 'ocr_image.swift');
 const execFileAsync = promisify(execFile);
@@ -81,21 +81,8 @@ function cleanOcrText(text: string): string {
     .trim();
 }
 
-function safeLocalPath(root: string, webPath: string): string {
-  const resolvedRoot = path.resolve(root);
-  const candidate = path.resolve(resolvedRoot, webPath.replace(/^\//, ''));
-  return candidate.startsWith(`${resolvedRoot}${path.sep}`) ? candidate : '';
-}
-
 export function localPathFromWebPath(webPath: string): string {
-  if (!webPath) return '';
-  if (webPath.startsWith('/uploads/')) {
-    return safeLocalPath(SERVER_ROOT, webPath);
-  }
-  if (webPath.startsWith('/journal_covers/')) {
-    return safeLocalPath(WORKSPACE_ROOT, webPath);
-  }
-  return '';
+  return localImagePath(webPath) || '';
 }
 
 export async function findLocalImage(c: { imagePath: string; thumbnailPath: string }): Promise<string> {

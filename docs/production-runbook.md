@@ -1,5 +1,7 @@
 # Sci AI Studio / Case Hub 生产运行手册
 
+只部署案例库到交大云时，使用 [交大云案例库部署与恢复手册](jcloud-case-hub-runbook.md)，其中包含完整图片迁移、HTTPS、备份和独立验收步骤。
+
 更新日期：2026-07-16
 
 ## 目标与边界

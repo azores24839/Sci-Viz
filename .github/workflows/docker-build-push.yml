@@ -48,9 +48,17 @@ jobs:
       - name: Build web
         run: npm run build
         working-directory: sci-viz-case-hub/web
-      - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
+      - name: Audit server runtime and build dependencies
+        run: npm audit --audit-level=high
         working-directory: sci-viz-case-hub/server
+      - name: Audit web dependencies
+        run: npm audit --audit-level=high
+        working-directory: sci-viz-case-hub/web
+      - name: Test deployment tooling
+        run: python3 -m unittest discover -s sci-viz-case-hub/scripts -p 'test_*.py' -v
+      - name: Exercise local demo profile
+        run: python3 scripts/local_profile_smoke.py
+        working-directory: sci-viz-case-hub
       - name: Validate production Compose
         env:
           CASE_HUB_IMAGE_TAG: ${{ github.sha }}
@@ -63,10 +71,9 @@ jobs:
 
   build-and-push:
     needs: quality
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     outputs:
-      image_version: ${{ steps.meta.outputs.version }}
+      image_version: ${{ github.sha }}
     concurrency:
       group: case-hub-image-${{ github.ref }}
       cancel-in-progress: true
@@ -79,6 +86,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -90,11 +98,11 @@ jobs:
 
       - name: Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=sha,prefix=,format=short
+            type=raw,value=${{ github.sha }}
             type=raw,value=latest
 
       - name: Build and push
@@ -105,19 +113,39 @@ jobs:
           file: ./sci-viz-case-hub/Dockerfile
           build-args: |
             VITE_BASE_URL=/
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          provenance: mode=max
-          sbom: true
+          provenance: ${{ github.event_name != 'pull_request' && 'mode=max' || 'false' }}
+          sbom: ${{ github.event_name != 'pull_request' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
 
 
+      - name: Exercise production container with isolated fixtures
+        env:
+          SMOKE_IMAGE: ${{ github.event_name == 'pull_request' && format('{0}/{1}:{2}', env.REGISTRY, env.IMAGE_NAME, github.sha) || format('{0}/{1}@{2}', env.REGISTRY, env.IMAGE_NAME, steps.build.outputs.digest) }}
+        run: bash sci-viz-case-hub/scripts/container_smoke.sh "$SMOKE_IMAGE"
+
+      - name: Scan the immutable image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          image-ref: ${{ github.event_name == 'pull_request' && format('{0}/{1}:{2}', env.REGISTRY, env.IMAGE_NAME, github.sha) || format('{0}/{1}@{2}', env.REGISTRY, env.IMAGE_NAME, steps.build.outputs.digest) }}
+          scanners: vuln
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+
   deploy:
     needs: build-and-push
-    if: ${{ vars.CASE_HUB_SSH_HOST != '' }}
+    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.CASE_HUB_SSH_HOST != '' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -154,26 +182,31 @@ jobs:
             set -eu
             cd ${{ vars.CASE_HUB_COMPOSE_DIR }}
             export CASE_HUB_IMAGE_TAG='${{ needs.build-and-push.outputs.image_version }}'
-            previous_image="$(docker inspect --format '{{.Image}}' sci-viz-hub 2>/dev/null || true)"
+            previous_ref="$(docker inspect --format '{{.Config.Image}}' sci-viz-hub 2>/dev/null || true)"
+            previous_tag=""
+            case "$previous_ref" in
+              "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:"*) previous_tag="${previous_ref##*:}" ;;
+            esac
+            rollback_image() {
+              case "$previous_tag" in
+                ""|latest) echo "No previous immutable image tag; manual recovery required" >&2; return ;;
+              esac
+              export CASE_HUB_IMAGE_TAG="$previous_tag"
+              docker compose -f docker-compose.prod.yml up -d --force-recreate --pull never --wait --wait-timeout 120 || true
+            }
             docker compose -f docker-compose.prod.yml config -q
             docker compose -f docker-compose.prod.yml pull
             if ! docker compose -f docker-compose.prod.yml up -d --remove-orphans --wait --wait-timeout 120; then
               docker compose -f docker-compose.prod.yml logs --tail=200 || true
-              if [ -n "$previous_image" ]; then
-                docker image tag "$previous_image" "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_version }}"
-                docker compose -f docker-compose.prod.yml up -d --force-recreate --pull never --wait --wait-timeout 120 || true
-              fi
+              rollback_image
               exit 1
             fi
             published_port="$(docker compose -f docker-compose.prod.yml port sci-viz-hub 3001 | tail -n 1 | sed 's/.*://')"
             if ! curl --fail --silent --show-error "http://127.0.0.1:${published_port}/api/health" >/dev/null; then
               docker compose -f docker-compose.prod.yml logs --tail=200 || true
-              if [ -n "$previous_image" ]; then
-                docker image tag "$previous_image" "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_version }}"
-                docker compose -f docker-compose.prod.yml up -d --force-recreate --pull never --wait --wait-timeout 120 || true
-              fi
+              rollback_image
               exit 1
             fi
 
-            docker image prune -f
+            # Preserve the previous image for a manual rollback. Prune after the retention window.
             docker compose -f docker-compose.prod.yml ps

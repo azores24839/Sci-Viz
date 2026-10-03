@@ -1,16 +1,13 @@
 import path from 'path';
+import { storagePaths, localImagePath } from '../config/storage.js';
 import crypto from 'crypto';
 import sharp from 'sharp';
 import { v4 as uuid } from 'uuid';
 import fs from 'fs/promises';
-import { fileURLToPath } from 'url';
 import { assertPublicHttpUrl, readResponseWithLimit } from '../utils/httpSafety.js';
 import { isOssEnabled, uploadBufferToOss, makeOssKey, getOssPublicUrl } from './oss.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads');
+const UPLOAD_DIR = storagePaths.uploadsDir;
 const ORIGINALS_DIR = path.join(UPLOAD_DIR, 'originals');
 const THUMBNAILS_DIR = path.join(UPLOAD_DIR, 'thumbnails');
 
@@ -100,9 +97,7 @@ export function createImageHash(buffer: Buffer): string {
 
 function uploadPathToFilePath(webPath: string): string | null {
   if (!webPath.startsWith('/uploads/')) return null;
-  const relative = webPath.replace(/^\/uploads\//, '');
-  const filePath = path.join(UPLOAD_DIR, relative);
-  return filePath.startsWith(UPLOAD_DIR) ? filePath : null;
+  return localImagePath(webPath);
 }
 
 export async function deleteSavedImage(imagePath: string, thumbnailPath: string): Promise<void> {

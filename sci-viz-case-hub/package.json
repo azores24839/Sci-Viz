@@ -25,7 +25,12 @@
     "enterprise:dry-run": "cd server && npm run enterprise:dry-run --",
     "enterprise:active-batch": "cd server && npm run enterprise:active-batch --",
     "enterprise:browser-batch": "cd server && npm run enterprise:browser-batch --",
-    "university:browser-batch": "cd server && npm run university:browser-batch --"
+    "university:browser-batch": "cd server && npm run university:browser-batch --",
+    "demo:local": "node scripts/profile.mjs local --demo",
+    "start:local": "node scripts/profile.mjs local",
+    "check:local-config": "node scripts/profile.mjs local --check",
+    "start:online": "bash scripts/start-online.sh",
+    "check:online-config": "bash scripts/start-online.sh --check"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

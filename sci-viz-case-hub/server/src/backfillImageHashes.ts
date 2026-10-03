@@ -1,18 +1,12 @@
+import { localImagePath as resolveLocalImagePath } from './config/storage.js';
 import fs from 'fs/promises';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { prisma } from './prisma.js';
 import { createImageHash } from './services/image.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const UPLOAD_DIR = path.join(__dirname, '..', 'uploads');
 
 function uploadPathToFilePath(webPath: string): string | null {
   if (!webPath.startsWith('/uploads/')) return null;
-  const relative = webPath.replace(/^\/uploads\//, '');
-  const filePath = path.join(UPLOAD_DIR, relative);
-  return filePath.startsWith(UPLOAD_DIR) ? filePath : null;
+  return resolveLocalImagePath(webPath);
 }
 
 async function main() {

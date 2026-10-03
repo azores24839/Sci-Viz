@@ -1,14 +1,9 @@
 import fs from 'fs/promises';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { localImagePath } from '../config/storage.js';
 import sharp from 'sharp';
 import { getVisionConfig, getVisionHeaders, type VisionApiConfig } from './visionConfig.js';
 import { assertPublicHttpUrl, readResponseWithLimit, readTextWithLimit } from '../utils/httpSafety.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const ORIGINALS_DIR = path.join(__dirname, '..', '..', 'uploads', 'originals');
-const REPO_ROOT = path.join(__dirname, '..', '..', '..');
 const MAX_REMOTE_IMAGE_BYTES = 15 * 1024 * 1024;
 const MAX_AI_RESPONSE_BYTES = 2 * 1024 * 1024;
 
@@ -201,19 +196,8 @@ async function imagePathToBase64(imagePath: string): Promise<string> {
     }
   }
 
-  if (imagePath.startsWith('/journal_covers/')) {
-    const filePath = path.join(REPO_ROOT, '..', imagePath);
-    try {
-      const buffer = await fs.readFile(filePath);
-      return await normalizeForVision(buffer);
-    } catch {
-      console.warn('[Vision] Cannot read journal cover:', filePath);
-      return '';
-    }
-  }
-
-  const filename = imagePath.replace('/uploads/originals/', '');
-  const filePath = path.join(ORIGINALS_DIR, filename);
+  const filePath = localImagePath(imagePath);
+  if (!filePath) return '';
   try {
     const buffer = await fs.readFile(filePath);
     return await normalizeForVision(buffer);

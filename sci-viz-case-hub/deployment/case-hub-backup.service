@@ -1,0 +1,11 @@
+[Unit]
+Description=Offline verified backup of the complete scientific case library
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/srv/case-hub/backup.env
+ExecStart=/usr/bin/bash /srv/case-hub/scripts/backup_daily.sh
+TimeoutStartSec=2h
+UMask=0077

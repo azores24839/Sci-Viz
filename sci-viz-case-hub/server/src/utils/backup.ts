@@ -1,13 +1,11 @@
 import fs from 'fs/promises';
+import { storagePaths } from '../config/storage.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { prisma } from '../prisma.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const BACKUPS_DIR = path.join(__dirname, '..', '..', 'backups');
-const DB_PATH = path.join(__dirname, '..', '..', 'prisma', 'dev.db');
+const BACKUPS_DIR = storagePaths.backupsDir;
+const DB_PATH = storagePaths.databasePath;
 
 function formatTimestamp(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -35,6 +33,6 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     console.log(`已备份数据库：${backupPath}`);
   }).catch((err: unknown) => {
     console.error('备份失败:', err instanceof Error ? err.message : err);
-    process.exit(1);
-  });
+    process.exitCode = 1;
+  }).finally(() => prisma.$disconnect());
 }

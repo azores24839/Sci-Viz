@@ -16,3 +16,7 @@ nasa_svs_output/
 # Local storage inventories can contain tens of thousands of paths.
 # Keep them on disk for recovery/audit use without bloating Git.
 /local-audits/
+
+# Private profile settings and isolated local demo data.
+/sci-viz-case-hub/config/*.env
+/sci-viz-case-hub/.local-data/

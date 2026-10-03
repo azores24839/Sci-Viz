@@ -1,3 +1,4 @@
+import { localImagePath } from '../config/storage.js';
 import { execFile } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -26,9 +27,9 @@ function isCloudConfigured(): boolean {
 }
 
 function resolveImagePath(imagePath: string): string {
-  const relative = imagePath.replace(/^\/uploads\//, '');
-  const uploadsDir = path.resolve(__dirname, '..', '..', 'uploads');
-  return path.join(uploadsDir, relative);
+  const resolved = localImagePath(imagePath);
+  if (!resolved) throw new Error('Unsupported local image path');
+  return resolved;
 }
 
 function runAppleVisionOCR(imagePath: string): Promise<string> {
