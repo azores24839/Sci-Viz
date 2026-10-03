@@ -48,9 +48,12 @@ jobs:
       - name: Build web
         run: npm run build
         working-directory: sci-viz-case-hub/web
-      - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
+      - name: Audit server runtime and build dependencies
+        run: npm audit --audit-level=high
         working-directory: sci-viz-case-hub/server
+      - name: Audit web dependencies
+        run: npm audit --audit-level=high
+        working-directory: sci-viz-case-hub/web
       - name: Test deployment tooling
         run: python3 -m unittest discover -s sci-viz-case-hub/scripts -p 'test_*.py' -v
       - name: Validate production Compose
