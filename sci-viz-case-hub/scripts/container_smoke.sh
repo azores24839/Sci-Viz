@@ -37,7 +37,7 @@ docker run --rm "${mounts[@]}" "${environment[@]}" --entrypoint sh "$image" -c '
     await db.$disconnect();
   '\''
 '
-docker run --rm "${mounts[@]}" --entrypoint sh "$image" -c 'printf "stale invalid schema\n" > /app/sci-viz-case-hub/server/prisma/schema.prisma' 
+docker run --rm "${mounts[@]}" --entrypoint sh "$image" -c 'printf "stale invalid schema\n" > /app/sci-viz-case-hub/server/prisma/schema.prisma'
 docker run -d --name "$container" --read-only --tmpfs /tmp:size=128m "${mounts[@]}" "${environment[@]}" "$image" >/dev/null
 ready=false
 for _ in $(seq 1 30); do
