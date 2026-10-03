@@ -35,6 +35,6 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     console.log(`已备份数据库：${backupPath}`);
   }).catch((err: unknown) => {
     console.error('备份失败:', err instanceof Error ? err.message : err);
-    process.exit(1);
-  });
+    process.exitCode = 1;
+  }).finally(() => prisma.$disconnect());
 }
