@@ -37,6 +37,9 @@ docker run --rm "${mounts[@]}" "${environment[@]}" --entrypoint sh "$image" -c '
     await db.$disconnect();
   '\''
 '
+script_dir=$(cd "$(dirname "$0")" && pwd)
+# Full-library snapshot is taken while no fixture writer is running.
+python3 "$script_dir/data_snapshot.py" snapshot --db "$work/prisma/dev.db" --uploads "$work/uploads" --journal-covers "$work/journal_covers" --output "$work/snapshot" --writers-stopped
 docker run --rm "${mounts[@]}" --entrypoint sh "$image" -c 'printf "stale invalid schema\n" > /app/sci-viz-case-hub/server/prisma/schema.prisma'
 docker run -d --name "$container" --read-only --tmpfs /tmp:size=128m "${mounts[@]}" "${environment[@]}" "$image" >/dev/null
 ready=false
@@ -66,10 +69,32 @@ docker exec -w /app/sci-viz-case-hub/server "$container" node --input-type=modul
   console.log("PASS: full-schema startup, real backup, image processing/serving, reads, secure login and database integrity");
 '
 docker restart "$container" >/dev/null
+ready=false
 # Reuse readiness check after restart to prove persistence.
 for _ in $(seq 1 30); do
   if docker exec -w /app/sci-viz-case-hub/server "$container" node --input-type=module -e 'import {PrismaClient} from "@prisma/client";const d=new PrismaClient();const r=await fetch("http://127.0.0.1:3001/api/health");if(!r.ok||await d.visualCase.count()!==1)process.exit(1);await d.$disconnect();' >/dev/null 2>&1; then
-    echo 'PASS: restart retains fixture database'; exit 0
+    echo 'PASS: restart retains fixture database'; ready=true; break
+  fi
+  sleep 2
+done
+if [ "$ready" != true ]; then docker logs "$container"; exit 1; fi
+# Simulate writes after a release, then roll data back to the pre-release snapshot.
+docker exec -w /app/sci-viz-case-hub/server "$container" node --input-type=module -e 'import {PrismaClient} from "@prisma/client"; const d=new PrismaClient(); await d.visualCase.create({data:{id:"after-release",title:"Post-release fixture"}}); await d.$disconnect();'
+docker stop "$container" >/dev/null
+python3 "$script_dir/data_snapshot.py" restore --snapshot "$work/snapshot" --target "$work/restored"
+python3 "$script_dir/data_snapshot.py" verify --snapshot "$work/snapshot" --target "$work/restored"
+docker rm "$container" >/dev/null
+mounts=(-v "$work/restored/prisma:/app/sci-viz-case-hub/server/prisma" -v "$work/restored/uploads:/app/sci-viz-case-hub/server/uploads" -v "$work/restored/journal_covers:/app/journal_covers" -v "$work/restored/backups:/app/sci-viz-case-hub/server/backups")
+docker run -d --name "$container" --read-only --tmpfs /tmp:size=128m "${mounts[@]}" "${environment[@]}" "$image" >/dev/null
+for _ in $(seq 1 30); do
+  if docker exec -w /app/sci-viz-case-hub/server "$container" node --input-type=module -e '
+    import assert from "node:assert/strict"; import {PrismaClient} from "@prisma/client";
+    const r=await fetch("http://127.0.0.1:3001/api/health"); assert.equal(r.status,200);
+    const d=new PrismaClient(); assert.equal(await d.visualCase.count(),1); assert.equal(await d.user.count(),1); assert.equal(await d.visualCase.findUnique({where:{id:"after-release"}}),null);
+    for(const path of ["/uploads/originals/fixture.png","/uploads/thumbnails/fixture.png","/journal_covers/fixture.png"]) assert.equal((await fetch("http://127.0.0.1:3001"+path)).status,200);
+    await d.$disconnect();
+  ' >/dev/null 2>&1; then
+    echo 'PASS: whole-library restore and data rollback retain users and images'; exit 0
   fi
   sleep 2
 done
