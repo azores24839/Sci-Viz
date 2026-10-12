@@ -6,6 +6,8 @@ journal_covers/
 # accidentally committed. This does not delete any existing files.
 **/.playwright-cli/
 .DS_Store
+# macOS AppleDouble metadata on external/network volumes is not project data.
+._*
 # 密钥和敏感配置
 .env
 .env.*
